@@ -1,0 +1,704 @@
+openapi: 3.0.3
+info:
+  title: RMRK Renderer API
+  version: "1.0"
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: OK
+  /status:
+    get:
+      summary: Public status snapshot
+      responses:
+        "200":
+          description: OK
+  /status.json:
+    get:
+      summary: Public status snapshot (JSON)
+      responses:
+        "200":
+          description: OK
+  /openapi.yaml:
+    get:
+      summary: OpenAPI specification
+      responses:
+        "200":
+          description: OK
+  /render/{chain}/{collection}/{tokenId}/{assetId}/{format}:
+    get:
+      summary: Render token asset
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+        "304":
+          description: Not modified
+  /render/{chain}/{collection}/{tokenId}/{assetId}.{format}:
+    get:
+      summary: Render token asset (legacy dotted path)
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+        "304":
+          description: Not modified
+  /render/{chain}/{collection}/{tokenId}/{format}:
+    get:
+      summary: Redirect to top asset render
+      description: HEAD is not supported on token-only routes; use the canonical asset route for cache probes.
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+      responses:
+        "307":
+          description: Redirect
+  /render/{chain}/{collection}/{tokenId}.{format}:
+    get:
+      summary: Redirect to top asset render (legacy dotted path)
+      description: HEAD is not supported on token-only routes; use the canonical asset route for cache probes.
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+      responses:
+        "307":
+          description: Redirect
+  /production/create/{chain}/{cacheTimestamp}/{collection}/{tokenId}/{assetId}/{format}:
+    get:
+      summary: Render token asset with cache timestamp
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: cacheTimestamp
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+        "304":
+          description: Not modified
+  /production/create/{chain}/{cacheTimestamp}/{collection}/{tokenId}/{assetId}.{format}:
+    get:
+      summary: Render token asset with cache timestamp (legacy dotted path)
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: cacheTimestamp
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+        "304":
+          description: Not modified
+  /og/{chain}/{collection}/{tokenId}/{assetId}/{format}:
+    get:
+      summary: Render OG image
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+  /og/{chain}/{collection}/{tokenId}/{assetId}.{format}:
+    get:
+      summary: Render OG image (legacy dotted path)
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: onerror
+          schema: { type: string, enum: [placeholder] }
+      responses:
+        "200":
+          description: Rendered image
+  /admin/api/collections:
+    get:
+      summary: List collections
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Upsert collection
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/collections/{chain}/{collection}:
+    delete:
+      summary: Delete collection
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/collections/{chain}/{collection}/approve:
+    post:
+      summary: Approve or unapprove collection
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/collections/{chain}/{collection}/refresh-canvas:
+    post:
+      summary: Refresh derived canvas size
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/collections/{chain}/{collection}/cache-epoch:
+    post:
+      summary: Set or bump collection cache epoch
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/warmup:
+    get:
+      summary: Warmup queue stats
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Enqueue warmup jobs
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/warmup/jobs:
+    get:
+      summary: List warmup jobs
+      security:
+        - adminAuth: []
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/warmup/jobs/{id}/cancel:
+    post:
+      summary: Cancel a warmup job
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/warmup/pause:
+    post:
+      summary: Pause warmup processing
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/warmup/resume:
+    post:
+      summary: Resume warmup processing
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/cache:
+    get:
+      summary: Cache stats
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/cache/purge:
+    post:
+      summary: Purge cache
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/rpc/{chain}:
+    get:
+      summary: List RPC endpoints
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+    put:
+      summary: Replace RPC endpoints
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/rpc/{chain}/health:
+    get:
+      summary: RPC health checks
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+  /admin/api/settings:
+    get:
+      summary: Settings
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/settings/require-approval:
+    put:
+      summary: Override approval requirement
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/clients:
+    get:
+      summary: List clients
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Create client
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/clients/{id}:
+    put:
+      summary: Update client
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+    delete:
+      summary: Delete client
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/clients/{id}/keys:
+    get:
+      summary: List client keys
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Create client key
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/clients/keys/{key_id}:
+    delete:
+      summary: Revoke client key
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: key_id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/ip-rules:
+    get:
+      summary: List IP rules
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Create IP rule
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/ip-rules/{id}:
+    delete:
+      summary: Delete IP rule
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: OK
+  /admin/api/usage:
+    get:
+      summary: Usage stats
+      security:
+        - adminAuth: []
+      parameters:
+        - in: query
+          name: hours
+          schema: { type: integer, default: 24 }
+      responses:
+        "200":
+          description: OK
+components:
+  securitySchemes:
+    adminAuth:
+      type: http
+      scheme: bearer
+    apiKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: APIKey
+      description: "Use Authorization: Bearer <API key>"

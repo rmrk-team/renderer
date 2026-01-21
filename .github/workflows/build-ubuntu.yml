@@ -1,0 +1,39 @@
+name: Build Ubuntu Renderer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build-ubuntu:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: proj-renderer
+      - name: Build release binary
+        working-directory: proj-renderer
+        run: cargo build --release --locked
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp "proj-renderer/target/release/proj-renderer" "dist/rmrk-renderer-ubuntu-x86_64"
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/rmrk-renderer-ubuntu-x86_64
+      - name: Upload workflow artifact
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rmrk-renderer-ubuntu
+          path: dist/rmrk-renderer-ubuntu-x86_64

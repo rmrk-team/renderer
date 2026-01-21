@@ -1,0 +1,38 @@
+[package]
+name = "jsonwebtoken"
+version = "8.3.0"
+authors = ["Vincent Prouillet <hello@vincentprouillet.com>"]
+license = "MIT"
+readme = "README.md"
+description = "Create and decode JWTs in a strongly typed way."
+homepage = "https://github.com/Keats/jsonwebtoken"
+repository = "https://github.com/Keats/jsonwebtoken"
+keywords = ["jwt", "api", "token", "jwk"]
+edition = "2021"
+include = ["src/**/*", "benches/**/*", "tests/**/*", "LICENSE", "README.md", "CHANGELOG.md"]
+rust-version = "1.56.0"
+
+[dependencies]
+serde_json = "1.0"
+serde = {version = "1.0", features = ["derive"] }
+ring = { version = "0.16.5", features = ["std"] }
+base64 = "0.21.0"
+# For PEM decoding
+pem = {version = "1", optional = true}
+simple_asn1 = {version = "0.6", optional = true}
+
+[dev-dependencies]
+# For the custom time example
+time = "0.3"
+criterion = "0.4"
+
+[features]
+default = ["use_pem"]
+use_pem = ["pem", "simple_asn1"]
+
+[[bench]]
+name = "jwt"
+harness = false
+
+[badges]
+maintenance = { status = "passively-maintained" }

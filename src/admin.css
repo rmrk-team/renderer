@@ -1,0 +1,14 @@
+body { font-family: sans-serif; margin: 40px; max-width: 1100px; }
+code { background: #f4f4f4; padding: 2px 4px; }
+h1 { margin-bottom: 4px; }
+p { color: #444; }
+fieldset { margin: 16px 0; padding: 12px; border: 1px solid #ddd; }
+legend { padding: 0 6px; }
+label { display: block; margin-top: 8px; font-weight: 600; }
+input, select, textarea { width: 100%; padding: 6px; margin-top: 4px; }
+button { margin-top: 10px; padding: 6px 12px; }
+table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+th, td { border: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
+th { background: #fafafa; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.small { font-size: 12px; color: #666; }

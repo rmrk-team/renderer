@@ -1,0 +1,51 @@
+[package]
+name = "proj-renderer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.100"
+axum = "0.8.8"
+base64 = "0.22.1"
+bytes = "1.11.0"
+ethers = { version = "2.0.14", features = ["abigen"] }
+filetime = "0.2.26"
+hmac = "0.12.1"
+hex = "0.4.3"
+image = { version = "0.25.9", features = ["png", "jpeg", "webp"] }
+ipnet = "2.10.0"
+mime = "0.3.17"
+rand = "0.8.5"
+reqwest = { version = "0.13.1", features = ["json", "stream", "webpki-roots"] }
+reqwest11 = { package = "reqwest", version = "0.11.27", features = ["json", "rustls-tls"] }
+resvg = "0.46.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+sha2 = "0.10.9"
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }
+thiserror = "2.0.17"
+tiny-skia = "0.11.4"
+tokio = { version = "1.49.0", features = ["full"] }
+tower = { version = "0.5.2", features = ["limit", "util"] }
+tower-http = { version = "0.6.8", features = ["trace", "compression-br", "compression-gzip", "compression-deflate", "fs", "limit", "sensitive-headers"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+url = "2.5.8"
+usvg = "0.46.0"
+subtle = "2.6.1"
+tokio-util = { version = "0.7.18", features = ["io"] }
+
+[patch.crates-io]
+# jsonwebtoken is pulled in by ethers-providers; vendored for audit visibility.
+jsonwebtoken = { path = "vendor/jsonwebtoken" }
+
+[dev-dependencies]
+openapiv3 = "2.2.0"
+serde_yaml = "0.9.34"
+tempfile = "3.24.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
