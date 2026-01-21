@@ -5,23 +5,23 @@ use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::refresh_canvas_size;
 use crate::state::AppState;
-use crate::warmup::{enqueue_warmup, WarmupRequest};
-use axum::extract::{Path, Query, State};
+use crate::warmup::{WarmupRequest, enqueue_warmup};
 use axum::body::Body;
-use axum::http::{header, HeaderMap, HeaderValue, Request, StatusCode};
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use base64::Engine;
+use ethers::providers::Middleware;
 use hmac::{Hmac, Mac};
 use rand::RngCore;
-use sha2::Sha256;
-use ethers::providers::Middleware;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::sync::Arc;
-use tower_http::limit::RequestBodyLimitLayer;
 use subtle::ConstantTimeEq;
+use tower_http::limit::RequestBodyLimitLayer;
 
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let max_body = if state.config.max_admin_body_bytes == 0 {
@@ -30,7 +30,10 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         state.config.max_admin_body_bytes
     };
     let api = Router::new()
-        .route("/api/collections", get(list_collections).post(upsert_collection))
+        .route(
+            "/api/collections",
+            get(list_collections).post(upsert_collection),
+        )
         .route(
             "/api/collections/{chain}/{collection}",
             delete(delete_collection),
@@ -57,8 +60,14 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/rpc/{chain}", get(list_rpc).put(replace_rpc))
         .route("/api/rpc/{chain}/health", get(rpc_health))
         .route("/api/clients", get(list_clients).post(create_client))
-        .route("/api/clients/{id}", put(update_client).delete(delete_client))
-        .route("/api/clients/{id}/keys", get(list_client_keys).post(create_client_key))
+        .route(
+            "/api/clients/{id}",
+            put(update_client).delete(delete_client),
+        )
+        .route(
+            "/api/clients/{id}/keys",
+            get(list_client_keys).post(create_client_key),
+        )
         .route("/api/clients/keys/{key_id}", delete(revoke_client_key))
         .route("/api/ip-rules", get(list_ip_rules).post(create_ip_rule))
         .route("/api/ip-rules/{id}", delete(delete_ip_rule))
@@ -85,7 +94,10 @@ async fn admin_security_headers(request: Request<Body>, next: Next) -> Response 
         ),
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
 }
@@ -96,7 +108,10 @@ async fn admin_page() -> impl IntoResponse {
 
 async fn admin_css() -> impl IntoResponse {
     (
-        [(header::CONTENT_TYPE, HeaderValue::from_static("text/css; charset=utf-8"))],
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/css; charset=utf-8"),
+        )],
         ADMIN_CSS,
     )
 }
@@ -135,7 +150,9 @@ async fn upsert_collection(
         approved: payload.approved,
     };
     state.db.upsert_collection_config(&input).await?;
-    state.invalidate_collection_cache(&input.chain, &collection_key).await;
+    state
+        .invalidate_collection_cache(&input.chain, &collection_key)
+        .await;
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -170,7 +187,9 @@ async fn approve_collection(
         approved: Some(payload.approved),
     };
     state.db.upsert_collection_config(&input).await?;
-    state.invalidate_collection_cache(&input.chain, &collection).await;
+    state
+        .invalidate_collection_cache(&input.chain, &collection)
+        .await;
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -306,7 +325,9 @@ async fn cancel_warmup_job(
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let canceled = state.db.cancel_warmup_job(id).await?;
-    Ok(Json(serde_json::json!({ "status": "ok", "canceled": canceled })))
+    Ok(Json(
+        serde_json::json!({ "status": "ok", "canceled": canceled }),
+    ))
 }
 
 async fn pause_warmup(
@@ -337,17 +358,19 @@ async fn purge_cache(
 ) -> Result<Json<serde_json::Value>, AdminError> {
     if let (Some(chain), Some(collection)) = (payload.chain, payload.collection) {
         let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-        let render_path = state
-            .cache
-            .renders_dir
-            .join(chain)
-            .join(collection);
+        let render_path = state.cache.renders_dir.join(chain).join(collection);
         state.cache.remove_dir_if_exists(&render_path).await?;
     } else if payload.include_assets.unwrap_or(false) {
-        state.cache.remove_dir_if_exists(&state.cache.base_dir).await?;
+        state
+            .cache
+            .remove_dir_if_exists(&state.cache.base_dir)
+            .await?;
         state.cache.ensure_dirs().await?;
     } else {
-        state.cache.remove_dir_if_exists(&state.cache.renders_dir).await?;
+        state
+            .cache
+            .remove_dir_if_exists(&state.cache.renders_dir)
+            .await?;
     }
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
@@ -442,9 +465,7 @@ struct ClientUpdateRequest {
     notes: Option<String>,
 }
 
-async fn list_clients(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<Client>>, AdminError> {
+async fn list_clients(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Client>>, AdminError> {
     let clients = state.db.list_clients().await?;
     Ok(Json(clients))
 }
@@ -632,10 +653,15 @@ async fn set_require_approval(
     Json(payload): Json<RequireApprovalRequest>,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     match payload.require_approval {
-        Some(value) => state
-            .db
-            .set_setting("require_approval", Some(if value { "true" } else { "false" }))
-            .await?,
+        Some(value) => {
+            state
+                .db
+                .set_setting(
+                    "require_approval",
+                    Some(if value { "true" } else { "false" }),
+                )
+                .await?
+        }
         None => state.db.set_setting("require_approval", None).await?,
     }
     state.clear_require_approval_cache().await;
@@ -671,8 +697,7 @@ fn rate_limit_response(info: RateLimitInfo) -> Response {
     let retry_after = info.reset_seconds.max(60);
     response.headers_mut().insert(
         header::RETRY_AFTER,
-        HeaderValue::from_str(&retry_after.to_string())
-            .unwrap_or(HeaderValue::from_static("60")),
+        HeaderValue::from_str(&retry_after.to_string()).unwrap_or(HeaderValue::from_static("60")),
     );
     let _ = response.headers_mut().insert(
         "X-RateLimit-Limit",
@@ -680,8 +705,7 @@ fn rate_limit_response(info: RateLimitInfo) -> Response {
     );
     let _ = response.headers_mut().insert(
         "X-RateLimit-Remaining",
-        HeaderValue::from_str(&info.remaining.to_string())
-            .unwrap_or(HeaderValue::from_static("0")),
+        HeaderValue::from_str(&info.remaining.to_string()).unwrap_or(HeaderValue::from_static("0")),
     );
     let _ = response.headers_mut().insert(
         "X-RateLimit-Reset",

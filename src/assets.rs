@@ -1,9 +1,9 @@
 use crate::cache::CacheManager;
 use crate::config::Config;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytes::{Bytes, BytesMut};
 use mime::Mime;
-use reqwest::{header, StatusCode};
+use reqwest::{StatusCode, header};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
@@ -255,7 +255,9 @@ impl AssetResolver {
                 bytes: Bytes::from(bytes),
             });
         }
-        let bytes = self.fetch_bytes_with_retry(&resolved, FetchKind::Asset).await?;
+        let bytes = self
+            .fetch_bytes_with_retry(&resolved, FetchKind::Asset)
+            .await?;
         self.cache.store_file(&cache_path, &bytes).await?;
         Ok(ResolvedAsset { bytes })
     }
@@ -275,12 +277,11 @@ impl AssetResolver {
         {
             return Ok(Bytes::from(bytes));
         }
-        let bytes = self.fetch_bytes_with_retry(&resolved, FetchKind::Metadata).await?;
+        let bytes = self
+            .fetch_bytes_with_retry(&resolved, FetchKind::Metadata)
+            .await?;
         if bytes.len() > self.config.max_metadata_json_bytes {
-            return Err(anyhow!(
-                "metadata json too large ({} bytes)",
-                bytes.len()
-            ));
+            return Err(anyhow!("metadata json too large ({} bytes)", bytes.len()));
         }
         self.cache.store_file(&cache_path, &bytes).await?;
         Ok(bytes)
@@ -393,7 +394,11 @@ impl AssetResolver {
         })
     }
 
-    async fn fetch_bytes_with_retry(&self, resolved: &ResolvedUri, kind: FetchKind) -> Result<Bytes> {
+    async fn fetch_bytes_with_retry(
+        &self,
+        resolved: &ResolvedUri,
+        kind: FetchKind,
+    ) -> Result<Bytes> {
         if !resolved.is_ipfs {
             return self.fetch_http_bytes(&resolved.url, kind).await;
         }
@@ -484,9 +489,9 @@ impl AssetResolver {
     ) -> std::result::Result<(Vec<SocketAddr>, bool), AssetFetchError> {
         let host_raw = url.host_str().ok_or(AssetFetchError::InvalidUri)?;
         let host = host_raw.trim_end_matches('.');
-        let port = url.port_or_known_default().unwrap_or_else(|| {
-            if url.scheme() == "https" { 443 } else { 80 }
-        });
+        let port = url
+            .port_or_known_default()
+            .unwrap_or_else(|| if url.scheme() == "https" { 443 } else { 80 });
         if !self.config.allow_private_networks
             && (host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost"))
         {
@@ -558,7 +563,9 @@ impl AssetResolver {
                 }
             }
         }
-        Err(last_err.map(|_| AssetFetchError::Upstream).unwrap_or(AssetFetchError::Upstream))
+        Err(last_err
+            .map(|_| AssetFetchError::Upstream)
+            .unwrap_or(AssetFetchError::Upstream))
     }
 
     fn client_with_resolve(
@@ -606,8 +613,10 @@ impl ClientCache {
         }
         let now = Instant::now();
         let mut guard = self.inner.lock().await;
-        if let Some((client, expires_at)) =
-            guard.map.get(key).map(|entry| (entry.client.clone(), entry.expires_at))
+        if let Some((client, expires_at)) = guard
+            .map
+            .get(key)
+            .map(|entry| (entry.client.clone(), entry.expires_at))
         {
             if expires_at <= now {
                 guard.map.remove(key);
@@ -626,13 +635,9 @@ impl ClientCache {
         }
         let expires_at = Instant::now() + self.ttl;
         let mut guard = self.inner.lock().await;
-        guard.map.insert(
-            key.clone(),
-            ClientCacheEntry {
-                client,
-                expires_at,
-            },
-        );
+        guard
+            .map
+            .insert(key.clone(), ClientCacheEntry { client, expires_at });
         touch_client_key(&mut guard.order, &key);
         while guard.map.len() > self.capacity {
             if let Some(oldest) = guard.order.pop_front() {
@@ -671,7 +676,9 @@ struct ResolvedUri {
 
 fn parse_ipfs_uri(uri: &str) -> Result<(String, String)> {
     let without_scheme = uri.trim_start_matches("ipfs://");
-    let without_prefix = without_scheme.strip_prefix("ipfs/").unwrap_or(without_scheme);
+    let without_prefix = without_scheme
+        .strip_prefix("ipfs/")
+        .unwrap_or(without_scheme);
     let mut parts = without_prefix.splitn(2, '/');
     let cid = parts
         .next()
@@ -680,7 +687,10 @@ fn parse_ipfs_uri(uri: &str) -> Result<(String, String)> {
     if !is_valid_cid(&cid) {
         return Err(anyhow!("invalid ipfs cid"));
     }
-    let path = parts.next().map(|path| format!("/{path}")).unwrap_or_default();
+    let path = parts
+        .next()
+        .map(|path| format!("/{path}"))
+        .unwrap_or_default();
     Ok((cid, path))
 }
 
@@ -764,7 +774,10 @@ fn is_cgnat_v4(addr: std::net::Ipv4Addr) -> bool {
     a == 100 && (b & 0b1100_0000) == 0b0100_0000
 }
 
-fn select_render_uri(metadata: &MetadataJson, prefer_thumb: bool) -> Option<(String, &'static str)> {
+fn select_render_uri(
+    metadata: &MetadataJson,
+    prefer_thumb: bool,
+) -> Option<(String, &'static str)> {
     let thumb = metadata
         .thumbnail_uri
         .as_ref()

@@ -1,11 +1,11 @@
 use crate::cache::SingleflightPermit;
 use crate::render::{
-    render_token_uncached, RenderKeyLimit, RenderResponse, RenderQueueError, RenderRequest,
+    RenderKeyLimit, RenderQueueError, RenderRequest, RenderResponse, render_token_uncached,
 };
 use crate::state::AppState;
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 pub struct RenderJob {
     pub request: RenderRequest,
@@ -16,11 +16,7 @@ pub struct RenderJob {
     pub respond_to: oneshot::Sender<Result<RenderResponse>>,
 }
 
-pub fn spawn_workers(
-    state: Arc<AppState>,
-    receiver: mpsc::Receiver<RenderJob>,
-    workers: usize,
-) {
+pub fn spawn_workers(state: Arc<AppState>, receiver: mpsc::Receiver<RenderJob>, workers: usize) {
     let receiver = Arc::new(Mutex::new(receiver));
     let worker_count = workers.max(1);
     for _ in 0..worker_count {

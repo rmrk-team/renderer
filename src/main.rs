@@ -21,23 +21,23 @@ use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::Database;
 use crate::state::AppState;
+use axum::Router;
+use axum::body::HttpBody;
+use axum::http::{Response, header};
+use axum::middleware;
 use std::sync::Arc;
 use std::time::Duration;
-use axum::body::HttpBody;
-use axum::http::{header, Response};
-use axum::Router;
-use axum::middleware;
 use tokio::net::TcpListener;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::{Semaphore, mpsc};
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::compression::{
-    predicate::{DefaultPredicate, Predicate},
     CompressionLayer,
+    predicate::{DefaultPredicate, Predicate},
 };
 use tower_http::sensitive_headers::SetSensitiveHeadersLayer;
-use tracing::warn;
 use tower_http::trace::{DefaultMakeSpan, TraceLayer};
 use tracing::info;
+use tracing::warn;
 
 #[derive(Clone)]
 struct NoImageCompression {
@@ -80,9 +80,10 @@ fn build_app(state: Arc<AppState>) -> Router {
         app = app.fallback_service(landing::router(landing).into_service());
     }
     app.layer(CompressionLayer::new().compress_when(NoImageCompression::new()))
-        .layer(TraceLayer::new_for_http().make_span_with(
-            DefaultMakeSpan::new().include_headers(false),
-        ))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().include_headers(false)),
+        )
         .layer(SetSensitiveHeadersLayer::new([
             header::AUTHORIZATION,
             header::COOKIE,
@@ -102,7 +103,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    if config.trusted_proxies.iter().any(|net| net.prefix_len() == 0) {
+    if config
+        .trusted_proxies
+        .iter()
+        .any(|net| net.prefix_len() == 0)
+    {
         warn!("TRUSTED_PROXY_CIDRS contains a /0 range; clients can spoof forwarded IPs");
     }
     info!(
@@ -124,7 +129,11 @@ async fn main() -> anyhow::Result<()> {
     let db = Database::new(&config).await?;
     let cache = CacheManager::new(&config)?;
     let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
-    let assets = AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore.clone())?;
+    let assets = AssetResolver::new(
+        Arc::new(config.clone()),
+        cache.clone(),
+        ipfs_semaphore.clone(),
+    )?;
     let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
     let (usage_tx, usage_rx) = if usage_tracking_enabled {
         let capacity = usage_channel_capacity.max(1);
@@ -351,15 +360,7 @@ mod tests {
         let assets =
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-        ));
+        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
         let app = build_app(state);
         let response = app
             .clone()
@@ -380,15 +381,7 @@ mod tests {
         let assets =
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-        ));
+        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
         let app = build_app(state);
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())

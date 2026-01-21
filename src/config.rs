@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use ipnet::IpNet;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::env;
 use std::net::IpAddr;
@@ -177,15 +177,15 @@ impl Config {
     pub fn from_env() -> Result<Self> {
         let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
         let port = parse_u16("PORT", 8080);
-        let admin_password = env::var("ADMIN_PASSWORD")
-            .context("ADMIN_PASSWORD is required for /admin access")?;
+        let admin_password =
+            env::var("ADMIN_PASSWORD").context("ADMIN_PASSWORD is required for /admin access")?;
 
-        let db_path = PathBuf::from(env::var("DB_PATH").unwrap_or_else(|_| {
-            "/var/lib/renderer/renderer.db".to_string()
-        }));
-        let cache_dir = PathBuf::from(env::var("CACHE_DIR").unwrap_or_else(|_| {
-            "/var/cache/renderer".to_string()
-        }));
+        let db_path = PathBuf::from(
+            env::var("DB_PATH").unwrap_or_else(|_| "/var/lib/renderer/renderer.db".to_string()),
+        );
+        let cache_dir = PathBuf::from(
+            env::var("CACHE_DIR").unwrap_or_else(|_| "/var/cache/renderer".to_string()),
+        );
 
         let cache_max_size_gb = parse_u64("CACHE_MAX_SIZE_GB", 50);
         let cache_max_size_bytes = cache_max_size_gb.saturating_mul(1024 * 1024 * 1024);
@@ -208,20 +208,18 @@ impl Config {
         let default_cache_ttl =
             Duration::from_secs(parse_u64("DEFAULT_CACHE_TTL_SECONDS", 604_800));
 
-        let rpc_endpoints =
-            normalize_chain_map(parse_json_env::<HashMap<String, Vec<String>>>("RPC_ENDPOINTS")
-                .unwrap_or_default());
-        let render_utils_addresses =
-            normalize_chain_map(parse_json_env::<HashMap<String, String>>(
-                "RENDER_UTILS_ADDRESSES",
-            )
-            .unwrap_or_default());
-        let approval_contracts =
-            normalize_chain_map(parse_json_env::<HashMap<String, String>>("APPROVALS_CONTRACTS")
-                .unwrap_or_default());
-        let approval_start_blocks =
-            normalize_chain_map(parse_json_env::<HashMap<String, u64>>("APPROVAL_START_BLOCKS")
-                .unwrap_or_default());
+        let rpc_endpoints = normalize_chain_map(
+            parse_json_env::<HashMap<String, Vec<String>>>("RPC_ENDPOINTS").unwrap_or_default(),
+        );
+        let render_utils_addresses = normalize_chain_map(
+            parse_json_env::<HashMap<String, String>>("RENDER_UTILS_ADDRESSES").unwrap_or_default(),
+        );
+        let approval_contracts = normalize_chain_map(
+            parse_json_env::<HashMap<String, String>>("APPROVALS_CONTRACTS").unwrap_or_default(),
+        );
+        let approval_start_blocks = normalize_chain_map(
+            parse_json_env::<HashMap<String, u64>>("APPROVAL_START_BLOCKS").unwrap_or_default(),
+        );
         let approval_poll_interval_seconds = parse_u64("APPROVAL_POLL_INTERVAL_SECONDS", 30);
         let approval_confirmations = parse_u64("APPROVAL_CONFIRMATIONS", 6);
         let chain_id_map = parse_chain_id_map("CHAIN_ID_MAP")?;
@@ -230,8 +228,7 @@ impl Config {
         let approval_negative_cache_capacity =
             parse_usize("APPROVAL_NEGATIVE_CACHE_CAPACITY", 10_000);
         let approval_enumeration_enabled = parse_bool("APPROVAL_ENUMERATION_ENABLED", true);
-        let max_approval_staleness_seconds =
-            parse_u64("MAX_APPROVAL_STALENESS_SECONDS", 0);
+        let max_approval_staleness_seconds = parse_u64("MAX_APPROVAL_STALENESS_SECONDS", 0);
         let approvals_contract_chain = env::var("APPROVALS_CONTRACT_CHAIN")
             .ok()
             .map(|value| value.trim().to_ascii_lowercase())
@@ -256,16 +253,14 @@ impl Config {
             "MAX_CACHE_VARIANTS_PER_KEY",
             parse_usize("MAX_CACHE_VARIANTS_PER_CHAIN", 5),
         );
-        let max_decoded_raster_pixels =
-            parse_u64("MAX_DECODED_RASTER_PIXELS", max_canvas_pixels);
+        let max_decoded_raster_pixels = parse_u64("MAX_DECODED_RASTER_PIXELS", max_canvas_pixels);
         let max_overlay_length = parse_usize("MAX_OVERLAY_LENGTH", 64);
         let max_background_length = parse_usize("MAX_BG_LENGTH", 64);
         let max_in_flight_requests = parse_usize("MAX_IN_FLIGHT_REQUESTS", 512);
         let max_admin_body_bytes = parse_usize("MAX_ADMIN_BODY_BYTES", 1_048_576);
         let rate_limit_per_minute = parse_u64("RATE_LIMIT_PER_MINUTE", 0);
         let rate_limit_burst = parse_u64("RATE_LIMIT_BURST", 0);
-        let auth_failure_rate_limit_per_minute =
-            parse_u64("AUTH_FAILURE_RATE_LIMIT_PER_MINUTE", 0);
+        let auth_failure_rate_limit_per_minute = parse_u64("AUTH_FAILURE_RATE_LIMIT_PER_MINUTE", 0);
         let auth_failure_rate_limit_burst = parse_u64("AUTH_FAILURE_RATE_LIMIT_BURST", 0);
         let access_mode = parse_access_mode("ACCESS_MODE");
         let api_key_secret = env::var("API_KEY_SECRET")
@@ -274,19 +269,16 @@ impl Config {
             .filter(|value| !value.is_empty());
         let key_rate_limit_per_minute = parse_u64("KEY_RATE_LIMIT_PER_MINUTE", 0);
         let key_rate_limit_burst = parse_u64("KEY_RATE_LIMIT_BURST", 0);
-        let api_key_cache_ttl =
-            Duration::from_secs(parse_u64("API_KEY_CACHE_TTL_SECONDS", 300));
+        let api_key_cache_ttl = Duration::from_secs(parse_u64("API_KEY_CACHE_TTL_SECONDS", 300));
         let api_key_cache_capacity = parse_usize("API_KEY_CACHE_CAPACITY", 10_000);
         let track_keys_in_open_mode = parse_bool("TRACK_KEYS_IN_OPEN_MODE", false);
         let trusted_proxies = parse_trusted_proxies("TRUSTED_PROXY_CIDRS")?;
         warn_on_broad_proxy_ranges(&trusted_proxies);
         let usage_tracking_enabled = parse_bool("USAGE_TRACKING_ENABLED", true);
-        let usage_sample_rate = parse_f64("USAGE_SAMPLE_RATE", 1.0)
-            .clamp(0.0, 1.0);
+        let usage_sample_rate = parse_f64("USAGE_SAMPLE_RATE", 1.0).clamp(0.0, 1.0);
         let usage_channel_capacity = parse_usize("USAGE_CHANNEL_CAPACITY", 2000);
-        let usage_flush_interval = Duration::from_secs(
-            parse_u64("USAGE_FLUSH_INTERVAL_SECONDS", 5).max(1),
-        );
+        let usage_flush_interval =
+            Duration::from_secs(parse_u64("USAGE_FLUSH_INTERVAL_SECONDS", 5).max(1));
         let usage_flush_max_entries =
             parse_usize("USAGE_FLUSH_MAX_ENTRIES", usage_channel_capacity);
         let usage_retention_days = parse_u64("USAGE_RETENTION_DAYS", 30);
@@ -322,18 +314,19 @@ impl Config {
             Duration::from_secs(parse_u64("PRIMARY_ASSET_CACHE_TTL_SECONDS", 60));
         let primary_asset_negative_ttl =
             Duration::from_secs(parse_u64("PRIMARY_ASSET_NEGATIVE_TTL_SECONDS", 15));
-        let primary_asset_cache_capacity =
-            parse_usize("PRIMARY_ASSET_CACHE_CAPACITY", 10_000);
+        let primary_asset_cache_capacity = parse_usize("PRIMARY_ASSET_CACHE_CAPACITY", 10_000);
         let outbound_client_cache_ttl =
             Duration::from_secs(parse_u64("OUTBOUND_CLIENT_CACHE_TTL_SECONDS", 900));
-        let outbound_client_cache_capacity =
-            parse_usize("OUTBOUND_CLIENT_CACHE_CAPACITY", 256);
+        let outbound_client_cache_capacity = parse_usize("OUTBOUND_CLIENT_CACHE_CAPACITY", 256);
         let landing = parse_landing_config()?;
         let openapi_public = parse_bool("OPENAPI_PUBLIC", true);
         let landing_public = parse_bool("LANDING_PUBLIC", false) && landing.is_some();
         let status_public = parse_bool("STATUS_PUBLIC", landing_public);
         let render_policy = RenderPolicy {
-            child_layer_mode: parse_child_layer_mode("CHILD_LAYER_MODE", ChildLayerMode::AboveSlot)?,
+            child_layer_mode: parse_child_layer_mode(
+                "CHILD_LAYER_MODE",
+                ChildLayerMode::AboveSlot,
+            )?,
             raster_mismatch_fixed: parse_raster_mismatch_policy(
                 "RASTER_MISMATCH_FIXED",
                 RasterMismatchPolicy::TopLeftNoScale,
@@ -554,7 +547,9 @@ fn parse_default_cache_timestamp() -> Result<Option<String>> {
 }
 
 fn parse_child_layer_mode(key: &str, default: ChildLayerMode) -> Result<ChildLayerMode> {
-    let value = env::var(key).ok().map(|value| value.trim().to_ascii_lowercase());
+    let value = env::var(key)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase());
     match value.as_deref() {
         None => Ok(default),
         Some("above_slot") | Some("above") => Ok(ChildLayerMode::AboveSlot),
@@ -569,7 +564,9 @@ fn parse_raster_mismatch_policy(
     key: &str,
     default: RasterMismatchPolicy,
 ) -> Result<RasterMismatchPolicy> {
-    let value = env::var(key).ok().map(|value| value.trim().to_ascii_lowercase());
+    let value = env::var(key)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase());
     match value.as_deref() {
         None => Ok(default),
         Some("error") => Ok(RasterMismatchPolicy::Error),
@@ -580,11 +577,8 @@ fn parse_raster_mismatch_policy(
     }
 }
 
-fn parse_collection_render_overrides(
-    key: &str,
-) -> Result<HashMap<String, RenderPolicyOverride>> {
-    let raw: HashMap<String, RenderPolicyOverrideRaw> =
-        parse_json_env(key).unwrap_or_default();
+fn parse_collection_render_overrides(key: &str) -> Result<HashMap<String, RenderPolicyOverride>> {
+    let raw: HashMap<String, RenderPolicyOverrideRaw> = parse_json_env(key).unwrap_or_default();
     let mut parsed = HashMap::new();
     for (collection_key, value) in raw {
         let normalized = collection_key.trim().to_ascii_lowercase();
@@ -726,9 +720,7 @@ fn parse_landing_config() -> Result<Option<LandingConfig>> {
                 strict_headers,
             }))
         }
-        _ => Err(anyhow::anyhow!(
-            "LANDING and LANDING_DIR must both be set"
-        )),
+        _ => Err(anyhow::anyhow!("LANDING and LANDING_DIR must both be set")),
     }
 }
 

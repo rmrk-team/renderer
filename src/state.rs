@@ -3,8 +3,8 @@ use crate::cache::{CacheManager, RenderCacheLimiter, RenderSingleflight};
 use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
-use crate::render_queue::RenderJob;
 use crate::rate_limit::{KeyRateLimiter, RateLimiter};
+use crate::render_queue::RenderJob;
 use crate::usage::UsageEvent;
 use anyhow::Result;
 use ipnet::IpNet;
@@ -12,7 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, RwLock, Semaphore, mpsc};
 use tracing::warn;
 
 #[derive(Clone)]
@@ -72,7 +72,8 @@ impl AppState {
             config.auth_failure_rate_limit_burst,
         );
         let key_render_limiter = KeyRenderLimiter::new();
-        let api_key_cache = ApiKeyCache::new(config.api_key_cache_ttl, config.api_key_cache_capacity);
+        let api_key_cache =
+            ApiKeyCache::new(config.api_key_cache_ttl, config.api_key_cache_capacity);
         let primary_asset_cache = PrimaryAssetCache::new(
             config.primary_asset_cache_ttl,
             config.primary_asset_negative_ttl,
@@ -84,8 +85,10 @@ impl AppState {
         );
         let ip_rules = IpRuleCache::new();
         let require_approval_cache = RequireApprovalCache::new(REQUIRE_APPROVAL_CACHE_TTL);
-        let collection_config_cache =
-            CollectionConfigCache::new(COLLECTION_CONFIG_CACHE_TTL, COLLECTION_CONFIG_CACHE_CAPACITY);
+        let collection_config_cache = CollectionConfigCache::new(
+            COLLECTION_CONFIG_CACHE_TTL,
+            COLLECTION_CONFIG_CACHE_CAPACITY,
+        );
         let collection_epoch_cache =
             CollectionEpochCache::new(COLLECTION_EPOCH_CACHE_TTL, COLLECTION_EPOCH_CACHE_CAPACITY);
         let theme_source_cache =
