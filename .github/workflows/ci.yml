@@ -1,0 +1,49 @@
+name: Renderer CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: proj-renderer
+      - name: Format check
+        working-directory: proj-renderer
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: proj-renderer
+        run: cargo clippy --all-targets --all-features
+      - name: Tests
+        working-directory: proj-renderer
+        run: cargo test
+
+  audit:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: proj-renderer
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Cargo audit
+        working-directory: proj-renderer
+        run: cargo audit

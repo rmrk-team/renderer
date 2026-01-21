@@ -52,6 +52,7 @@ pub struct RenderRequest {
     pub asset_id: String,
     pub format: OutputFormat,
     pub cache_timestamp: Option<String>,
+    pub cache_param_present: bool,
     pub width_param: Option<String>,
     pub og_mode: bool,
     pub overlay: Option<String>,
@@ -232,7 +233,11 @@ pub async fn render_token_with_limit(
                             missing_layers: 0,
                             nonconforming_layers: 0,
                             cache_hit: true,
-                            cache_control: cache_control_header(state.cache.render_ttl),
+                            cache_control: cache_control_for_request(
+                                &request,
+                                state.cache.render_ttl,
+                                state.config.default_cache_ttl,
+                            ),
                             etag: Some(selection.key.etag.clone()),
                             cached_path: Some(selection.key.path.clone()),
                             content_length: Some(size),
@@ -651,7 +656,11 @@ pub(crate) async fn render_token_uncached(
                     missing_layers: 0,
                     nonconforming_layers: 0,
                     cache_hit: true,
-                    cache_control: cache_control_header(state.cache.render_ttl),
+                    cache_control: cache_control_for_request(
+                        request,
+                        state.cache.render_ttl,
+                        state.config.default_cache_ttl,
+                    ),
                     etag: Some(selection.key.etag.clone()),
                     cached_path: Some(selection.key.path.clone()),
                     content_length: Some(size),
@@ -845,8 +854,8 @@ pub(crate) async fn render_token_uncached(
         let _ = state.cache.store_file(&key.path, &bytes).await;
     }
     let complete = missing_layers == 0;
-    let cache_control = if request.cache_timestamp.is_some() && complete {
-        cache_control_header(state.cache.render_ttl)
+    let cache_control = if complete {
+        cache_control_for_request(request, state.cache.render_ttl, state.config.default_cache_ttl)
     } else {
         "no-store".to_string()
     };
@@ -2540,6 +2549,23 @@ pub(crate) fn cache_control_header(ttl: Duration) -> String {
     format!("public, max-age={}", ttl.as_secs())
 }
 
+fn cache_control_for_request(
+    request: &RenderRequest,
+    render_ttl: Duration,
+    default_ttl: Duration,
+) -> String {
+    if request.cache_timestamp.is_none() {
+        return "no-store".to_string();
+    }
+    if request.cache_param_present {
+        return cache_control_header(render_ttl);
+    }
+    if default_ttl.is_zero() {
+        return "no-store".to_string();
+    }
+    cache_control_header(default_ttl)
+}
+
 fn scale_height(original_height: u32, original_width: u32, target_width: u32) -> u32 {
     if original_width == 0 {
         return original_height;
@@ -2758,6 +2784,7 @@ mod tests {
             asset_id: "10".to_string(),
             format: OutputFormat::Png,
             cache_timestamp: None,
+            cache_param_present: false,
             width_param: Some("medium".to_string()),
             og_mode: false,
             overlay: Some("watermark".to_string()),
@@ -2783,6 +2810,7 @@ mod tests {
             asset_id: "10".to_string(),
             format: OutputFormat::Png,
             cache_timestamp: None,
+            cache_param_present: false,
             width_param: Some("medium".to_string()),
             og_mode: false,
             overlay: Some("invalid".to_string()),
@@ -2951,6 +2979,7 @@ mod tests {
                 asset_id: asset_id.to_string(),
                 format: OutputFormat::Png,
                 cache_timestamp: cache_timestamp.clone(),
+                cache_param_present: true,
                 width_param: Some("large".to_string()),
                 og_mode: false,
                 overlay: None,

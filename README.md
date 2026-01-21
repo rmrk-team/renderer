@@ -86,6 +86,7 @@ RPC_CONNECT_TIMEOUT_SECONDS=5
 DEFAULT_CANVAS_WIDTH=1080
 DEFAULT_CANVAS_HEIGHT=1512
 DEFAULT_CACHE_TIMESTAMP=0
+DEFAULT_CACHE_TTL_SECONDS=604800
 CHILD_LAYER_MODE=above_slot
 RASTER_MISMATCH_FIXED=top_left_no_scale
 RASTER_MISMATCH_CHILD=top_left_no_scale
@@ -106,9 +107,9 @@ MAX_SVG_BYTES=2097152
 MAX_SVG_NODE_COUNT=200000
 MAX_RASTER_BYTES=10485760
 MAX_LAYERS_PER_RENDER=200
-MAX_CANVAS_PIXELS=50000000
-MAX_TOTAL_RASTER_PIXELS=250000000
-MAX_DECODED_RASTER_PIXELS=50000000
+MAX_CANVAS_PIXELS=16000000
+MAX_TOTAL_RASTER_PIXELS=64000000
+MAX_DECODED_RASTER_PIXELS=16000000
 MAX_CACHE_VARIANTS_PER_KEY=5
 MAX_OVERLAY_LENGTH=64
 MAX_BG_LENGTH=64
@@ -138,6 +139,7 @@ HTTP safety caps:
 - `CACHE_EVICT_INTERVAL_SECONDS` sets how often the cache eviction loop runs (0 disables).
 - `MAX_CONCURRENT_RPC_CALLS` caps concurrent RPC calls (primary-route lookups + warmup fallbacks).
 - `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` caches failed primary-asset lookups briefly to avoid RPC hammering.
+- `DEFAULT_CACHE_TTL_SECONDS` sets a default HTTP cache TTL when `cache` is omitted.
 
 ### Render policy overrides
 
@@ -294,6 +296,50 @@ When deploying behind a reverse proxy (nginx/ALB/Cloudflare):
 - Avoid overly broad `TRUSTED_PROXY_CIDRS` like `0.0.0.0/0` unless you fully trust clients.
 - Configure the proxy to **overwrite** forwarded headers; the app selects the last untrusted IP in the chain (bounded to 20 entries).
 - If you have multiple proxies (e.g., Cloudflare → nginx), include **all** proxy CIDRs in `TRUSTED_PROXY_CIDRS` or client IP attribution will break.
+
+#### Nginx legacy path shims (optional)
+
+If you are replacing legacy domains such as `composable.rmrk.link` and
+`nft-renderer.rmrk.app`, you can keep old URLs working by proxying to the renderer
+and rewriting `/nft/...` to the token-only route. `/production/create/...` is already
+supported by the renderer and does not need a rewrite.
+
+```nginx
+upstream renderer {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 443 ssl;
+    server_name composable.rmrk.link nft-renderer.rmrk.app;
+
+    # Legacy: /nft/{chainId}/{collection}/{tokenId}?extension=png&img-width=600
+    location ~ ^/nft/(?<chain_id>[^/]+)/(?<collection>0x[0-9A-Fa-f]+)/(?<token_id>[0-9]+)$ {
+        set $chain $chain_id;
+        if ($chain_id = "8453") { set $chain "base"; }
+
+        set $format $arg_extension;
+        if ($format = "") { set $format "png"; }
+
+        rewrite ^ /render/$chain/$collection/$token_id/$format break;
+        proxy_pass http://renderer;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://renderer;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Add more `chain_id` mappings as needed. If you prefer to keep numeric chain IDs
+in the URL, you can instead use numeric keys in `RPC_ENDPOINTS` and
+`RENDER_UTILS_ADDRESSES` (and drop the `chain_id` mapping above).
 
 ### Go-live checklist
 
@@ -549,3 +595,23 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - The OpenAPI spec is served at `/openapi.yaml`; set `OPENAPI_PUBLIC=false` to gate it.
+- `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.
+
+### Deployment profiles
+
+- Local dev: `ACCESS_MODE=open`, `REQUIRE_APPROVAL=false`, permissive limits.
+- Staging: `ACCESS_MODE=key_required`, `OPENAPI_PUBLIC=false`, moderate limits.
+- Prod: approvals on, key or allowlist mode, strict limits.
+
+### CI checks
+
+- `cargo fmt --check`
+- `cargo clippy`
+- `cargo test`
+- `cargo audit` (or `cargo deny`) on a schedule
+
+### Common footguns
+
+- `TRUSTED_PROXY_CIDRS` too broad lets clients spoof IPs (rate limiting/denylist bypass).
+- `ALLOW_PRIVATE_NETWORKS=true` enables internal SSRF paths; use only in trusted networks.
+- `ALLOW_HTTP=true` weakens transport safety; keep off in production.

@@ -6,6 +6,7 @@ use crate::render::{
     render_token_with_limit, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
     RenderRequest,
 };
+use crate::rate_limit::RateLimitInfo;
 use crate::state::AppState;
 use crate::usage::UsageEvent;
 use crate::{admin, render};
@@ -143,6 +144,35 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
         .cached_sizes()
         .await
         .map_err(|err| map_render_error(err.into()))?;
+    let usage_summary = if state.config.usage_tracking_enabled {
+        let rows = state
+            .db
+            .list_usage(1)
+            .await
+            .map_err(|err| map_render_error(err.into()))?;
+        let mut requests = 0i64;
+        let mut cache_hits = 0i64;
+        let mut cache_misses = 0i64;
+        for row in rows {
+            requests = requests.saturating_add(row.requests);
+            cache_hits = cache_hits.saturating_add(row.cache_hits);
+            cache_misses = cache_misses.saturating_add(row.cache_misses);
+        }
+        let total = cache_hits.saturating_add(cache_misses);
+        let hit_rate = if total > 0 {
+            (cache_hits as f64) / (total as f64)
+        } else {
+            0.0
+        };
+        Some(serde_json::json!({
+            "requests_1h": requests,
+            "cache_hits_1h": cache_hits,
+            "cache_misses_1h": cache_misses,
+            "cache_hit_rate_1h": hit_rate
+        }))
+    } else {
+        None
+    };
     let access_mode = match state.config.access_mode {
         crate::config::AccessMode::Open => "open",
         crate::config::AccessMode::KeyRequired => "key_required",
@@ -155,6 +185,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "render_bytes": render_bytes,
             "asset_bytes": asset_bytes
         },
+        "usage": usage_summary,
         "warmup": {
             "queued": queued,
             "running": running,
@@ -199,13 +230,16 @@ async fn render_canonical(
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
+    let cache_param_present = query.cache.is_some();
+    let cache_timestamp = query.cache;
     let request = RenderRequest {
         chain,
         collection,
         token_id,
         asset_id,
         format: format.clone(),
-        cache_timestamp: query.cache,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -245,13 +279,16 @@ async fn render_og(
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
+    let cache_param_present = query.cache.is_some();
+    let cache_timestamp = query.cache;
     let request = RenderRequest {
         chain,
         collection,
         token_id,
         asset_id,
         format: format.clone(),
-        cache_timestamp: query.cache,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: true,
         overlay: query.overlay,
@@ -299,6 +336,7 @@ async fn render_legacy(
         asset_id,
         format: format.clone(),
         cache_timestamp: Some(cache_timestamp),
+        cache_param_present: true,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -519,13 +557,16 @@ async fn head_render_canonical(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
+    let cache_param_present = query.cache.is_some();
+    let cache_timestamp = query.cache;
     let request = RenderRequest {
         chain,
         collection,
         token_id,
         asset_id,
         format,
-        cache_timestamp: query.cache,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -548,13 +589,16 @@ async fn head_render_og(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
+    let cache_param_present = query.cache.is_some();
+    let cache_timestamp = query.cache;
     let request = RenderRequest {
         chain,
         collection,
         token_id,
         asset_id,
         format,
-        cache_timestamp: query.cache,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: true,
         overlay: query.overlay,
@@ -585,6 +629,7 @@ async fn head_render_legacy(
         asset_id,
         format,
         cache_timestamp: Some(cache_timestamp),
+        cache_param_present: true,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -727,6 +772,10 @@ async fn head_cached_response(
         HeaderValue::from_static("true"),
     );
     headers.insert(
+        "X-Renderer-Result",
+        HeaderValue::from_static("rendered"),
+    );
+    headers.insert(
         "X-Renderer-Cache-Hit",
         HeaderValue::from_static("true"),
     );
@@ -766,6 +815,11 @@ async fn to_http_response(
         "X-Renderer-Complete",
         HeaderValue::from_str(if response.complete { "true" } else { "false" })
             .unwrap_or(HeaderValue::from_static("false")),
+    );
+    headers.insert(
+        "X-Renderer-Result",
+        HeaderValue::from_str(if response.complete { "rendered" } else { "placeholder" })
+            .unwrap_or(HeaderValue::from_static("rendered")),
     );
     headers.insert(
         "X-Renderer-Cache-Hit",
@@ -845,6 +899,10 @@ fn placeholder_response(format: &OutputFormat, width: u32, height: u32) -> Respo
     headers.insert(
         "X-Renderer-Complete",
         HeaderValue::from_static("false"),
+    );
+    headers.insert(
+        "X-Renderer-Result",
+        HeaderValue::from_static("placeholder"),
     );
     headers.insert("X-Renderer-Error", HeaderValue::from_static("true"));
     (headers, bytes).into_response()
@@ -1015,8 +1073,9 @@ pub async fn access_middleware(
     let ip = client_ip(&request, &state);
     if path == "/admin" || path.starts_with("/admin/") {
         if let Some(ip) = ip {
-            if !apply_ip_rate_limit(&state, ip).await {
-                return rate_limit_response();
+            let info = apply_ip_rate_limit(&state, ip).await;
+            if !info.allowed {
+                return rate_limit_response(Some(info));
             }
         }
         return next.run(request).await;
@@ -1026,8 +1085,9 @@ pub async fn access_middleware(
     let is_public_openapi = is_public_openapi_path(&state, &path);
 
     if let Some(ip) = ip {
-        if !apply_ip_rate_limit(&state, ip).await {
-            return rate_limit_response();
+        let info = apply_ip_rate_limit(&state, ip).await;
+        if !info.allowed {
+            return rate_limit_response(Some(info));
         }
     }
 
@@ -1082,8 +1142,9 @@ pub async fn access_middleware(
         && !is_access_allowed(&state, ip, key_info.as_ref()).await
     {
         if let Some(ip) = ip {
-            if !apply_auth_fail_limit(&state, ip).await {
-            return rate_limit_response();
+            let info = apply_auth_fail_limit(&state, ip).await;
+            if !info.allowed {
+                return rate_limit_response(Some(info));
             }
         }
         return ApiError::new(StatusCode::UNAUTHORIZED, "access denied")
@@ -1095,8 +1156,9 @@ pub async fn access_middleware(
     }
 
     if let Some(key) = key_info.as_ref() {
-        if !apply_key_rate_limit(&state, key).await {
-            return rate_limit_response();
+        let info = apply_key_rate_limit(&state, key).await;
+        if !info.allowed {
+            return rate_limit_response(Some(info));
         }
     }
 
@@ -1156,17 +1218,22 @@ async fn is_access_allowed(
     }
 }
 
-async fn apply_ip_rate_limit(state: &AppState, ip: std::net::IpAddr) -> bool {
-    state.rate_limiter.allow(ip).await
+async fn apply_ip_rate_limit(state: &AppState, ip: std::net::IpAddr) -> RateLimitInfo {
+    state.rate_limiter.check(ip).await
 }
 
-async fn apply_auth_fail_limit(state: &AppState, ip: std::net::IpAddr) -> bool {
-    state.auth_fail_limiter.allow(ip).await
+async fn apply_auth_fail_limit(state: &AppState, ip: std::net::IpAddr) -> RateLimitInfo {
+    state.auth_fail_limiter.check(ip).await
 }
 
-async fn apply_key_rate_limit(state: &AppState, key: &crate::db::ClientKey) -> bool {
+async fn apply_key_rate_limit(state: &AppState, key: &crate::db::ClientKey) -> RateLimitInfo {
     if !key.active {
-        return false;
+        return RateLimitInfo {
+            allowed: false,
+            limit: 0,
+            remaining: 0,
+            reset_seconds: 0,
+        };
     }
     let rate = key
         .rate_limit_per_minute
@@ -1176,16 +1243,39 @@ async fn apply_key_rate_limit(state: &AppState, key: &crate::db::ClientKey) -> b
         .burst
         .map(|value| value as u64)
         .unwrap_or(state.config.key_rate_limit_burst);
-    state.key_rate_limiter.allow(key.id, rate, burst).await
+    state.key_rate_limiter.check(key.id, rate, burst).await
 }
 
-fn rate_limit_response() -> Response {
-    ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded")
-        .with_header(
-            header::RETRY_AFTER,
-            HeaderValue::from_static(RATE_LIMIT_RETRY_AFTER_SECONDS),
-        )
-        .into_response()
+fn rate_limit_response(info: Option<RateLimitInfo>) -> Response {
+    let mut response =
+        ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
+    let retry_after = info
+        .as_ref()
+        .map(|info| info.reset_seconds)
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| RATE_LIMIT_RETRY_AFTER_SECONDS.parse().unwrap_or(60));
+    let _ = response.headers_mut().insert(
+        header::RETRY_AFTER,
+        HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static(RATE_LIMIT_RETRY_AFTER_SECONDS)),
+    );
+    if let Some(info) = info {
+        let _ = response.headers_mut().insert(
+            "X-RateLimit-Limit",
+            HeaderValue::from_str(&info.limit.to_string()).unwrap_or(HeaderValue::from_static("0")),
+        );
+        let _ = response.headers_mut().insert(
+            "X-RateLimit-Remaining",
+            HeaderValue::from_str(&info.remaining.to_string())
+                .unwrap_or(HeaderValue::from_static("0")),
+        );
+        let _ = response.headers_mut().insert(
+            "X-RateLimit-Reset",
+            HeaderValue::from_str(&info.reset_seconds.to_string())
+                .unwrap_or(HeaderValue::from_static("0")),
+        );
+    }
+    response
 }
 
 async fn ip_rule_for_ip(state: &AppState, ip: IpAddr) -> Option<String> {

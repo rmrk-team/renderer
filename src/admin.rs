@@ -2,6 +2,7 @@ use crate::canonical;
 use crate::config::{AdminCollectionInput, Config};
 use crate::db::{Client, ClientKey, CollectionConfig, IpRule, RpcEndpoint, UsageRow, WarmupJob};
 use crate::http::client_ip;
+use crate::rate_limit::RateLimitInfo;
 use crate::render::refresh_canvas_size;
 use crate::state::AppState;
 use crate::warmup::{enqueue_warmup, WarmupRequest};
@@ -650,14 +651,9 @@ async fn require_admin(
         return next.run(request).await;
     }
     if let Some(ip) = client_ip(&request, &state) {
-        if !state.auth_fail_limiter.allow(ip).await {
-            let mut response = Response::new("Too many requests".into());
-            *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-            response.headers_mut().insert(
-                header::RETRY_AFTER,
-                HeaderValue::from_static("60"),
-            );
-            return response;
+        let info = state.auth_fail_limiter.check(ip).await;
+        if !info.allowed {
+            return rate_limit_response(info);
         }
     }
     let mut response = Response::new("Unauthorized".into());
@@ -665,6 +661,32 @@ async fn require_admin(
     response.headers_mut().insert(
         header::WWW_AUTHENTICATE,
         HeaderValue::from_static("Bearer realm=\"renderer\""),
+    );
+    response
+}
+
+fn rate_limit_response(info: RateLimitInfo) -> Response {
+    let mut response = Response::new("Too many requests".into());
+    *response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+    let retry_after = info.reset_seconds.max(60);
+    response.headers_mut().insert(
+        header::RETRY_AFTER,
+        HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static("60")),
+    );
+    let _ = response.headers_mut().insert(
+        "X-RateLimit-Limit",
+        HeaderValue::from_str(&info.limit.to_string()).unwrap_or(HeaderValue::from_static("0")),
+    );
+    let _ = response.headers_mut().insert(
+        "X-RateLimit-Remaining",
+        HeaderValue::from_str(&info.remaining.to_string())
+            .unwrap_or(HeaderValue::from_static("0")),
+    );
+    let _ = response.headers_mut().insert(
+        "X-RateLimit-Reset",
+        HeaderValue::from_str(&info.reset_seconds.to_string())
+            .unwrap_or(HeaderValue::from_static("0")),
     );
     response
 }
@@ -1180,6 +1202,7 @@ mod tests {
             default_canvas_width: 1,
             default_canvas_height: 1,
             default_cache_timestamp: None,
+            default_cache_ttl: Duration::from_secs(0),
             rpc_endpoints: HashMap::new(),
             render_utils_addresses: HashMap::new(),
             approval_contracts: HashMap::new(),

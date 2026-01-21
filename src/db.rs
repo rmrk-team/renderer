@@ -1711,6 +1711,7 @@ mod tests {
             default_canvas_width: 1,
             default_canvas_height: 1,
             default_cache_timestamp: None,
+            default_cache_ttl: std::time::Duration::from_secs(0),
             rpc_endpoints: std::collections::HashMap::new(),
             render_utils_addresses: std::collections::HashMap::new(),
             approval_contracts: std::collections::HashMap::new(),

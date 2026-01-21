@@ -554,6 +554,7 @@ mod tests {
             default_canvas_width: 1,
             default_canvas_height: 1,
             default_cache_timestamp: None,
+            default_cache_ttl: Duration::from_secs(0),
             rpc_endpoints,
             render_utils_addresses,
             approval_contracts: HashMap::new(),

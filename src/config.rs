@@ -7,6 +7,7 @@ use std::env;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::Duration;
+use tracing::warn;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -26,6 +27,7 @@ pub struct Config {
     pub default_canvas_width: u32,
     pub default_canvas_height: u32,
     pub default_cache_timestamp: Option<String>,
+    pub default_cache_ttl: Duration,
     pub rpc_endpoints: HashMap<String, Vec<String>>,
     pub render_utils_addresses: HashMap<String, String>,
     pub approval_contracts: HashMap<String, String>,
@@ -203,6 +205,8 @@ impl Config {
         let default_canvas_width = parse_u32("DEFAULT_CANVAS_WIDTH", 1080);
         let default_canvas_height = parse_u32("DEFAULT_CANVAS_HEIGHT", 1512);
         let default_cache_timestamp = parse_default_cache_timestamp()?;
+        let default_cache_ttl =
+            Duration::from_secs(parse_u64("DEFAULT_CACHE_TTL_SECONDS", 604_800));
 
         let rpc_endpoints =
             normalize_chain_map(parse_json_env::<HashMap<String, Vec<String>>>("RPC_ENDPOINTS")
@@ -246,8 +250,8 @@ impl Config {
         let max_svg_node_count = parse_usize("MAX_SVG_NODE_COUNT", 200_000);
         let max_raster_bytes = parse_usize("MAX_RASTER_BYTES", 10 * 1024 * 1024);
         let max_layers_per_render = parse_usize("MAX_LAYERS_PER_RENDER", 200);
-        let max_canvas_pixels = parse_u64("MAX_CANVAS_PIXELS", 50_000_000);
-        let max_total_raster_pixels = parse_u64("MAX_TOTAL_RASTER_PIXELS", 250_000_000);
+        let max_canvas_pixels = parse_u64("MAX_CANVAS_PIXELS", 16_000_000);
+        let max_total_raster_pixels = parse_u64("MAX_TOTAL_RASTER_PIXELS", 64_000_000);
         let max_cache_variants_per_key = parse_usize(
             "MAX_CACHE_VARIANTS_PER_KEY",
             parse_usize("MAX_CACHE_VARIANTS_PER_CHAIN", 5),
@@ -275,6 +279,7 @@ impl Config {
         let api_key_cache_capacity = parse_usize("API_KEY_CACHE_CAPACITY", 10_000);
         let track_keys_in_open_mode = parse_bool("TRACK_KEYS_IN_OPEN_MODE", false);
         let trusted_proxies = parse_trusted_proxies("TRUSTED_PROXY_CIDRS")?;
+        warn_on_broad_proxy_ranges(&trusted_proxies);
         let usage_tracking_enabled = parse_bool("USAGE_TRACKING_ENABLED", true);
         let usage_sample_rate = parse_f64("USAGE_SAMPLE_RATE", 1.0)
             .clamp(0.0, 1.0);
@@ -358,6 +363,7 @@ impl Config {
             default_canvas_width,
             default_canvas_height,
             default_cache_timestamp,
+            default_cache_ttl,
             rpc_endpoints,
             render_utils_addresses,
             approval_contracts,
@@ -656,6 +662,25 @@ fn parse_trusted_proxies(key: &str) -> Result<Vec<IpNet>> {
         return Err(anyhow::anyhow!("invalid trusted proxy entry: {value}"));
     }
     Ok(parsed)
+}
+
+fn warn_on_broad_proxy_ranges(trusted: &[IpNet]) {
+    for net in trusted {
+        let prefix = net.prefix_len();
+        if net.addr().is_ipv4() {
+            if prefix <= 8 {
+                warn!(
+                    cidr = %net,
+                    "trusted proxy range is very broad; clients may spoof IPs"
+                );
+            }
+        } else if prefix <= 32 {
+            warn!(
+                cidr = %net,
+                "trusted proxy range is very broad; clients may spoof IPs"
+            );
+        }
+    }
 }
 
 fn parse_landing_config() -> Result<Option<LandingConfig>> {
