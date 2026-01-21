@@ -1,11 +1,11 @@
 use crate::assets::{AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
-use crate::chain::ComposeResult;
 use crate::canonical;
+use crate::chain::ComposeResult;
 use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
-use crate::state::{collection_cache_key, AppState, ThemeSourceCache};
-use anyhow::{anyhow, Context, Result};
+use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
+use anyhow::{Context, Result, anyhow};
 use image::codecs::png::PngEncoder;
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, ImageFormat, ImageReader, Rgba, RgbaImage};
@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{self, JoinSet};
@@ -203,7 +203,11 @@ pub async fn render_token_with_limit(
     apply_cache_epoch(&state, &mut request).await?;
     ensure_collection_approved(&state, &request.chain, &request.collection).await?;
 
-    validate_query_lengths(&request, state.config.max_overlay_length, state.config.max_background_length)?;
+    validate_query_lengths(
+        &request,
+        state.config.max_overlay_length,
+        state.config.max_background_length,
+    )?;
     let (width, base_key) = resolve_width(&request.width_param, request.og_mode)?;
     let variant_key = build_variant_key(&base_key, &request);
     let cache_enabled = request.cache_timestamp.is_some();
@@ -314,13 +318,8 @@ pub async fn apply_cache_epoch(state: &AppState, request: &mut RenderRequest) ->
     if request.cache_timestamp.is_some() {
         return Ok(());
     }
-    request.cache_timestamp = resolve_cache_timestamp(
-        state,
-        &request.chain,
-        &request.collection,
-        None,
-    )
-    .await?;
+    request.cache_timestamp =
+        resolve_cache_timestamp(state, &request.chain, &request.collection, None).await?;
     Ok(())
 }
 
@@ -344,10 +343,7 @@ pub async fn resolve_cache_timestamp(
         .db
         .get_collection_cache_epoch(chain, collection)
         .await?;
-    state
-        .collection_epoch_cache
-        .insert(cache_key, epoch)
-        .await;
+    state.collection_epoch_cache.insert(cache_key, epoch).await;
     Ok(epoch_to_timestamp(
         epoch,
         &state.config.default_cache_timestamp,
@@ -364,10 +360,7 @@ pub async fn ensure_collection_approved(
     }
     let config = get_collection_config_cached(state, chain, collection).await?;
     let has_config = config.is_some();
-    let approved = config
-        .as_ref()
-        .map(is_collection_approved)
-        .unwrap_or(false);
+    let approved = config.as_ref().map(is_collection_approved).unwrap_or(false);
     let stale = config
         .as_ref()
         .map(|config| is_approval_stale(config, state.config.max_approval_staleness_seconds))
@@ -375,7 +368,11 @@ pub async fn ensure_collection_approved(
     if approved && !stale {
         return Ok(());
     }
-    if !has_config && state.approval_negative_cache.contains(&format!("{chain}:{collection}")).await
+    if !has_config
+        && state
+            .approval_negative_cache
+            .contains(&format!("{chain}:{collection}"))
+            .await
     {
         return Err(anyhow!("collection not approved"));
     }
@@ -398,17 +395,24 @@ pub async fn ensure_collection_approved(
                 )
                 .await?;
             if has_config {
-                state.db.record_approval_check(chain, collection, true).await?;
+                state
+                    .db
+                    .record_approval_check(chain, collection, true)
+                    .await?;
             }
             state.invalidate_collection_cache(chain, collection).await;
             Ok(())
         }
         None => {
             if has_config {
-                state.db.record_approval_check(chain, collection, false).await?;
+                state
+                    .db
+                    .record_approval_check(chain, collection, false)
+                    .await?;
                 state.invalidate_collection_cache(chain, collection).await;
             } else {
-                state.approval_negative_cache
+                state
+                    .approval_negative_cache
                     .insert(format!("{chain}:{collection}"))
                     .await;
             }
@@ -443,7 +447,10 @@ fn should_skip_on_demand(config: &CollectionConfig, now: i64, ttl_seconds: u64) 
     if ttl_seconds == 0 {
         return false;
     }
-    match (config.last_approval_check_at, config.last_approval_check_result) {
+    match (
+        config.last_approval_check_at,
+        config.last_approval_check_result,
+    ) {
         (Some(at), Some(false)) => now.saturating_sub(at) < ttl_seconds as i64,
         _ => false,
     }
@@ -496,11 +503,7 @@ async fn on_demand_approval_check(
 
 fn approval_until_to_i64(value: u64) -> i64 {
     let max = i64::MAX as u64;
-    if value > max {
-        i64::MAX
-    } else {
-        value as i64
-    }
+    if value > max { i64::MAX } else { value as i64 }
 }
 
 fn now_epoch() -> i64 {
@@ -516,27 +519,28 @@ pub(crate) async fn render_token_uncached(
     width: Option<u32>,
     variant_key: &str,
 ) -> Result<RenderResponse> {
-    let collection_config = get_collection_config_cached(state, &request.chain, &request.collection)
-        .await?
-        .unwrap_or(CollectionConfig {
-            chain: request.chain.clone(),
-            collection_address: request.collection.clone(),
-            canvas_width: None,
-            canvas_height: None,
-            canvas_fingerprint: None,
-            og_focal_point: 25,
-            og_overlay_uri: None,
-            watermark_overlay_uri: None,
-            warmup_strategy: "auto".to_string(),
-            cache_epoch: None,
-            approved: true,
-            approved_until: None,
-            approval_source: None,
-            last_approval_sync_at: None,
-            last_approval_sync_block: None,
-            last_approval_check_at: None,
-            last_approval_check_result: None,
-        });
+    let collection_config =
+        get_collection_config_cached(state, &request.chain, &request.collection)
+            .await?
+            .unwrap_or(CollectionConfig {
+                chain: request.chain.clone(),
+                collection_address: request.collection.clone(),
+                canvas_width: None,
+                canvas_height: None,
+                canvas_fingerprint: None,
+                og_focal_point: 25,
+                og_overlay_uri: None,
+                watermark_overlay_uri: None,
+                warmup_strategy: "auto".to_string(),
+                cache_epoch: None,
+                approved: true,
+                approved_until: None,
+                approval_source: None,
+                last_approval_sync_at: None,
+                last_approval_sync_block: None,
+                last_approval_check_at: None,
+                last_approval_check_result: None,
+            });
     let composite_variant_key = build_variant_key("base", request);
     let mut composite_key: Option<CompositeCacheKey> = None;
     let mut composite_from_cache = false;
@@ -621,10 +625,7 @@ pub(crate) async fn render_token_uncached(
         let required_layers = layers.iter().filter(|layer| layer.required).count();
         debug!(
             layers = layers.len(),
-            required_layers,
-            slot_part_layers,
-            slot_child_layers,
-            "render layers prepared"
+            required_layers, slot_part_layers, slot_child_layers, "render layers prepared"
         );
         if layers.len() > state.config.max_layers_per_render {
             return Err(RenderLimitError::TooManyLayers.into());
@@ -690,8 +691,8 @@ pub(crate) async fn render_token_uncached(
                         .await?
                     {
                         let max_pixels = state.config.max_decoded_raster_pixels;
-                        let image =
-                            task::spawn_blocking(move || decode_raster(&bytes, max_pixels)).await??;
+                        let image = task::spawn_blocking(move || decode_raster(&bytes, max_pixels))
+                            .await??;
                         composite_from_cache = true;
                         canvas = Some(image);
                     }
@@ -699,8 +700,7 @@ pub(crate) async fn render_token_uncached(
             }
         }
         if let Some(image) = canvas.as_ref() {
-            let canvas_pixels =
-                (image.width() as u64).saturating_mul(image.height() as u64);
+            let canvas_pixels = (image.width() as u64).saturating_mul(image.height() as u64);
             if canvas_pixels > state.config.max_canvas_pixels {
                 return Err(RenderLimitError::CanvasTooLarge.into());
             }
@@ -713,8 +713,8 @@ pub(crate) async fn render_token_uncached(
             let layer_limit = state.config.render_layer_concurrency.max(1);
             let semaphore = Arc::new(Semaphore::new(layer_limit));
             let mut join_set = JoinSet::new();
-        let theme_source_cache = state.theme_source_cache.clone();
-        for (idx, layer) in layers.iter().enumerate() {
+            let theme_source_cache = state.theme_source_cache.clone();
+            for (idx, layer) in layers.iter().enumerate() {
                 let permit = semaphore.clone().acquire_owned().await?;
                 let assets = state.assets.clone();
                 let layer = layer.clone();
@@ -724,8 +724,8 @@ pub(crate) async fn render_token_uncached(
                 let max_raster_bytes = state.config.max_raster_bytes;
                 let raster_fixed = render_policy.raster_mismatch_fixed;
                 let raster_child = render_policy.raster_mismatch_child;
-            let theme_replace = theme_replace.clone();
-            let theme_source_cache = theme_source_cache.clone();
+                let theme_replace = theme_replace.clone();
+                let theme_source_cache = theme_source_cache.clone();
                 join_set.spawn(async move {
                     let _permit = permit;
                     let result = load_layer(
@@ -739,8 +739,8 @@ pub(crate) async fn render_token_uncached(
                         max_decoded,
                         raster_fixed,
                         raster_child,
-                    theme_replace,
-                    theme_source_cache,
+                        theme_replace,
+                        theme_source_cache,
                     )
                     .await;
                     (idx, result)
@@ -761,8 +761,7 @@ pub(crate) async fn render_token_uncached(
                         if layer_image.nonconforming {
                             nonconforming_layers += 1;
                         }
-                        total_raster_pixels =
-                            total_raster_pixels.saturating_add(canvas_pixels);
+                        total_raster_pixels = total_raster_pixels.saturating_add(canvas_pixels);
                         if total_raster_pixels > state.config.max_total_raster_pixels {
                             return Err(RenderLimitError::RasterPixelsExceeded.into());
                         }
@@ -824,38 +823,43 @@ pub(crate) async fn render_token_uncached(
     let output_format = request.format.clone();
     let should_store_composite =
         !composite_from_cache && composite_key.is_some() && missing_layers == 0;
-    let (bytes, composite_bytes) = task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
-        let composite_bytes = if should_store_composite {
-            let mut bytes = Vec::new();
-            let encoder = PngEncoder::new(&mut bytes);
-            encoder.write_image(
-                canvas.as_raw(),
-                canvas.width(),
-                canvas.height(),
-                image::ColorType::Rgba8.into(),
-            )?;
-            Some(bytes)
-        } else {
-            None
-        };
-        let mut final_image = DynamicImage::ImageRgba8(canvas);
-        if og_mode {
-            final_image = apply_og_crop(final_image, focal_point);
-        }
-        if let Some(width) = width {
-            let height = scale_height(final_image.height(), final_image.width(), width);
-            final_image = final_image.resize_exact(width, height, FilterType::Lanczos3);
-        }
-        let bytes = encode_image(final_image, &output_format)?;
-        Ok((bytes, composite_bytes))
-    })
-    .await??;
+    let (bytes, composite_bytes) =
+        task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+            let composite_bytes = if should_store_composite {
+                let mut bytes = Vec::new();
+                let encoder = PngEncoder::new(&mut bytes);
+                encoder.write_image(
+                    canvas.as_raw(),
+                    canvas.width(),
+                    canvas.height(),
+                    image::ColorType::Rgba8.into(),
+                )?;
+                Some(bytes)
+            } else {
+                None
+            };
+            let mut final_image = DynamicImage::ImageRgba8(canvas);
+            if og_mode {
+                final_image = apply_og_crop(final_image, focal_point);
+            }
+            if let Some(width) = width {
+                let height = scale_height(final_image.height(), final_image.width(), width);
+                final_image = final_image.resize_exact(width, height, FilterType::Lanczos3);
+            }
+            let bytes = encode_image(final_image, &output_format)?;
+            Ok((bytes, composite_bytes))
+        })
+        .await??;
     if let (Some(key), Some(bytes)) = (composite_key, composite_bytes) {
         let _ = state.cache.store_file(&key.path, &bytes).await;
     }
     let complete = missing_layers == 0;
     let cache_control = if complete {
-        cache_control_for_request(request, state.cache.render_ttl, state.config.default_cache_ttl)
+        cache_control_for_request(
+            request,
+            state.cache.render_ttl,
+            state.config.default_cache_ttl,
+        )
     } else {
         "no-store".to_string()
     };
@@ -980,11 +984,7 @@ fn overlay_layer(config: &CollectionConfig, request: &RenderRequest) -> Option<L
     None
 }
 
-fn render_policy_for_collection(
-    config: &Config,
-    chain: &str,
-    collection: &str,
-) -> RenderPolicy {
+fn render_policy_for_collection(config: &Config, chain: &str, collection: &str) -> RenderPolicy {
     let key = format!("{}:{}", chain, collection).to_ascii_lowercase();
     match config.collection_render_overrides.get(&key) {
         Some(override_entry) => config.render_policy.apply_override(override_entry),
@@ -1039,25 +1039,19 @@ async fn load_theme_replace_map(
             return None;
         }
     };
-    let dest = match resolve_theme_from_catalog(
-        state,
-        chain,
-        &compose.catalog_address,
-        &theme_id,
-    )
-    .await
-    {
-        Some(dest) => dest,
-        None => {
-            debug!(
-                metadata_uri = %compose.metadata_uri,
-                catalog_address = %compose.catalog_address,
-                theme_id = %theme_id,
-                "catalog theme lookup failed"
-            );
-            return None;
-        }
-    };
+    let dest =
+        match resolve_theme_from_catalog(state, chain, &compose.catalog_address, &theme_id).await {
+            Some(dest) => dest,
+            None => {
+                debug!(
+                    metadata_uri = %compose.metadata_uri,
+                    catalog_address = %compose.catalog_address,
+                    theme_id = %theme_id,
+                    "catalog theme lookup failed"
+                );
+                return None;
+            }
+        };
     Some(ThemeReplaceMap {
         source: legacy_theme_source(),
         dest,
@@ -1219,10 +1213,7 @@ fn theme_colors_from_struct(theme: &ThemeColors) -> Option<[String; 4]> {
 }
 
 fn is_zero_address(value: &str) -> bool {
-    value
-        .trim_start_matches("0x")
-        .chars()
-        .all(|ch| ch == '0')
+    value.trim_start_matches("0x").chars().all(|ch| ch == '0')
 }
 
 fn normalize_theme_color(value: &str) -> Option<String> {
@@ -1318,8 +1309,7 @@ fn extract_svg_data_theme_color(svg_bytes: &[u8], idx: usize) -> Option<String> 
     let attr_bytes = attr.as_bytes();
     let mut search_from = 0usize;
     while search_from < svg_bytes.len() {
-        let pos =
-            find_case_insensitive(&svg_bytes[search_from..], attr_bytes)? + search_from;
+        let pos = find_case_insensitive(&svg_bytes[search_from..], attr_bytes)? + search_from;
         let mut i = pos + attr_bytes.len();
         if i < svg_bytes.len() {
             let next = svg_bytes[i];
@@ -1398,8 +1388,7 @@ fn apply_theme_to_svg_bytes(
             Some(&theme.source[idx])
         };
         if let Some(src) = src {
-            let (next, replaced) =
-                replace_case_insensitive_bytes(&current, src, placeholder);
+            let (next, replaced) = replace_case_insensitive_bytes(&current, src, placeholder);
             current = next;
             replaced_any |= replaced;
         }
@@ -1499,27 +1488,28 @@ async fn compute_render_cache_key_for_request(
     }
     let render_policy =
         render_policy_for_collection(&state.config, &request.chain, &request.collection);
-    let collection_config = get_collection_config_cached(state, &request.chain, &request.collection)
-        .await?
-        .unwrap_or(CollectionConfig {
-            chain: request.chain.clone(),
-            collection_address: request.collection.clone(),
-            canvas_width: None,
-            canvas_height: None,
-            canvas_fingerprint: None,
-            og_focal_point: 25,
-            og_overlay_uri: None,
-            watermark_overlay_uri: None,
-            warmup_strategy: "auto".to_string(),
-            cache_epoch: None,
-            approved: true,
-            approved_until: None,
-            approval_source: None,
-            last_approval_sync_at: None,
-            last_approval_sync_block: None,
-            last_approval_check_at: None,
-            last_approval_check_result: None,
-        });
+    let collection_config =
+        get_collection_config_cached(state, &request.chain, &request.collection)
+            .await?
+            .unwrap_or(CollectionConfig {
+                chain: request.chain.clone(),
+                collection_address: request.collection.clone(),
+                canvas_width: None,
+                canvas_height: None,
+                canvas_fingerprint: None,
+                og_focal_point: 25,
+                og_overlay_uri: None,
+                watermark_overlay_uri: None,
+                warmup_strategy: "auto".to_string(),
+                cache_epoch: None,
+                approved: true,
+                approved_until: None,
+                approval_source: None,
+                last_approval_sync_at: None,
+                last_approval_sync_block: None,
+                last_approval_check_at: None,
+                last_approval_check_result: None,
+            });
     let compose = state
         .chain
         .compose_equippables(
@@ -1661,9 +1651,11 @@ async fn ensure_canvas_size(
         .unwrap_or(&first.metadata_uri);
 
     if !force {
-        if let (Some(width), Some(height), Some(fingerprint)) =
-            (config.canvas_width, config.canvas_height, config.canvas_fingerprint.as_ref())
-        {
+        if let (Some(width), Some(height), Some(fingerprint)) = (
+            config.canvas_width,
+            config.canvas_height,
+            config.canvas_fingerprint.as_ref(),
+        ) {
             let expected = sha256_hex(&format!("{art_uri}:{width}x{height}"));
             if fingerprint == &expected {
                 return Ok((width as u32, height as u32));
@@ -1687,7 +1679,7 @@ async fn ensure_canvas_size(
                     default_height,
                     max_svg_bytes,
                     max_svg_nodes,
-                max_raster_bytes,
+                    max_raster_bytes,
                     max_decoded_raster_pixels,
                 )
             })
@@ -1848,14 +1840,20 @@ async fn load_layer(
             canvas_height,
             max_svg_bytes,
             max_svg_nodes,
-        max_raster_bytes,
+            max_raster_bytes,
             max_decoded_raster_pixels,
             assets,
         )
         .await?;
         let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
-        let layer_image =
-            apply_raster_mismatch_policy(layer, image, nonconforming, policy, canvas_width, canvas_height)?;
+        let layer_image = apply_raster_mismatch_policy(
+            layer,
+            image,
+            nonconforming,
+            policy,
+            canvas_width,
+            canvas_height,
+        )?;
         return Ok(Some(layer_image));
     }
     let asset = match assets.resolve_metadata(&layer.metadata_uri, false).await {
@@ -1869,7 +1867,10 @@ async fn load_layer(
             assets.fetch_asset(&resolved.art_uri).await?
         }
         Ok(None) => {
-            if matches!(layer.kind, LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay) {
+            if matches!(
+                layer.kind,
+                LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay
+            ) {
                 debug!(
                     metadata_uri = %layer.metadata_uri,
                     kind = ?layer.kind,
@@ -1893,9 +1894,13 @@ async fn load_layer(
         bytes = asset.bytes.len(),
         "fetched layer asset"
     );
-    let themed =
-        apply_theme_if_svg(&asset.bytes, theme_replace.as_deref(), layer, &theme_source_cache)
-            .await?;
+    let themed = apply_theme_if_svg(
+        &asset.bytes,
+        theme_replace.as_deref(),
+        layer,
+        &theme_source_cache,
+    )
+    .await?;
     let (image, nonconforming) = rasterize_bytes(
         themed.as_ref(),
         canvas_width,
@@ -1908,8 +1913,14 @@ async fn load_layer(
     )
     .await?;
     let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
-    let layer_image =
-        apply_raster_mismatch_policy(layer, image, nonconforming, policy, canvas_width, canvas_height)?;
+    let layer_image = apply_raster_mismatch_policy(
+        layer,
+        image,
+        nonconforming,
+        policy,
+        canvas_width,
+        canvas_height,
+    )?;
     Ok(Some(layer_image))
 }
 
@@ -2013,12 +2024,8 @@ fn apply_raster_mismatch_policy(
     match policy {
         RasterMismatchPolicy::Error => Err(anyhow!("nonconforming raster dimensions")),
         RasterMismatchPolicy::ScaleToCanvas => {
-            let resized = image::imageops::resize(
-                &image,
-                canvas_width,
-                canvas_height,
-                FilterType::Lanczos3,
-            );
+            let resized =
+                image::imageops::resize(&image, canvas_width, canvas_height, FilterType::Lanczos3);
             Ok(LayerImage {
                 image: resized,
                 offset_x: 0,
@@ -2045,11 +2052,7 @@ fn apply_raster_mismatch_policy(
     }
 }
 
-fn render_svg_to_pixmap(
-    tree: &usvg::Tree,
-    width: u32,
-    height: u32,
-) -> Result<tiny_skia::Pixmap> {
+fn render_svg_to_pixmap(tree: &usvg::Tree, width: u32, height: u32) -> Result<tiny_skia::Pixmap> {
     let mut pixmap =
         tiny_skia::Pixmap::new(width, height).ok_or_else(|| anyhow!("invalid pixmap size"))?;
     let size = tree.size();
@@ -2116,8 +2119,7 @@ fn parse_svg(
         return Err(anyhow!("svg exceeds max size"));
     }
     let raw = std::str::from_utf8(bytes).context("svg not utf-8")?;
-    if contains_ascii_case_insensitive(raw.as_bytes(), b"<script")
-        || contains_external_svg_url(raw)
+    if contains_ascii_case_insensitive(raw.as_bytes(), b"<script") || contains_external_svg_url(raw)
     {
         return Err(anyhow!("svg contains disallowed external references"));
     }
@@ -2133,8 +2135,9 @@ fn parse_svg(
             "image/jpg" | "image/jpeg" => {
                 data_uri_raster_kind(data, max_decoded_raster_pixels).map(ImageKind::JPEG)
             }
-            "image/webp" => data_uri_raster_kind(data, max_decoded_raster_pixels)
-                .map(ImageKind::WEBP),
+            "image/webp" => {
+                data_uri_raster_kind(data, max_decoded_raster_pixels).map(ImageKind::WEBP)
+            }
             _ => None,
         }
     });
@@ -2523,10 +2526,14 @@ fn validate_chain_segment(chain: &str) -> std::result::Result<(), RenderInputErr
 
 fn validate_collection_address(collection: &str) -> std::result::Result<(), RenderInputError> {
     if collection.len() != 42 || !collection.starts_with("0x") {
-        return Err(RenderInputError::InvalidParam { field: "collection" });
+        return Err(RenderInputError::InvalidParam {
+            field: "collection",
+        });
     }
     if !collection[2..].chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return Err(RenderInputError::InvalidParam { field: "collection" });
+        return Err(RenderInputError::InvalidParam {
+            field: "collection",
+        });
     }
     Ok(())
 }
@@ -2825,8 +2832,11 @@ mod tests {
             background: Some("transparent".to_string()),
             ..request
         };
-        let (_, base_key) =
-            resolve_width(&transparent_request.width_param, transparent_request.og_mode).unwrap();
+        let (_, base_key) = resolve_width(
+            &transparent_request.width_param,
+            transparent_request.og_mode,
+        )
+        .unwrap();
         let key = build_variant_key(&base_key, &transparent_request);
         assert!(!key.contains("bg-"));
     }
@@ -2845,10 +2855,7 @@ mod tests {
 
     #[test]
     fn theme_color_normalization_accepts_hex() {
-        assert_eq!(
-            normalize_theme_color("#Aa11Bb").as_deref(),
-            Some("#aa11bb")
-        );
+        assert_eq!(normalize_theme_color("#Aa11Bb").as_deref(), Some("#aa11bb"));
         assert!(normalize_theme_color("bad").is_none());
         assert!(normalize_theme_color("#12345").is_none());
     }
@@ -2916,12 +2923,12 @@ mod tests {
         let rpc_raw = env::var("LIVE_BASE_RPC_URLS")
             .or_else(|_| env::var("LIVE_BASE_RPC_URL"))
             .context("LIVE_BASE_RPC_URLS not set")?;
-        let render_utils = env::var("LIVE_BASE_RENDER_UTILS")
-            .context("LIVE_BASE_RENDER_UTILS not set")?;
-        let reference_1 = env::var("LIVE_RENDER_REF_1_URL")
-            .context("LIVE_RENDER_REF_1_URL not set")?;
-        let reference_3005 = env::var("LIVE_RENDER_REF_3005_URL")
-            .context("LIVE_RENDER_REF_3005_URL not set")?;
+        let render_utils =
+            env::var("LIVE_BASE_RENDER_UTILS").context("LIVE_BASE_RENDER_UTILS not set")?;
+        let reference_1 =
+            env::var("LIVE_RENDER_REF_1_URL").context("LIVE_RENDER_REF_1_URL not set")?;
+        let reference_3005 =
+            env::var("LIVE_RENDER_REF_3005_URL").context("LIVE_RENDER_REF_3005_URL not set")?;
 
         let rpc_urls = parse_rpc_urls(&rpc_raw)?;
         if rpc_urls.is_empty() {
@@ -2953,15 +2960,7 @@ mod tests {
         let assets = AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore)
             .context("assets")?;
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-        ));
+        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
 
         let collection = "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004".to_string();
         let cache_timestamp = Some("1700787357000".to_string());
@@ -2998,10 +2997,7 @@ mod tests {
             );
             let actual_hash = sha256_hex_bytes(actual.as_raw());
             let expected_hash = sha256_hex_bytes(expected.as_raw());
-            assert_eq!(
-                actual_hash, expected_hash,
-                "{label} pixel hash mismatch"
-            );
+            assert_eq!(actual_hash, expected_hash, "{label} pixel hash mismatch");
         }
 
         Ok(())
@@ -3010,8 +3006,7 @@ mod tests {
     fn parse_rpc_urls(raw: &str) -> Result<Vec<String>> {
         let trimmed = raw.trim();
         if trimmed.starts_with('[') {
-            let urls: Vec<String> =
-                serde_json::from_str(trimmed).context("parse rpc urls json")?;
+            let urls: Vec<String> = serde_json::from_str(trimmed).context("parse rpc urls json")?;
             return Ok(urls);
         }
         let urls = trimmed
@@ -3101,7 +3096,8 @@ mod tests {
     #[test]
     fn parse_svg_disables_string_href_resolution() {
         reset_svg_string_resolver_called();
-        let svg = r#"<svg width="1" height="1"><image href="/dev/zero" width="1" height="1"/></svg>"#;
+        let svg =
+            r#"<svg width="1" height="1"><image href="/dev/zero" width="1" height="1"/></svg>"#;
         let result = parse_svg(svg.as_bytes(), 10_000, 10_000, 50_000, 1_000_000);
         assert!(result.is_ok());
         assert!(SVG_STRING_RESOLVER_CALLED.load(Ordering::Relaxed));

@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::db::{Database, RpcEndpoint};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -496,9 +496,7 @@ impl ChainClient {
         }
         let client = reqwest11::Client::builder()
             .timeout(Duration::from_secs(self.config.rpc_timeout_seconds))
-            .connect_timeout(Duration::from_secs(
-                self.config.rpc_connect_timeout_seconds,
-            ))
+            .connect_timeout(Duration::from_secs(self.config.rpc_connect_timeout_seconds))
             .build()
             .context("build rpc http client")?;
         let url = Url::parse(url).context("invalid rpc url")?;
@@ -516,9 +514,7 @@ impl ChainClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AccessMode, ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy,
-    };
+    use crate::config::{AccessMode, ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::Duration;

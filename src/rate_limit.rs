@@ -68,7 +68,11 @@ impl RateLimiter {
                 })),
             };
         }
-        let burst = if burst == 0 { rate_per_minute.max(1) } else { burst };
+        let burst = if burst == 0 {
+            rate_per_minute.max(1)
+        } else {
+            burst
+        };
         Self {
             enabled: true,
             rate_per_second: rate_per_minute as f64 / 60.0,
@@ -141,12 +145,7 @@ impl KeyRateLimiter {
         }
     }
 
-    pub async fn check(
-        &self,
-        key_id: i64,
-        rate_per_minute: u64,
-        burst: u64,
-    ) -> RateLimitInfo {
+    pub async fn check(&self, key_id: i64, rate_per_minute: u64, burst: u64) -> RateLimitInfo {
         if rate_per_minute == 0 {
             return RateLimitInfo {
                 allowed: true,
@@ -197,9 +196,7 @@ impl KeyRateLimiter {
             };
         }
         let reset_seconds = if rate_per_second > 0.0 {
-            ((1.0 - bucket.tokens) / rate_per_second)
-                .ceil()
-                .max(1.0) as u64
+            ((1.0 - bucket.tokens) / rate_per_second).ceil().max(1.0) as u64
         } else {
             0
         };

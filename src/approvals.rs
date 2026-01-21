@@ -7,7 +7,7 @@ use ethers::prelude::*;
 use std::cmp::min;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::{info, warn};
 
 pub async fn spawn_approval_watchers(state: Arc<AppState>) {
@@ -76,17 +76,22 @@ async fn watch_chain(state: Arc<AppState>, chain: String) -> Result<()> {
         {
             Ok(Some(block)) => block.as_u64(),
             Ok(None) => {
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
             Err(err) => {
                 warn!(error = ?err, "approval watcher failed to fetch block number");
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
         };
-        let confirmed_latest =
-            latest_block.saturating_sub(state.config.approval_confirmations);
+        let confirmed_latest = latest_block.saturating_sub(state.config.approval_confirmations);
 
         let start_block = if let Some(last) = state.db.get_approval_last_block(&chain).await? {
             (last as u64).saturating_add(1)
@@ -97,7 +102,10 @@ async fn watch_chain(state: Arc<AppState>, chain: String) -> Result<()> {
         };
 
         if start_block > confirmed_latest {
-            sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+            sleep(Duration::from_secs(
+                state.config.approval_poll_interval_seconds,
+            ))
+            .await;
             continue;
         }
 
@@ -117,12 +125,18 @@ async fn watch_chain(state: Arc<AppState>, chain: String) -> Result<()> {
         {
             Ok(Some(events)) => events,
             Ok(None) => {
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
             Err(err) => {
                 warn!(error = ?err, "approval watcher failed to query updates");
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
         };
@@ -141,12 +155,18 @@ async fn watch_chain(state: Arc<AppState>, chain: String) -> Result<()> {
         {
             Ok(Some(events)) => events,
             Ok(None) => {
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
             Err(err) => {
                 warn!(error = ?err, "approval watcher failed to query revokes");
-                sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+                sleep(Duration::from_secs(
+                    state.config.approval_poll_interval_seconds,
+                ))
+                .await;
                 continue;
             }
         };
@@ -170,7 +190,10 @@ async fn watch_chain(state: Arc<AppState>, chain: String) -> Result<()> {
             warn!(error = ?err, "approval watcher failed to persist last block");
         }
 
-        sleep(Duration::from_secs(state.config.approval_poll_interval_seconds)).await;
+        sleep(Duration::from_secs(
+            state.config.approval_poll_interval_seconds,
+        ))
+        .await;
     }
 }
 
@@ -230,18 +253,11 @@ async fn handle_update(
         }
     };
     let collection_address = format!("{:#x}", event.collection);
-    let collection_address =
-        canonical::canonicalize_collection_address(&collection_address)?;
+    let collection_address = canonical::canonicalize_collection_address(&collection_address)?;
     let approved_until = approval_until_to_i64(event.approved_until);
     state
         .db
-        .upsert_collection_approval(
-            &chain,
-            &collection_address,
-            approved_until,
-            "event",
-            None,
-        )
+        .upsert_collection_approval(&chain, &collection_address, approved_until, "event", None)
         .await?;
     state
         .invalidate_collection_cache(&chain, &collection_address)
@@ -308,8 +324,7 @@ async fn handle_revoke(
         }
     };
     let collection_address = format!("{:#x}", event.collection);
-    let collection_address =
-        canonical::canonicalize_collection_address(&collection_address)?;
+    let collection_address = canonical::canonicalize_collection_address(&collection_address)?;
     state
         .db
         .upsert_collection_approval(&chain, &collection_address, 0, "event", None)
@@ -484,9 +499,5 @@ async fn sync_all_collections(state: Arc<AppState>, watcher_chain: &str) -> Resu
 
 fn approval_until_to_i64(value: u64) -> i64 {
     let max = i64::MAX as u64;
-    if value > max {
-        i64::MAX
-    } else {
-        value as i64
-    }
+    if value > max { i64::MAX } else { value as i64 }
 }

@@ -2,34 +2,34 @@ use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::config::{AccessMode, Config};
 use crate::landing;
-use crate::render::{
-    render_token_with_limit, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
-    RenderRequest,
-};
 use crate::rate_limit::RateLimitInfo;
+use crate::render::{
+    OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError, RenderRequest,
+    render_token_with_limit,
+};
 use crate::state::AppState;
 use crate::usage::UsageEvent;
 use crate::{admin, render};
-use axum::extract::{ConnectInfo, Extension, Path, Query, RawQuery, State};
 use axum::body::Body;
-use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::extract::{ConnectInfo, Extension, Path, Query, RawQuery, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use hmac::{Hmac, Mac};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use ipnet::IpNet;
 use rand::random;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use tokio_util::io::ReaderStream;
 use std::sync::OnceLock;
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio_util::io::ReaderStream;
 
 const OPENAPI_YAML: &str = include_str!("../openapi.yaml");
 const MAX_FORWARDED_IPS: usize = 20;
@@ -250,8 +250,7 @@ async fn render_canonical(
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
             if query.onerror.as_deref() == Some("placeholder") {
-                let (width, height) =
-                    placeholder_dimensions(&state, &placeholder_width, false);
+                let (width, height) = placeholder_dimensions(&state, &placeholder_width, false);
                 return Ok(placeholder_response(&format, width, height));
             }
             Err(map_render_error(err))
@@ -299,8 +298,7 @@ async fn render_og(
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
             if query.onerror.as_deref() == Some("placeholder") {
-                let (width, height) =
-                    placeholder_dimensions(&state, &placeholder_width, true);
+                let (width, height) = placeholder_dimensions(&state, &placeholder_width, true);
                 return Ok(placeholder_response(&format, width, height));
             }
             Err(map_render_error(err))
@@ -370,15 +368,13 @@ async fn render_primary(
     render::validate_render_params(&chain, &collection, &token_id, None)
         .map_err(|err| map_render_error(err.into()))?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-    let cache_timestamp = render::resolve_cache_timestamp(
-        &state,
-        &chain,
-        &collection,
-        query.cache.clone(),
-    )
-    .await
-    .map_err(|err| map_render_error(err.into()))?;
-    let cache_stamp = cache_timestamp.clone().unwrap_or_else(|| "none".to_string());
+    let cache_timestamp =
+        render::resolve_cache_timestamp(&state, &chain, &collection, query.cache.clone())
+            .await
+            .map_err(|err| map_render_error(err.into()))?;
+    let cache_stamp = cache_timestamp
+        .clone()
+        .unwrap_or_else(|| "none".to_string());
     let primary_cache_key = format!("{chain}:{collection}:{token_id}:{cache_stamp}");
     let asset_id = match state.primary_asset_cache.get(&primary_cache_key).await {
         Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
@@ -440,10 +436,7 @@ async fn render_primary(
         target.push_str(&query_string);
     }
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store"),
-    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert(
         "X-Renderer-Primary-AssetId",
         HeaderValue::from_str(&asset_id.to_string()).unwrap_or(HeaderValue::from_static("0")),
@@ -517,7 +510,14 @@ async fn render_legacy_compat(
     let (asset_id, format) = split_dotted_segment(&asset)?;
     render_legacy(
         State(state),
-        Path((chain, cache_timestamp, collection, token_id, asset_id, format)),
+        Path((
+            chain,
+            cache_timestamp,
+            collection,
+            token_id,
+            asset_id,
+            format,
+        )),
         Query(query),
         headers,
         context,
@@ -678,7 +678,14 @@ async fn head_render_legacy_compat(
     let (asset_id, format) = split_dotted_segment(&asset)?;
     head_render_legacy(
         State(state),
-        Path((chain, cache_timestamp, collection, token_id, asset_id, format)),
+        Path((
+            chain,
+            cache_timestamp,
+            collection,
+            token_id,
+            asset_id,
+            format,
+        )),
         Query(query),
     )
     .await
@@ -767,20 +774,14 @@ async fn head_cached_response(
         header::ETAG,
         HeaderValue::from_str(&cache_key.etag).unwrap_or(HeaderValue::from_static("")),
     );
-    headers.insert(
-        "X-Renderer-Complete",
-        HeaderValue::from_static("true"),
-    );
-    headers.insert(
-        "X-Renderer-Result",
-        HeaderValue::from_static("rendered"),
-    );
-    headers.insert(
-        "X-Renderer-Cache-Hit",
-        HeaderValue::from_static("true"),
-    );
+    headers.insert("X-Renderer-Complete", HeaderValue::from_static("true"));
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("rendered"));
+    headers.insert("X-Renderer-Cache-Hit", HeaderValue::from_static("true"));
     headers.insert("X-Cache", HeaderValue::from_static("HIT"));
-    headers.insert("Server-Timing", HeaderValue::from_static("cache;desc=\"HIT\""));
+    headers.insert(
+        "Server-Timing",
+        HeaderValue::from_static("cache;desc=\"HIT\""),
+    );
     Ok((headers, ()).into_response())
 }
 
@@ -789,9 +790,7 @@ async fn to_http_response(
     request_headers: &HeaderMap,
 ) -> Response {
     if let Some(etag) = response.etag.as_deref() {
-        if is_cacheable(&response.cache_control)
-            && matches_etag(request_headers, etag)
-        {
+        if is_cacheable(&response.cache_control) && matches_etag(request_headers, etag) {
             let mut headers = HeaderMap::new();
             headers.insert(
                 header::ETAG,
@@ -818,8 +817,12 @@ async fn to_http_response(
     );
     headers.insert(
         "X-Renderer-Result",
-        HeaderValue::from_str(if response.complete { "rendered" } else { "placeholder" })
-            .unwrap_or(HeaderValue::from_static("rendered")),
+        HeaderValue::from_str(if response.complete {
+            "rendered"
+        } else {
+            "placeholder"
+        })
+        .unwrap_or(HeaderValue::from_static("rendered")),
     );
     headers.insert(
         "X-Renderer-Cache-Hit",
@@ -857,10 +860,10 @@ async fn to_http_response(
     );
     if is_cacheable(&response.cache_control) {
         if let Some(etag) = response.etag.as_deref() {
-        headers.insert(
-            header::ETAG,
-            HeaderValue::from_str(etag).unwrap_or(HeaderValue::from_static("")),
-        );
+            headers.insert(
+                header::ETAG,
+                HeaderValue::from_str(etag).unwrap_or(HeaderValue::from_static("")),
+            );
         }
     }
     if let Some(path) = response.cached_path.as_ref() {
@@ -892,18 +895,9 @@ fn placeholder_response(format: &OutputFormat, width: u32, height: u32) -> Respo
         HeaderValue::from_str(format.mime().as_ref())
             .unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("no-store"),
-    );
-    headers.insert(
-        "X-Renderer-Complete",
-        HeaderValue::from_static("false"),
-    );
-    headers.insert(
-        "X-Renderer-Result",
-        HeaderValue::from_static("placeholder"),
-    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("placeholder"));
     headers.insert("X-Renderer-Error", HeaderValue::from_static("true"));
     (headers, bytes).into_response()
 }
@@ -1010,13 +1004,11 @@ fn resolve_placeholder_width(width_param: &Option<String>) -> Option<u32> {
         }
     }
     if let Ok(value) = width.parse::<u32>() {
-        let (_, nearest) = presets
-            .iter()
-            .min_by(|a, b| {
-                let da = a.1.abs_diff(value);
-                let db = b.1.abs_diff(value);
-                da.cmp(&db)
-            })?;
+        let (_, nearest) = presets.iter().min_by(|a, b| {
+            let da = a.1.abs_diff(value);
+            let db = b.1.abs_diff(value);
+            da.cmp(&db)
+        })?;
         return Some(*nearest);
     }
     None
@@ -1096,27 +1088,25 @@ pub async fn access_middleware(
         _ => true,
     };
     let bearer = if should_check_key {
-        extract_bearer_token(request.headers())
-            .filter(|token| is_reasonable_token_len(token))
+        extract_bearer_token(request.headers()).filter(|token| is_reasonable_token_len(token))
     } else {
         None
     };
-    let key_info = if let (Some(token), Some(secret)) =
-        (bearer, state.config.api_key_secret.as_deref())
-    {
-        let hash = hash_api_key(secret, token);
-        if let Some(key) = state.api_key_cache.get(&hash).await {
-            Some(key)
-        } else {
-            let fetched = state.db.find_client_key_by_hash(&hash).await.ok().flatten();
-            if let Some(key) = fetched.as_ref() {
-                state.api_key_cache.insert(hash, key.clone()).await;
+    let key_info =
+        if let (Some(token), Some(secret)) = (bearer, state.config.api_key_secret.as_deref()) {
+            let hash = hash_api_key(secret, token);
+            if let Some(key) = state.api_key_cache.get(&hash).await {
+                Some(key)
+            } else {
+                let fetched = state.db.find_client_key_by_hash(&hash).await.ok().flatten();
+                if let Some(key) = fetched.as_ref() {
+                    state.api_key_cache.insert(hash, key.clone()).await;
+                }
+                fetched
             }
-            fetched
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     let identity = if let Some(key) = key_info.as_ref() {
         Some(AccessContext {
@@ -1282,10 +1272,7 @@ async fn ip_rule_for_ip(state: &AppState, ip: IpAddr) -> Option<String> {
     state.ip_rules.rule_for_ip(ip).await
 }
 
-pub(crate) fn client_ip(
-    request: &axum::http::Request<Body>,
-    state: &AppState,
-) -> Option<IpAddr> {
+pub(crate) fn client_ip(request: &axum::http::Request<Body>, state: &AppState) -> Option<IpAddr> {
     let peer_ip = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -1308,7 +1295,11 @@ pub(crate) fn client_ip(
     if forwarded.len() > MAX_FORWARDED_IPS {
         forwarded.truncate(MAX_FORWARDED_IPS);
     }
-    Some(select_client_ip(forwarded, &state.config.trusted_proxies, peer_ip))
+    Some(select_client_ip(
+        forwarded,
+        &state.config.trusted_proxies,
+        peer_ip,
+    ))
 }
 
 fn select_client_ip(mut forwarded: Vec<IpAddr>, trusted: &[IpNet], peer_ip: IpAddr) -> IpAddr {
@@ -1465,8 +1456,8 @@ mod tests {
 }
 
 fn hash_api_key(secret: &str, token: &str) -> String {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .expect("hmac can take key of any size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac can take key of any size");
     mac.update(token.as_bytes());
     let result = mac.finalize().into_bytes();
     hex::encode(result)
@@ -1540,7 +1531,6 @@ fn current_hour_bucket() -> i64 {
         .unwrap_or(0);
     (now / 3600 * 3600) as i64
 }
-
 
 #[derive(Debug)]
 pub struct ApiError {

@@ -268,7 +268,10 @@ impl CacheManager {
         }
         let now = Instant::now();
         {
-            let guard = self.size_cache.lock().unwrap_or_else(|err| err.into_inner());
+            let guard = self
+                .size_cache
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
             if let Some(updated) = guard.updated_at {
                 if now.duration_since(updated) < self.size_cache_ttl {
                     return Ok((guard.render_bytes, guard.asset_bytes));
@@ -277,7 +280,10 @@ impl CacheManager {
         }
         let render_bytes = self.scan_dir_size(&self.renders_dir).await?;
         let asset_bytes = self.scan_dir_size(&self.assets_dir).await?;
-        let mut guard = self.size_cache.lock().unwrap_or_else(|err| err.into_inner());
+        let mut guard = self
+            .size_cache
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
         guard.render_bytes = render_bytes;
         guard.asset_bytes = asset_bytes;
         guard.updated_at = Some(now);

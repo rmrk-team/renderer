@@ -1,6 +1,6 @@
 use crate::db::{Database, UsageBatchRow};
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -76,7 +76,10 @@ pub async fn run_usage_aggregator(
     }
 }
 
-async fn flush_usage(db: &Database, buffer: &mut HashMap<UsageKey, UsageTotals>) -> anyhow::Result<()> {
+async fn flush_usage(
+    db: &Database,
+    buffer: &mut HashMap<UsageKey, UsageTotals>,
+) -> anyhow::Result<()> {
     if buffer.is_empty() {
         return Ok(());
     }

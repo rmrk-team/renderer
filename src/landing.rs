@@ -1,10 +1,10 @@
 use crate::config::LandingConfig;
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, get_service};
-use axum::Router;
 use std::path::{Component, Path};
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -58,11 +58,7 @@ async fn default_landing() -> Html<&'static str> {
     Html(DEFAULT_LANDING_HTML)
 }
 
-async fn landing_allowlist(
-    request: Request<Body>,
-    next: Next,
-    strict_headers: bool,
-) -> Response {
+async fn landing_allowlist(request: Request<Body>, next: Next, strict_headers: bool) -> Response {
     let path = request.uri().path();
     if is_landing_asset_path(path) {
         let mut response = next.run(request).await;
@@ -81,10 +77,7 @@ pub fn is_landing_asset_path(path: &str) -> bool {
     if path == "/" {
         return true;
     }
-    if let Some(ext) = Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-    {
+    if let Some(ext) = Path::new(path).extension().and_then(|ext| ext.to_str()) {
         let ext = ext.to_ascii_lowercase();
         return ALLOWED_EXTENSIONS.iter().any(|allowed| *allowed == ext);
     }
@@ -134,7 +127,7 @@ fn apply_landing_headers(response: &mut Response, strict_headers: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::{to_bytes, Body};
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use tempfile::tempdir;
     use tower::ServiceExt;
@@ -165,7 +158,12 @@ mod tests {
 
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/app.js").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -173,7 +171,12 @@ mod tests {
         assert!(body.starts_with(b"console.log"));
 
         let response = app
-            .oneshot(Request::builder().uri("/secret.env").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/secret.env")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
@@ -194,7 +197,12 @@ mod tests {
 
         let response = app
             .clone()
-            .oneshot(Request::builder().uri("/../secret.env").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/../secret.env")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

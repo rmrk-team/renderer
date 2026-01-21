@@ -197,7 +197,8 @@ When deploying behind a reverse proxy (nginx/ALB/Cloudflare):
 - Avoid overly broad `TRUSTED_PROXY_CIDRS` like `0.0.0.0/0` unless you fully trust clients.
 - Configure the proxy to **overwrite** forwarded headers; the app selects the
   last untrusted IP in the chain (bounded to 20 entries).
-- If you have multiple proxies (e.g., Cloudflare → nginx), include **all** proxy CIDRs in `TRUSTED_PROXY_CIDRS` or client IP attribution will break.
+- If you have multiple proxies (e.g., Cloudflare → nginx), include **all** proxy
+  CIDRs in `TRUSTED_PROXY_CIDRS` or client IP attribution will break.
 
 #### Nginx legacy path shims (optional)
 

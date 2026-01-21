@@ -34,10 +34,9 @@ pub fn canonicalize_chain_unchecked(chain: &str) -> Result<String, CanonicalizeE
     Ok(normalized)
 }
 
-pub fn canonicalize_collection_address(
-    address: &str,
-) -> Result<String, CanonicalizeError> {
-    let addr = Address::from_str(address).map_err(|_| CanonicalizeError::InvalidCollectionAddress)?;
+pub fn canonicalize_collection_address(address: &str) -> Result<String, CanonicalizeError> {
+    let addr =
+        Address::from_str(address).map_err(|_| CanonicalizeError::InvalidCollectionAddress)?;
     Ok(format!("{:#x}", addr))
 }
 

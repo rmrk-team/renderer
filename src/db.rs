@@ -3,8 +3,8 @@ use crate::config::AdminCollectionInput;
 use crate::config::Config;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
@@ -256,10 +256,11 @@ impl Database {
             sqlx::query("ALTER TABLE collection_config ADD COLUMN last_approval_sync_at INTEGER")
                 .execute(&self.pool)
                 .await;
-        let _ =
-            sqlx::query("ALTER TABLE collection_config ADD COLUMN last_approval_sync_block INTEGER")
-                .execute(&self.pool)
-                .await;
+        let _ = sqlx::query(
+            "ALTER TABLE collection_config ADD COLUMN last_approval_sync_block INTEGER",
+        )
+        .execute(&self.pool)
+        .await;
         let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN cache_epoch INTEGER")
             .execute(&self.pool)
             .await;
@@ -411,14 +412,15 @@ impl Database {
                 }
             };
             let collection_raw: String = row.get("collection_address");
-            let collection_address =
-                match canonical::canonicalize_collection_address(&collection_raw) {
-                    Ok(address) => address,
-                    Err(err) => {
-                        warn!(error = ?err, address = %collection_raw, "invalid collection address in collection_config");
-                        continue;
-                    }
-                };
+            let collection_address = match canonical::canonicalize_collection_address(
+                &collection_raw,
+            ) {
+                Ok(address) => address,
+                Err(err) => {
+                    warn!(error = ?err, address = %collection_raw, "invalid collection address in collection_config");
+                    continue;
+                }
+            };
             let data = RowData {
                 id: row.get("id"),
                 chain: chain_raw,
@@ -483,15 +485,13 @@ impl Database {
                 if merged.approval_source.is_none() {
                     merged.approval_source = row.approval_source.clone();
                 }
-                merged.last_approval_sync_at = match (
-                    merged.last_approval_sync_at,
-                    row.last_approval_sync_at,
-                ) {
-                    (Some(a), Some(b)) => Some(a.max(b)),
-                    (None, Some(b)) => Some(b),
-                    (Some(a), None) => Some(a),
-                    _ => None,
-                };
+                merged.last_approval_sync_at =
+                    match (merged.last_approval_sync_at, row.last_approval_sync_at) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        (None, Some(b)) => Some(b),
+                        (Some(a), None) => Some(a),
+                        _ => None,
+                    };
                 merged.last_approval_sync_block = match (
                     merged.last_approval_sync_block,
                     row.last_approval_sync_block,
@@ -519,8 +519,10 @@ impl Database {
                 }
                 merged.canvas_width = merged.canvas_width.or(row.canvas_width);
                 merged.canvas_height = merged.canvas_height.or(row.canvas_height);
-                merged.canvas_fingerprint =
-                    merged.canvas_fingerprint.clone().or_else(|| row.canvas_fingerprint.clone());
+                merged.canvas_fingerprint = merged
+                    .canvas_fingerprint
+                    .clone()
+                    .or_else(|| row.canvas_fingerprint.clone());
                 if merged.og_focal_point == 25 && row.og_focal_point != 25 {
                     merged.og_focal_point = row.og_focal_point;
                 }
@@ -678,7 +680,10 @@ impl Database {
                 priority: row.get("priority"),
                 enabled: row.get::<i64, _>("enabled") == 1,
             };
-            grouped.entry((data.chain.clone(), url)).or_default().push(data);
+            grouped
+                .entry((data.chain.clone(), url))
+                .or_default()
+                .push(data);
         }
 
         let mut tx = self.pool.begin().await?;
@@ -735,9 +740,15 @@ impl Database {
             }
         }
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM approval_state").execute(&mut *tx).await?;
+        sqlx::query("DELETE FROM approval_state")
+            .execute(&mut *tx)
+            .await?;
         for (chain, last_block) in grouped {
-            let value = if last_block == i64::MIN { None } else { Some(last_block) };
+            let value = if last_block == i64::MIN {
+                None
+            } else {
+                Some(last_block)
+            };
             sqlx::query("INSERT INTO approval_state (chain, last_block) VALUES (?1, ?2)")
                 .bind(&chain)
                 .bind(value)
@@ -1802,7 +1813,10 @@ mod tests {
         db.set_setting("require_approval", Some("true"))
             .await
             .unwrap();
-        assert_eq!(db.get_setting_bool("require_approval").await.unwrap(), Some(true));
+        assert_eq!(
+            db.get_setting_bool("require_approval").await.unwrap(),
+            Some(true)
+        );
 
         db.set_setting("require_approval", None).await.unwrap();
         assert_eq!(db.get_setting_bool("require_approval").await.unwrap(), None);

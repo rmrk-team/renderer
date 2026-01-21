@@ -1,8 +1,8 @@
 use crate::canonical;
 use crate::db::WarmupJob;
-use crate::render::{render_token, OutputFormat, RenderRequest};
+use crate::render::{OutputFormat, RenderRequest, render_token};
 use crate::state::AppState;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -53,9 +53,7 @@ pub async fn enqueue_warmup(state: Arc<AppState>, request: WarmupRequest) -> Res
     } else {
         Some(widths.join(","))
     };
-    let include_og = request
-        .include_og
-        .unwrap_or(state.config.warmup_include_og);
+    let include_og = request.include_og.unwrap_or(state.config.warmup_include_og);
     let cache_timestamp = request.cache_timestamp.clone();
 
     let jobs = token_ids
@@ -113,12 +111,21 @@ pub async fn spawn_worker(state: Arc<AppState>) {
         let result = if timeout == 0 {
             run_job(state.clone(), job.clone()).await
         } else {
-            match tokio::time::timeout(Duration::from_secs(timeout), run_job(state.clone(), job.clone())).await {
+            match tokio::time::timeout(
+                Duration::from_secs(timeout),
+                run_job(state.clone(), job.clone()),
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => {
                     let _ = state
                         .db
-                        .update_warmup_job_status(job.id, "failed", Some("warmup timeout".to_string()))
+                        .update_warmup_job_status(
+                            job.id,
+                            "failed",
+                            Some("warmup timeout".to_string()),
+                        )
                         .await;
                     continue;
                 }
@@ -162,7 +169,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
         None => {
             return Err(anyhow!(
                 "cache_timestamp required for warmup renders (or set DEFAULT_CACHE_TIMESTAMP)"
-            ))
+            ));
         }
     };
     let widths = parse_widths(job.widths.as_deref(), &state);
@@ -283,10 +290,12 @@ async fn resolve_tokens(state: Arc<AppState>, request: &WarmupRequest) -> Result
             .token_ids
             .clone()
             .ok_or_else(|| anyhow!("token_ids required for list strategy")),
-        "erc721_enumerable" => state
-            .chain
-            .erc721_token_ids_enumerable(&request.chain, &request.collection)
-            .await,
+        "erc721_enumerable" => {
+            state
+                .chain
+                .erc721_token_ids_enumerable(&request.chain, &request.collection)
+                .await
+        }
         "transfer_log" => {
             let from_block = request
                 .from_block
@@ -308,13 +317,14 @@ async fn resolve_tokens(state: Arc<AppState>, request: &WarmupRequest) -> Result
             let start = request
                 .range_start
                 .ok_or_else(|| anyhow!("range_start required"))?;
-            let end = request.range_end.ok_or_else(|| anyhow!("range_end required"))?;
+            let end = request
+                .range_end
+                .ok_or_else(|| anyhow!("range_end required"))?;
             if end < start {
                 return Err(anyhow!("range_end must be >= range_start"));
             }
             let count = end.saturating_sub(start).saturating_add(1);
-            if state.config.warmup_max_tokens > 0
-                && count as usize > state.config.warmup_max_tokens
+            if state.config.warmup_max_tokens > 0 && count as usize > state.config.warmup_max_tokens
             {
                 return Err(anyhow!(
                     "sequential range exceeds warmup token limit ({} > {})",
@@ -360,7 +370,9 @@ async fn resolve_tokens(state: Arc<AppState>, request: &WarmupRequest) -> Result
                 let start = request
                     .range_start
                     .ok_or_else(|| anyhow!("range_start required"))?;
-                let end = request.range_end.ok_or_else(|| anyhow!("range_end required"))?;
+                let end = request
+                    .range_end
+                    .ok_or_else(|| anyhow!("range_end required"))?;
                 return Ok((start..=end).map(|id| id.to_string()).collect());
             }
             Err(anyhow!("no viable warmup strategy"))
@@ -408,5 +420,4 @@ mod tests {
         assert!(deduped.contains(&"1".to_string()));
         assert!(deduped.contains(&"2".to_string()));
     }
-
 }
