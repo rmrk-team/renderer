@@ -195,7 +195,8 @@ When deploying behind a reverse proxy (nginx/ALB/Cloudflare):
 - Keep `RATE_LIMIT_PER_MINUTE` / `AUTH_FAILURE_RATE_LIMIT_PER_MINUTE` enabled at the proxy and app.
 - Terminate TLS at the proxy, and forward `X-Forwarded-For` / `Forwarded`.
 - Avoid overly broad `TRUSTED_PROXY_CIDRS` like `0.0.0.0/0` unless you fully trust clients.
-- Configure the proxy to **overwrite** forwarded headers; the app selects the last untrusted IP in the chain (bounded to 20 entries).
+- Configure the proxy to **overwrite** forwarded headers; the app selects the
+  last untrusted IP in the chain (bounded to 20 entries).
 - If you have multiple proxies (e.g., Cloudflare → nginx), include **all** proxy CIDRs in `TRUSTED_PROXY_CIDRS` or client IP attribution will break.
 
 #### Nginx legacy path shims (optional)
