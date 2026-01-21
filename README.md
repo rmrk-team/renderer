@@ -200,6 +200,112 @@ When deploying behind a reverse proxy (nginx/ALB/Cloudflare):
 - If you have multiple proxies (e.g., Cloudflare → nginx), include **all** proxy
   CIDRs in `TRUSTED_PROXY_CIDRS` or client IP attribution will break.
 
+#### Nginx HTTPS (certbot quickstart)
+
+Put the config in `/etc/nginx/sites-available/renderer.rmrk.app`, then enable it:
+
+```sh
+sudo ln -s /etc/nginx/sites-available/renderer.rmrk.app \
+  /etc/nginx/sites-enabled/renderer.rmrk.app
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Start with HTTP only so certbot can validate the domain:
+
+```nginx
+upstream renderer {
+    server 127.0.0.1:8080;
+}
+
+server {
+    listen 80;
+    server_name renderer.rmrk.app;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://renderer;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Then issue the cert (ensure port 80 is open in your firewall/security group):
+
+```sh
+sudo mkdir -p /var/www/certbot/.well-known/acme-challenge
+sudo certbot certonly --webroot -w /var/www/certbot -d renderer.rmrk.app
+```
+
+After the cert exists, add HTTPS and redirect HTTP:
+
+```nginx
+server {
+    listen 80;
+    server_name renderer.rmrk.app;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name renderer.rmrk.app;
+
+    ssl_certificate /etc/letsencrypt/live/renderer.rmrk.app/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/renderer.rmrk.app/privkey.pem;
+
+    client_max_body_size 2m;
+
+    # Legacy: /nft/{chainId}/{collection}/{tokenId}?extension=png&img-width=600
+    location ~ ^/nft/(?<chain_id>[^/]+)/(?<collection>0x[0-9A-Fa-f]+)/(?<token_id>[0-9]+)$ {
+        set $chain $chain_id;
+        if ($chain_id = "8453") { set $chain "base"; }
+
+        set $format $arg_extension;
+        if ($format = "") { set $format "png"; }
+
+        rewrite ^ /render/$chain/$collection/$token_id/$format break;
+        proxy_pass http://renderer;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location / {
+        proxy_pass http://renderer;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 10s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+}
+```
+
+If `nginx -t` reports `no "ssl_certificate" is defined`, remove `ssl` from the
+`listen 443 ssl` line until certbot has created the cert, then re-enable HTTPS.
+
 #### Nginx legacy path shims (optional)
 
 If you are replacing legacy domains such as `composable.rmrk.link` and
@@ -227,14 +333,16 @@ server {
         rewrite ^ /render/$chain/$collection/$token_id/$format break;
         proxy_pass http://renderer;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location / {
         proxy_pass http://renderer;
         proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
@@ -465,14 +573,50 @@ After=network.target
 [Service]
 Type=simple
 User=renderer
-WorkingDirectory=/opt/proj-renderer
-EnvironmentFile=/etc/renderer.env
-ExecStart=/opt/proj-renderer/target/release/proj-renderer
-Restart=always
-RestartSec=5
+Group=renderer
+WorkingDirectory=/opt/renderer
+EnvironmentFile=/opt/renderer/.env
+ExecStart=/opt/renderer/renderer
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
+```
+
+Replace `renderer` with your service user (e.g. `bitfalls`) and adjust paths to match your install.
+
+After creating or updating the unit and env file:
+
+```sh
+sudo mkdir -p /var/lib/renderer /var/cache/renderer
+sudo chown -R renderer:renderer /var/lib/renderer /var/cache/renderer
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now renderer
+sudo systemctl status renderer
+```
+
+If you update `/opt/renderer/.env` or swap the binary, restart the service:
+
+```sh
+sudo systemctl restart renderer
+sudo journalctl -u renderer -f
+```
+
+Then validate and reload nginx (renderer first, nginx second):
+
+```sh
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Quick sanity checks:
+
+```sh
+curl -I http://127.0.0.1:8080/
+# If you expose it: curl -I http://127.0.0.1:8080/status
 ```
 
 ### Run (locally)
