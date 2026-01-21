@@ -1,7 +1,7 @@
 # RMRK Renderer (proj-renderer)
 
 Standalone Rust service that renders RMRK equippable NFTs into flat images.
-SVG-first rendering, deterministic caching, and a minimal admin API.
+SVG-first rendering, deterministic caching, and a minimal admin panel and API.
 
 ## Features
 
@@ -21,7 +21,6 @@ cargo build --release
 
 export ADMIN_PASSWORD="change-me"
 export RPC_ENDPOINTS='{"base":["https://mainnet.base.org"]}'
-export RENDER_UTILS_ADDRESSES='{"base":"0xYourRMRKEquipRenderUtils"}'
 
 ./target/release/proj-renderer
 ```
@@ -36,84 +35,7 @@ curl http://localhost:8080/healthz
 
 ## Configuration
 
-All configuration is done via environment variables.
-
-### Required
-
-```env
-ADMIN_PASSWORD=your-secure-password
-RPC_ENDPOINTS={"base":["https://mainnet.base.org"]}
-RENDER_UTILS_ADDRESSES={"base":"0x..."}
-```
-
-### Optional (common)
-
-```env
-HOST=0.0.0.0
-PORT=8080
-DB_PATH=/var/lib/renderer/renderer.db
-CACHE_DIR=/var/cache/renderer
-CACHE_MAX_SIZE_GB=50
-RENDER_CACHE_MIN_TTL_DAYS=7
-ASSET_CACHE_MIN_TTL_DAYS=30
-CACHE_EVICT_INTERVAL_SECONDS=3600
-CACHE_SIZE_REFRESH_SECONDS=60
-MAX_CONCURRENT_RENDERS=4
-MAX_CONCURRENT_IPFS_FETCHES=16
-MAX_CONCURRENT_RPC_CALLS=16
-MAX_IN_FLIGHT_REQUESTS=512
-MAX_ADMIN_BODY_BYTES=1048576
-RATE_LIMIT_PER_MINUTE=0
-RATE_LIMIT_BURST=0
-ACCESS_MODE=open
-API_KEY_SECRET=change-me
-KEY_RATE_LIMIT_PER_MINUTE=0
-KEY_RATE_LIMIT_BURST=0
-AUTH_FAILURE_RATE_LIMIT_PER_MINUTE=0
-AUTH_FAILURE_RATE_LIMIT_BURST=0
-TRACK_KEYS_IN_OPEN_MODE=false
-USAGE_RETENTION_DAYS=30
-RENDER_QUEUE_CAPACITY=256
-RENDER_LAYER_CONCURRENCY=8
-COMPOSITE_CACHE_ENABLED=true
-PRIMARY_ASSET_CACHE_TTL_SECONDS=60
-PRIMARY_ASSET_NEGATIVE_TTL_SECONDS=15
-PRIMARY_ASSET_CACHE_CAPACITY=10000
-OUTBOUND_CLIENT_CACHE_TTL_SECONDS=900
-OUTBOUND_CLIENT_CACHE_CAPACITY=256
-RPC_TIMEOUT_SECONDS=30
-RPC_CONNECT_TIMEOUT_SECONDS=5
-DEFAULT_CANVAS_WIDTH=1080
-DEFAULT_CANVAS_HEIGHT=1512
-DEFAULT_CACHE_TIMESTAMP=0
-DEFAULT_CACHE_TTL_SECONDS=604800
-CHILD_LAYER_MODE=above_slot
-RASTER_MISMATCH_FIXED=top_left_no_scale
-RASTER_MISMATCH_CHILD=top_left_no_scale
-COLLECTION_RENDER_OVERRIDES={}
-ALLOW_HTTP=false
-ALLOW_PRIVATE_NETWORKS=false
-LANDING_PUBLIC=false
-STATUS_PUBLIC=false
-```
-
-### IPFS / metadata limits
-
-```env
-IPFS_GATEWAYS=["https://rmrk.myfilebase.com/ipfs/","https://cloudflare-ipfs.com/ipfs/","https://ipfs.io/ipfs/"]
-IPFS_TIMEOUT_SECONDS=30
-MAX_METADATA_JSON_BYTES=524288
-MAX_SVG_BYTES=2097152
-MAX_SVG_NODE_COUNT=200000
-MAX_RASTER_BYTES=10485760
-MAX_LAYERS_PER_RENDER=200
-MAX_CANVAS_PIXELS=16000000
-MAX_TOTAL_RASTER_PIXELS=64000000
-MAX_DECODED_RASTER_PIXELS=16000000
-MAX_CACHE_VARIANTS_PER_KEY=5
-MAX_OVERLAY_LENGTH=64
-MAX_BG_LENGTH=64
-```
+All configuration is done via environment variables. See env.example for possibilities.
 
 Note: outbound HTTP(S) fetches block private/loopback/link-local hosts and do not
 follow redirects by default. Use `ALLOW_PRIVATE_NETWORKS=true` only in trusted
@@ -175,18 +97,12 @@ IP rule precedence: longest CIDR prefix wins; on ties, `deny` beats `allow`.
 
 ### Hosted approvals (optional)
 
-```env
+```sh
 REQUIRE_APPROVAL=true
 APPROVALS_CONTRACTS={"base":"0xYourRendererApprovalsContract"}
 APPROVALS_CONTRACT_CHAIN=base
 CHAIN_ID_MAP={"1":"ethereum","56":"bsc","137":"polygon","8453":"base","84532":"base-sepolia","1284":"moonbeam","1285":"moonriver","1287":"moonbase-alpha","31337":"hardhat"}
-APPROVAL_START_BLOCKS={"base":123456}
-APPROVAL_POLL_INTERVAL_SECONDS=30
-APPROVAL_CONFIRMATIONS=6
-APPROVAL_SYNC_INTERVAL_SECONDS=900
-APPROVAL_NEGATIVE_CACHE_CAPACITY=10000
-APPROVAL_ENUMERATION_ENABLED=true
-MAX_APPROVAL_STALENESS_SECONDS=0
+# See approval section in env.example for more
 ```
 
 Set `APPROVAL_POLL_INTERVAL_SECONDS=0` to disable approval watchers.
@@ -197,29 +113,6 @@ or strict rate limits to prevent on-demand approval checks from becoming an RPC
 cost/availability lever.
 Include a chain ID entry for every chain you enable.
 
-### Renderer approvals contract deployment (Base)
-
-The Foundry subproject lives at `proj-renderer/renderer-contracts` and contains
-`RendererApprovalsV2` (the on-chain approval policy).
-
-```bash
-cd proj-renderer/renderer-contracts
-
-export BASE_RPC_URL=https://mainnet.base.org
-export PRIVATE_KEY=<deployer_private_key>
-export APPROVALS_TOKEN=<erc20_fee_token>
-export APPROVALS_TREASURY=<treasury_address>
-export APPROVALS_FEE=<fee_in_smallest_unit>
-export ETHERSCAN_API_KEY=<basescan_api_key>
-
-forge script script/DeployRendererApprovals.s.sol:DeployRendererApprovals \
-  --rpc-url "$BASE_RPC_URL" \
-  --broadcast \
-  --verify \
-  --etherscan-api-key "$ETHERSCAN_API_KEY" \
-  --retries 10 \
-  --delay 15
-```
 Set `MAX_APPROVAL_STALENESS_SECONDS` to force an on-demand recheck when approval
 sync is older than the configured window (0 disables the guardrail).
 
@@ -269,21 +162,29 @@ When enabled, the service will serve `LANDING` at `/` and static assets from
 `LANDING_DIR`. Render routes still take priority.
 
 `LANDING` must be an `.html` file and this feature is disabled on Windows builds.
+
 Set `LANDING_PUBLIC=true` to allow the landing page and its static assets to be
 served without access gating (render routes remain protected).
+
 `LANDING_STRICT_HEADERS=true` adds CSP, `X-Frame-Options`, and `Referrer-Policy`;
 disable it if your landing needs embedding or external assets.
+
 If the landing file is missing, the renderer serves a built-in minimal template
 with canonical, primary, and HEAD examples.
+
 Landing serves only allowlisted extensions and does not expose directory indexes.
+
 Do not place secrets or sensitive files under `LANDING_DIR`; any allowlisted file
 extension can be served if requested.
+
 Landing does not provide SPA-style fallbacks for deep links (e.g., `/docs` will not map to `index.html`).
 For best UX, include copy-paste examples for the canonical vs primary route and
 note that the primary route is slower (RPC lookup) while canonical is cache-first.
+
 Set `STATUS_PUBLIC=true` to expose `/status` and `/status.json` for a lightweight
 status widget (cache size, warmup queue, approvals, access mode). Avoid polling
 these endpoints at high frequency.
+
 Set `OPENAPI_PUBLIC=true` to expose `/openapi.yaml` without access gating.
 
 ### Reverse proxy deployment
@@ -594,7 +495,6 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - PNG/JPG layers that do not match the canonical canvas size are treated as nonconforming.
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
-- The OpenAPI spec is served at `/openapi.yaml`; set `OPENAPI_PUBLIC=false` to gate it.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.
 
 ### Deployment profiles
