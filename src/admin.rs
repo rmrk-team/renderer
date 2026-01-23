@@ -603,7 +603,7 @@ async fn list_usage(
     State(state): State<Arc<AppState>>,
     Query(query): Query<UsageQuery>,
 ) -> Result<Json<Vec<UsageRow>>, AdminError> {
-    let hours = query.hours.unwrap_or(24).max(1).min(168);
+    let hours = query.hours.unwrap_or(24).clamp(1, 168);
     let usage = state.db.list_usage(hours).await?;
     Ok(Json(usage))
 }

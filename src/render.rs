@@ -265,19 +265,18 @@ pub async fn render_token_with_limit(
                     respond_to: tx,
                 };
                 crate::render_queue::try_enqueue(queue, job)?;
-                return Ok(rx.await??);
+                return rx.await?;
             }
             let state = state.clone();
             let request = request.clone();
             let variant_key = variant_key.clone();
-            let key_limit = key_limit;
             let handle = tokio::spawn(async move {
                 let _singleflight = permit;
                 let _key_permit = acquire_key_permit(&state, key_limit).await?;
                 let _permit = state.render_semaphore.acquire().await?;
                 render_token_uncached(&state, &request, width, &variant_key).await
             });
-            return Ok(handle.await??);
+            return handle.await?;
         }
         let _key_permit = acquire_key_permit(&state, key_limit).await?;
         let _permit = state.render_semaphore.acquire().await?;
@@ -721,7 +720,7 @@ pub(crate) async fn render_token_uncached(
             }
         }
         if canvas.is_none() {
-            let background = resolve_background(&request.background, request.format.clone());
+            let background = resolve_background(&request.background, request.format);
             let mut results: Vec<Option<Result<Option<LayerImage>>>> =
                 Vec::with_capacity(layers.len());
             results.resize_with(layers.len(), || None);
@@ -741,8 +740,6 @@ pub(crate) async fn render_token_uncached(
                 let raster_child = render_policy.raster_mismatch_child;
                 let theme_replace = theme_replace.clone();
                 let theme_source_cache = theme_source_cache.clone();
-                let prefer_thumb = prefer_thumb;
-                let allow_thumb_fallback = allow_thumb_fallback;
                 join_set.spawn(async move {
                     let _permit = permit;
                     let result = load_layer(
@@ -827,7 +824,7 @@ pub(crate) async fn render_token_uncached(
             let mut base = RgbaImage::from_pixel(
                 canvas_width,
                 canvas_height,
-                background.unwrap_or_else(|| Rgba([0, 0, 0, 0])),
+                background.unwrap_or(Rgba([0, 0, 0, 0])),
             );
             for layer in layers_to_composite {
                 image::imageops::overlay(&mut base, &layer.image, layer.offset_x, layer.offset_y);
@@ -839,7 +836,7 @@ pub(crate) async fn render_token_uncached(
     let canvas = canvas.ok_or_else(|| anyhow!("missing composite canvas"))?;
     let og_mode = request.og_mode;
     let focal_point = collection_config.og_focal_point;
-    let output_format = request.format.clone();
+    let output_format = request.format;
     let should_store_composite =
         !composite_from_cache && composite_key.is_some() && missing_layers == 0;
     let (bytes, composite_bytes) =
@@ -970,8 +967,7 @@ fn build_layers(compose: &ComposeResult, child_layer_mode: ChildLayerMode) -> Ve
 fn is_non_composable_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
-        message.contains(NON_COMPOSABLE_ASSET_REVERT)
-            || message.contains("RMRKNotComposableAsset")
+        message.contains(NON_COMPOSABLE_ASSET_REVERT) || message.contains("RMRKNotComposableAsset")
     })
 }
 
@@ -1382,12 +1378,8 @@ fn find_case_insensitive(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.len() > haystack.len() {
         return None;
     }
-    for index in 0..=haystack.len() - needle.len() {
-        if haystack[index..index + needle.len()].eq_ignore_ascii_case(needle) {
-            return Some(index);
-        }
-    }
-    None
+    (0..=haystack.len() - needle.len())
+        .find(|&index| haystack[index..index + needle.len()].eq_ignore_ascii_case(needle))
 }
 
 fn extract_svg_data_theme_color(svg_bytes: &[u8], idx: usize) -> Option<String> {
@@ -1523,6 +1515,7 @@ fn replace_case_insensitive_bytes(
     (out, replaced)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn compute_render_cache_key_for_layers(
     state: &AppState,
     request: &RenderRequest,
@@ -1798,8 +1791,10 @@ async fn ensure_canvas_size(
         }
         Err(err) => {
             if allow_thumb_fallback && !prefer_thumb && is_asset_too_large_error(&err) {
-                if let Ok(Some(thumb)) =
-                    state.assets.resolve_metadata(&first.metadata_uri, true).await
+                if let Ok(Some(thumb)) = state
+                    .assets
+                    .resolve_metadata(&first.metadata_uri, true)
+                    .await
                 {
                     if thumb.art_uri != art_uri {
                         debug!(
@@ -1814,8 +1809,7 @@ async fn ensure_canvas_size(
                             let default_height = state.config.default_canvas_height;
                             let max_svg_bytes = state.config.max_svg_bytes;
                             let max_svg_nodes = state.config.max_svg_node_count;
-                            let max_decoded_raster_pixels =
-                                state.config.max_decoded_raster_pixels;
+                            let max_decoded_raster_pixels = state.config.max_decoded_raster_pixels;
                             let max_raster_bytes = state.config.max_raster_bytes;
                             match task::spawn_blocking(move || {
                                 derive_canvas_from_asset(
@@ -1985,6 +1979,7 @@ fn derive_canvas_from_asset(
     Ok((default_width, default_height, true))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn load_layer(
     assets: &AssetResolver,
     layer: &Layer,
@@ -2033,7 +2028,10 @@ async fn load_layer(
         )?;
         return Ok(Some(layer_image));
     }
-    let asset = match assets.resolve_metadata(&layer.metadata_uri, prefer_thumb).await {
+    let asset = match assets
+        .resolve_metadata(&layer.metadata_uri, prefer_thumb)
+        .await
+    {
         Ok(Some(mut resolved)) => {
             debug!(
                 metadata_uri = %layer.metadata_uri,
@@ -2044,10 +2042,7 @@ async fn load_layer(
             match assets.fetch_asset(&resolved.art_uri).await {
                 Ok(asset) => asset,
                 Err(err) => {
-                    if allow_thumb_fallback
-                        && !prefer_thumb
-                        && is_asset_too_large_error(&err)
-                    {
+                    if allow_thumb_fallback && !prefer_thumb && is_asset_too_large_error(&err) {
                         if let Ok(Some(thumb)) =
                             assets.resolve_metadata(&layer.metadata_uri, true).await
                         {
@@ -2129,6 +2124,7 @@ async fn load_layer(
     Ok(Some(layer_image))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn rasterize_bytes(
     bytes: &[u8],
     canvas_width: u32,
@@ -2473,7 +2469,7 @@ pub(crate) fn build_variant_key(base_key: &str, request: &RenderRequest) -> Stri
         key.push_str("_ov-");
         key.push_str(overlay);
     }
-    if let Some(bg) = normalize_background_for_key(&request.background, request.format.clone()) {
+    if let Some(bg) = normalize_background_for_key(&request.background, request.format) {
         key.push_str("_bg-");
         key.push_str(&sanitize_key(&bg));
     }
@@ -2588,6 +2584,7 @@ fn composite_cache_key_hash(
     Ok(sha256_hex(&hash_input))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_cache_key(
     cache: &CacheManager,
     chain: &str,
@@ -3177,14 +3174,7 @@ mod tests {
             .context("assets")?;
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-            None,
+            config, db, cache, assets, chain, None, None, None,
         ));
 
         let collection = "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004".to_string();

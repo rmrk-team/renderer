@@ -1858,7 +1858,7 @@ mod tests {
         let now = now_epoch();
         let current_hour = now / 3600 * 3600;
         let old_hour = current_hour - 48 * 3600;
-        let recent_hour = current_hour - 1 * 3600;
+        let recent_hour = current_hour - 3600;
 
         let rows = vec![
             UsageBatchRow {

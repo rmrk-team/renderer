@@ -184,7 +184,7 @@ impl KeyRateLimiter {
         bucket.tokens = (bucket.tokens + elapsed * bucket.rate_per_second).min(bucket.burst);
         bucket.last_refill = now;
         bucket.last_seen = now;
-        let limit = burst.max(1) as u64;
+        let limit = burst.max(1);
         if bucket.tokens >= 1.0 {
             bucket.tokens -= 1.0;
             let remaining = bucket.tokens.floor().max(0.0) as u64;

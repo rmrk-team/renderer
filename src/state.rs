@@ -3,10 +3,10 @@ use crate::cache::{CacheManager, RenderCacheLimiter, RenderSingleflight};
 use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
+use crate::failure_log::FailureLog;
 use crate::rate_limit::{KeyRateLimiter, RateLimiter};
 use crate::render_queue::RenderJob;
 use crate::usage::UsageEvent;
-use crate::failure_log::FailureLog;
 use anyhow::Result;
 use ipnet::IpNet;
 use std::collections::{HashMap, VecDeque};
@@ -48,6 +48,7 @@ pub struct AppState {
 }
 
 impl AppState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Config,
         db: Database,
@@ -943,10 +944,10 @@ fn parse_ip_rule(rule: &IpRule) -> Option<IpRuleEntry> {
         return None;
     };
     let is_deny = rule.mode == "deny";
-    return Some(IpRuleEntry {
+    Some(IpRuleEntry {
         mode: rule.mode.clone(),
         prefix_len: net.prefix_len(),
         net,
         is_deny,
-    });
+    })
 }

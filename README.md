@@ -591,10 +591,13 @@ cargo test
 
 ### CI suggestions
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test`
-- `cargo audit`
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
+cargo audit
+```
+
 - Optional: `cargo deny check`
 
 ### Run (systemd example)

@@ -1,8 +1,8 @@
 use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::config::{AccessMode, Config};
-use crate::landing;
 use crate::failure_log::FailureLogEntry;
+use crate::landing;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError, RenderRequest,
@@ -136,21 +136,21 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
         .db
         .warmup_stats()
         .await
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let approvals_required = render::require_approval(&state)
         .await
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let (render_bytes, asset_bytes) = state
         .cache
         .cached_sizes()
         .await
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let usage_summary = if state.config.usage_tracking_enabled {
         let rows = state
             .db
             .list_usage(1)
             .await
-            .map_err(|err| map_render_error(err.into()))?;
+            .map_err(map_render_error_anyhow)?;
         let mut requests = 0i64;
         let mut cache_hits = 0i64;
         let mut cache_misses = 0i64;
@@ -227,7 +227,7 @@ async fn render_canonical(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
@@ -238,7 +238,7 @@ async fn render_canonical(
         collection,
         token_id,
         asset_id,
-        format: format.clone(),
+        format,
         cache_timestamp,
         cache_param_present,
         width_param,
@@ -275,7 +275,7 @@ async fn render_og(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
@@ -286,7 +286,7 @@ async fn render_og(
         collection,
         token_id,
         asset_id,
-        format: format.clone(),
+        format,
         cache_timestamp,
         cache_param_present,
         width_param,
@@ -324,7 +324,7 @@ async fn render_legacy(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
@@ -333,7 +333,7 @@ async fn render_legacy(
         collection,
         token_id,
         asset_id,
-        format: format.clone(),
+        format,
         cache_timestamp: Some(cache_timestamp),
         cache_param_present: true,
         width_param,
@@ -367,12 +367,12 @@ async fn render_primary(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, None)
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let cache_timestamp =
         render::resolve_cache_timestamp(&state, &chain, &collection, query.cache.clone())
             .await
-            .map_err(|err| map_render_error(err.into()))?;
+            .map_err(map_render_error_anyhow)?;
     let cache_stamp = cache_timestamp
         .clone()
         .unwrap_or_else(|| "none".to_string());
@@ -716,7 +716,7 @@ async fn head_cached_response(
         &request.token_id,
         Some(&request.asset_id),
     )
-    .map_err(|err| map_render_error(err.into()))?;
+    .map_err(map_render_error_anyhow)?;
     let (chain, collection) =
         canonicalize_chain_collection(&state, &request.chain, &request.collection)?;
     let mut request = request;
@@ -724,22 +724,22 @@ async fn head_cached_response(
     request.collection = collection;
     render::apply_cache_epoch(&state, &mut request)
         .await
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     render::validate_query_lengths(
         &request,
         state.config.max_overlay_length,
         state.config.max_background_length,
     )
-    .map_err(|err| map_render_error(err.into()))?;
+    .map_err(map_render_error_anyhow)?;
     render::ensure_collection_approved(&state, &request.chain, &request.collection)
         .await
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let cache_ts = match request.cache_timestamp.as_ref() {
         Some(value) => value,
         None => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
     let (_, base_key) = render::resolve_width(&request.width_param, request.og_mode)
-        .map_err(|err| map_render_error(err.into()))?;
+        .map_err(map_render_error_anyhow)?;
     let variant_key = render::build_variant_key(&base_key, &request);
     let cache_key = render::render_cache_key(
         &state.cache,
@@ -751,12 +751,12 @@ async fn head_cached_response(
         &variant_key,
         request.format.extension(),
     )
-    .map_err(|err| map_render_error(err.into()))?;
+    .map_err(map_render_error_anyhow)?;
     let cached = state
         .cache
         .is_cached_file(&cache_key.path, state.cache.render_ttl)
         .await
-        .map_err(map_render_error)?;
+        .map_err(map_render_error_anyhow)?;
     if !cached {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
@@ -1023,6 +1023,7 @@ fn scale_placeholder_height(original_height: u32, original_width: u32, target_wi
     (original_height as f64 * ratio).round() as u32
 }
 
+#[allow(clippy::result_large_err)]
 fn canonicalize_chain_collection(
     state: &AppState,
     chain: &str,
@@ -1072,9 +1073,9 @@ pub async fn access_middleware(
         max_concurrent_renders_override: None,
     });
     let is_admin = path == "/admin" || path.starts_with("/admin/");
-    let is_public_landing = is_public_landing_path(&state, &path);
-    let is_public_status = is_public_status_path(&state, &path);
-    let is_public_openapi = is_public_openapi_path(&state, &path);
+    let is_public_landing = is_public_landing_path(&state, path);
+    let is_public_status = is_public_status_path(&state, path);
+    let is_public_openapi = is_public_openapi_path(&state, path);
 
     if let Some(ip) = ip {
         let info = apply_ip_rate_limit(&state, ip).await;
@@ -1331,9 +1332,7 @@ pub(crate) fn client_ip(request: &axum::http::Request<Body>, state: &AppState) -
     if state.config.trusted_proxies.is_empty() {
         return peer_ip;
     }
-    let Some(peer_ip) = peer_ip else {
-        return None;
-    };
+    let peer_ip = peer_ip?;
     let trusted = state
         .config
         .trusted_proxies
@@ -1441,6 +1440,7 @@ fn parse_ip_candidate(value: &str) -> Option<IpAddr> {
     None
 }
 
+#[allow(clippy::result_large_err)]
 fn split_dotted_segment(segment: &str) -> Result<(String, String), ApiError> {
     let (left, right) = segment
         .rsplit_once('.')
@@ -1490,7 +1490,7 @@ fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
 
 fn is_reasonable_token_len(token: &str) -> bool {
     let len = token.len();
-    len >= MIN_BEARER_TOKEN_LEN && len <= MAX_BEARER_TOKEN_LEN
+    (MIN_BEARER_TOKEN_LEN..=MAX_BEARER_TOKEN_LEN).contains(&len)
 }
 
 #[cfg(test)]
@@ -1715,7 +1715,9 @@ fn extract_error_message(body: &Value) -> Option<String> {
     let Value::Object(map) = body else {
         return None;
     };
-    map.get("error").and_then(|value| value.as_str()).map(|value| value.to_string())
+    map.get("error")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
 }
 
 fn sanitize_error_header(value: &str) -> String {
@@ -1725,6 +1727,10 @@ fn sanitize_error_header(value: &str) -> String {
         .collect();
     sanitized.truncate(200);
     sanitized
+}
+
+fn map_render_error_anyhow<E: Into<anyhow::Error>>(error: E) -> ApiError {
+    map_render_error(error.into())
 }
 
 fn map_render_error(error: anyhow::Error) -> ApiError {
@@ -1755,8 +1761,7 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
                     .with_log_detail(detail)
             }
             AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream => {
-                ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")
-                    .with_log_detail(detail)
+                ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed").with_log_detail(detail)
             }
         };
     }
@@ -1769,6 +1774,5 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
         return ApiError::forbidden("collection not approved").with_log_detail(detail);
     }
     tracing::warn!(error = ?error, "render failed");
-    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "render failed")
-        .with_log_detail(detail)
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "render failed").with_log_detail(detail)
 }

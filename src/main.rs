@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 mod admin;
 mod approvals;
 mod assets;
@@ -21,8 +23,8 @@ use crate::cache::CacheManager;
 use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::Database;
-use crate::state::AppState;
 use crate::failure_log::FailureLog;
+use crate::state::AppState;
 use axum::Router;
 use axum::body::HttpBody;
 use axum::http::{Response, header};
@@ -370,14 +372,7 @@ mod tests {
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-            None,
+            config, db, cache, assets, chain, None, None, None,
         ));
         let app = build_app(state);
         let response = app
@@ -400,14 +395,7 @@ mod tests {
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            None,
-            None,
-            None,
+            config, db, cache, assets, chain, None, None, None,
         ));
         let app = build_app(state);
         let response = app
