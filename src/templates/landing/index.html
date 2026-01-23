@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Renderer</title>
+    <meta
+      name="description"
+      content="Canonical renderer for cache-first NFT previews."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <div class="brand">Canonical Renderer</div>
+        <h1>Renderer</h1>
+        <p class="lead">
+          Use the canonical render path for cache-first performance.
+        </p>
+      </header>
+
+      <section class="block">
+        <h2>Canonical render</h2>
+        <pre>GET /render/{chain}/{collection}/{tokenId}/{assetId}/png?cache=1700000000000</pre>
+      </section>
+
+      <section class="block">
+        <h2>Primary render (redirects)</h2>
+        <pre>GET /render/{chain}/{collection}/{tokenId}/png?cache=1700000000000</pre>
+      </section>
+
+      <section class="block">
+        <h2>HEAD (cache probe)</h2>
+        <pre>HEAD /render/{chain}/{collection}/{tokenId}/{assetId}/png?cache=1700000000000</pre>
+        <p class="note">
+          <code>cache=</code> selects a specific cache epoch; omit it to use the
+          collection cache epoch or default.
+        </p>
+      </section>
+
+      <footer class="footer">
+        <span>(c) <span data-year></span> RMRK Labs.</span>
+        <span>Build your own template from <code>src/templates/landing</code>.</span>
+      </footer>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

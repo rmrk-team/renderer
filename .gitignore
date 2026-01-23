@@ -13,6 +13,10 @@
 .idea/
 .vscode/
 spec-docs/
+dist/
 
 cache/
 *.db*
+
+*.code-workspace
+node_modules/*

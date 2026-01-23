@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Renderer Approvals</title>
+    <meta
+      name="description"
+      content="Approvals registry and canonical renderer overview."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav">
+        <div class="logo">RMRK Canonical Renderer</div>
+        <div class="nav-links">
+          <a href="#what">What is this</a>
+          <a href="#how">How it works</a>
+          <a href="#approved">Approved collections</a>
+          <a href="#approve">Approve a collection</a>
+        </div>
+      </nav>
+
+      <div class="hero-body">
+        <div class="tagline">On-chain approvals for the canonical renderer</div>
+        <h1>Renderer Approvals</h1>
+        <p class="lead">
+          This landing page introduces the canonical renderer, explains how it
+          works end-to-end, and lets you approve collections directly on-chain.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="#approve">Approve a collection</a>
+          <a class="button ghost" href="#approved">Browse approved</a>
+        </div>
+        <div class="hero-meta">
+          <div>
+            <span class="meta-label">Approvals contract</span>
+            <span id="approval-contract-address" class="mono">Loading...</span>
+          </div>
+          <div>
+            <span class="meta-label">Contract chain</span>
+            <span id="approval-contract-chain">Loading...</span>
+          </div>
+          <div>
+            <span class="meta-label">Fee</span>
+            <span id="approval-fee">--</span>
+            <span id="approval-token" class="mono">TOKEN</span>
+          </div>
+        </div>
+        <div id="approval-status" class="status"></div>
+      </div>
+    </header>
+
+    <main>
+      <section id="what" class="section">
+        <h2>What is the canonical renderer?</h2>
+        <p>
+          The canonical renderer takes an on-chain NFT and deterministically
+          produces the final media output. Use it to power previews, marketplaces,
+          and composable UI that always stays in sync with the collection's
+          rendering rules.
+        </p>
+        <div class="grid two">
+          <div class="card">
+            <h3>Canonical render (cache-first)</h3>
+            <pre>
+GET /render/{chain}/{collection}/{tokenId}/{assetId}/{format}
+    ?cache=1700000000000
+            </pre>
+            <p class="muted">
+              Directly hits the renderer cache. Use it when you already know the
+              top asset ID.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Primary render (auto-redirect)</h3>
+            <pre>
+GET /render/{chain}/{collection}/{tokenId}/{format}
+    ?cache=1700000000000
+            </pre>
+            <p class="muted">
+              Resolves the top asset ID via RPC, then redirects to canonical.
+            </p>
+          </div>
+          <div class="card">
+            <h3>Cache probe (HEAD)</h3>
+            <pre>
+HEAD /render/{chain}/{collection}/{tokenId}/{assetId}/{format}
+    ?cache=1700000000000
+            </pre>
+            <p class="muted">
+              Fast cache availability checks; perfect for warmup pipelines.
+            </p>
+          </div>
+          <div class="card">
+            <h3>OpenGraph / social cards</h3>
+            <pre>
+GET /og/{chain}/{collection}/{tokenId}/{assetId}/{format}
+    ?width=1200&amp;ogImage=true
+            </pre>
+            <p class="muted">
+              Generates OG-friendly dimensions with optional overrides.
+            </p>
+          </div>
+        </div>
+        <div class="note">
+          <span class="mono">cache=</span> selects a specific cache epoch. Omit
+          it to use the collection cache epoch or the default timestamp. Use
+          <span class="mono">width</span> / <span class="mono">img-width</span> for
+          resized outputs and <span class="mono">onerror=placeholder</span> to
+          fall back gracefully.
+        </div>
+      </section>
+
+      <section id="how" class="section">
+        <h2>How it works (step by step)</h2>
+        <div class="grid three">
+          <div class="card">
+            <h3>1. Resolve chain + policy</h3>
+            <p class="muted">
+              Identify the chain, load the collection config, and enforce the
+              on-chain approvals policy if required.
+            </p>
+          </div>
+          <div class="card">
+            <h3>2. Load catalog + assets</h3>
+            <p class="muted">
+              Fetch catalog definitions, NFT metadata, and the full asset stack
+              (base layers, parts, equippables).
+            </p>
+          </div>
+          <div class="card">
+            <h3>3. Interpolate themes</h3>
+            <p class="muted">
+              Apply collection render policy, theme overrides, and child-layer
+              ordering to build the final render tree.
+            </p>
+          </div>
+          <div class="card">
+            <h3>4. Compose the frame</h3>
+            <p class="muted">
+              Rasterize SVGs, decode rasters, blend layers, and respect slot
+              rules to assemble the output image.
+            </p>
+          </div>
+          <div class="card">
+            <h3>5. Cache + serve</h3>
+            <p class="muted">
+              Persist outputs in a deterministic cache key, emit usage signals,
+              and serve via CDN-friendly headers.
+            </p>
+          </div>
+          <div class="card">
+            <h3>6. Warmup + reuse</h3>
+            <p class="muted">
+              Warmup jobs pre-render heavy collections; subsequent requests hit
+              the cache instantly.
+            </p>
+          </div>
+        </div>
+        <div class="diagram">
+          <div class="diagram-title">Diagram placeholder</div>
+          <p class="muted">
+            We'll add a visual pipeline diagram here (chain -> catalog -> assets ->
+            render graph -> cache -> response).
+          </p>
+        </div>
+      </section>
+
+      <section id="approved" class="section">
+        <div class="section-header">
+          <div>
+            <h2>Approved collections</h2>
+            <p class="muted">
+              Collections approved on-chain, ready for canonical rendering.
+            </p>
+          </div>
+          <div class="stats">
+            <div>
+              <span class="meta-label">Approved</span>
+              <span id="approved-count">--</span>
+            </div>
+            <div>
+              <span class="meta-label">Tracked</span>
+              <span id="approved-total">--</span>
+            </div>
+          </div>
+        </div>
+        <div id="approved-loading" class="loading">Loading approvals...</div>
+        <div id="approved-empty" class="empty hidden">
+          No approved collections found yet.
+        </div>
+        <div id="approved-collections" class="collection-grid"></div>
+      </section>
+
+      <section id="approve" class="section">
+        <h2>Approve a collection</h2>
+        <p class="muted">
+          Enter a collection address, pay the on-chain fee, and the renderer
+          will start serving canonical renders for the collection.
+        </p>
+        <div class="approve-card">
+          <div class="wallet">
+            <div>
+              <span class="meta-label">Wallet</span>
+              <span id="wallet-status">Not connected</span>
+            </div>
+            <button id="connect-wallet" class="button ghost">Connect</button>
+          </div>
+          <form id="approve-form" class="approve-form">
+            <label>
+              Collection address
+              <input
+                id="approve-collection"
+                placeholder="0x011ff409bc4803ec5cfab41c3fd1db99fd05c004"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </label>
+            <label>
+              Collection chain
+              <select id="approve-chain"></select>
+            </label>
+            <label>
+              Chain ID
+              <input id="approve-chain-id" type="number" min="1" />
+            </label>
+            <button id="approve-submit" class="button primary" type="submit">
+              Pay
+            </button>
+          </form>
+          <div class="approve-meta">
+            <span class="mono">Fee:</span>
+            <span id="approve-fee">--</span>
+            <span id="approve-token">TOKEN</span>
+            <span class="divider">-</span>
+            <span>Requires ERC-20 allowance + approval transaction.</span>
+          </div>
+          <div id="approve-status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Copy this template</h2>
+        <p class="muted">
+          This landing page is fully static and built with Bun. Copy
+          <span class="mono">src/templates/approval</span> to ship your own
+          approvals front-end.
+        </p>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Canonical renderer by RMRK Labs.</span>
+      <span class="mono">Built for static hosting + LANDING_DIR.</span>
+    </footer>
+
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

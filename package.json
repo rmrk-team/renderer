@@ -1,0 +1,14 @@
+{
+  "name": "proj-renderer-landing",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "bun run scripts/build-templates.ts",
+    "build:landing": "bun run scripts/build-template.ts landing",
+    "build:approval": "bun run scripts/build-template.ts approval"
+  },
+  "dependencies": {
+    "ethers": "^6.15.0"
+  }
+}

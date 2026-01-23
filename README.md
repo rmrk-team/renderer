@@ -187,6 +187,40 @@ these endpoints at high frequency.
 
 Set `OPENAPI_PUBLIC=true` to expose `/openapi.yaml` without access gating.
 
+### Landing templates (Bun)
+
+Static landing templates live under `src/templates/<name>`. Build one template
+into `dist/<name>`:
+
+```sh
+bun install
+bun run build:landing
+bun run build:approval
+```
+
+Run `bun run build` to build every template folder under `src/templates`.
+
+The approvals template reads build-time settings from `.env`:
+
+- `APPROVALS_CONTRACTS` + `APPROVALS_CONTRACT_CHAIN`
+- `RPC_ENDPOINTS`
+- `CHAIN_ID_MAP`
+
+Optional overrides:
+
+- `LANDING_RENDERER_BASE_URL` (defaults to `window.location.origin`)
+- `LANDING_SINGULAR_BASE_URL`
+- `LANDING_APPROVALS_LIMIT`
+- `LANDING_APPROVALS_PREVIEW_TOKENS`
+
+If you point `LANDING_RENDERER_BASE_URL` at a different origin while using
+`LANDING_STRICT_HEADERS=true`, disable strict headers or host the landing page
+on the same origin so CSP allows image loads.
+
+The approvals template performs client-side RPC calls. When serving it through
+the renderer, either disable strict headers or expose an RPC proxy on the same
+origin so `connect-src` allows the JSON-RPC requests.
+
 ### Reverse proxy deployment
 
 When deploying behind a reverse proxy (nginx/ALB/Cloudflare):
