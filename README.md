@@ -424,7 +424,10 @@ HEAD /render/{chain}/{collection}/{tokenId}/{assetId}/{format}?cache={timestamp}
 `cache=` selects a specific cache epoch. Omit it to use the collection cache
 epoch (if set) or `DEFAULT_CACHE_TIMESTAMP`.
 
-`HEAD` is supported on cached render routes and returns headers without a body.
+`HEAD` is supported on cached render routes and returns headers without a body. It
+acts as a cache probe and never renders; cache misses return `200` with
+`X-Renderer-Cache-Hit: false` (`X-Cache: MISS`, `X-Renderer-Result: cache-miss`)
+and `Cache-Control: no-store`.
 
 ### Token-only convenience (redirect)
 
@@ -470,6 +473,9 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 ### Response headers
 
 - `X-Renderer-Complete: true|false`
+- `X-Renderer-Result: rendered|placeholder|cache-miss`
+- `X-Renderer-Cache-Hit: true|false` (cached renders and HEAD probes)
+- `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when PNG/JPG sizes mismatch)
 - `Cache-Control: public, max-age=...` when cacheable

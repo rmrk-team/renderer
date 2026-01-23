@@ -736,7 +736,7 @@ async fn head_cached_response(
         .map_err(map_render_error_anyhow)?;
     let cache_ts = match request.cache_timestamp.as_ref() {
         Some(value) => value,
-        None => return Ok(StatusCode::NOT_FOUND.into_response()),
+        None => return Ok(head_cache_miss_response(&request)),
     };
     let (_, base_key) = render::resolve_width(&request.width_param, request.og_mode)
         .map_err(map_render_error_anyhow)?;
@@ -758,7 +758,7 @@ async fn head_cached_response(
         .await
         .map_err(map_render_error_anyhow)?;
     if !cached {
-        return Ok(StatusCode::NOT_FOUND.into_response());
+        return Ok(head_cache_miss_response(&request));
     }
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -784,6 +784,25 @@ async fn head_cached_response(
         HeaderValue::from_static("cache;desc=\"HIT\""),
     );
     Ok((headers, ()).into_response())
+}
+
+fn head_cache_miss_response(request: &RenderRequest) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(request.format.mime().as_ref())
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("cache-miss"));
+    headers.insert("X-Renderer-Cache-Hit", HeaderValue::from_static("false"));
+    headers.insert("X-Cache", HeaderValue::from_static("MISS"));
+    headers.insert(
+        "Server-Timing",
+        HeaderValue::from_static("cache;desc=\"MISS\""),
+    );
+    (StatusCode::OK, headers).into_response()
 }
 
 async fn to_http_response(
