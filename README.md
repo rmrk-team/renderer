@@ -673,6 +673,9 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Canvas size is derived from the first fixed part’s art. If SVG sizing is invalid,
   defaults are used and the collection should be reviewed.
 - PNG/JPG layers that do not match the canonical canvas size are treated as nonconforming.
+- Non-composable primary assets fall back to a single-layer render using asset metadata.
+- Original-size fallback renders are not cached; resized/OG variants are.
+- If a static asset exceeds size limits and has `thumbnailUri`, the thumbnail is used.
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.

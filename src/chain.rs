@@ -78,6 +78,24 @@ abigen!(
 );
 
 abigen!(
+    RmrkMultiAsset,
+    r#"[
+        {
+            "type":"function",
+            "name":"getAssetMetadata",
+            "stateMutability":"view",
+            "inputs":[
+                {"name":"tokenId","type":"uint256"},
+                {"name":"assetId","type":"uint64"}
+            ],
+            "outputs":[
+                {"name":"metadata","type":"string"}
+            ]
+        }
+    ]"#
+);
+
+abigen!(
     RmrkCatalog,
     r#"[
         {
@@ -257,6 +275,31 @@ impl ChainClient {
             })
             .await?;
         Ok(response.0)
+    }
+
+    pub async fn get_asset_metadata(
+        &self,
+        chain: &str,
+        collection: &str,
+        token_id: &str,
+        asset_id: &str,
+    ) -> Result<String> {
+        let collection = Address::from_str(collection)?;
+        let token_id = U256::from_dec_str(token_id)?;
+        let asset_id = asset_id.parse::<u64>().context("invalid asset id")?;
+        let response = self
+            .call_with_failover(chain, move |provider| {
+                let contract = RmrkMultiAsset::new(collection, provider);
+                async move {
+                    contract
+                        .get_asset_metadata(token_id, asset_id)
+                        .call()
+                        .await
+                        .map_err(|err| err.into())
+                }
+            })
+            .await?;
+        Ok(response)
     }
 
     pub async fn get_catalog_metadata_uri(

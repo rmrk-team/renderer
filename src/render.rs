@@ -1,12 +1,12 @@
-use crate::assets::{AssetResolver, ResolvedMetadata};
+use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
-use crate::chain::ComposeResult;
+use crate::chain::{ComposeResult, FixedPart, SlotPart};
 use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
 use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
 use anyhow::{Context, Result, anyhow};
-use image::codecs::png::PngEncoder;
+use image::codecs::png::{CompressionType, FilterType as PngFilterType, PngEncoder};
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, ImageFormat, ImageReader, Rgba, RgbaImage};
 use mime::Mime;
@@ -35,6 +35,8 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
     ("xl", 1024u32),
     ("xxl", 2048u32),
 ];
+
+const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 
 #[cfg(test)]
 static SVG_STRING_RESOLVER_CALLED: AtomicBool = AtomicBool::new(false);
@@ -557,16 +559,19 @@ pub(crate) async fn render_token_uncached(
     let mut missing_layers = 0usize;
     let mut nonconforming_layers = 0usize;
     let mut total_raster_pixels = 0u64;
+    let mut cache_allowed = true;
     if canvas.is_none() {
-        let compose = state
-            .chain
-            .compose_equippables(
-                &request.chain,
-                &request.collection,
-                &request.token_id,
-                &request.asset_id,
-            )
-            .await?;
+        let (compose, fallback_used) = load_compose_for_request(
+            state,
+            &request.chain,
+            &request.collection,
+            &request.token_id,
+            &request.asset_id,
+        )
+        .await?;
+        cache_allowed = !fallback_used || width.is_some();
+        let prefer_thumb = fallback_used && width.is_some();
+        let allow_thumb_fallback = fallback_used;
         let theme_replace = load_theme_replace_map(state, &request.chain, &compose).await;
         let theme_replace = theme_replace.map(Arc::new);
         if let Some(theme) = theme_replace.as_ref() {
@@ -601,8 +606,15 @@ pub(crate) async fn render_token_uncached(
             raster_mismatch_child = ?render_policy.raster_mismatch_child,
             "render policy"
         );
-        let (canvas_width, canvas_height) =
-            ensure_canvas_size(state, &compose, &collection_config, false).await?;
+        let (canvas_width, canvas_height) = ensure_canvas_size(
+            state,
+            &compose,
+            &collection_config,
+            false,
+            prefer_thumb,
+            allow_thumb_fallback,
+        )
+        .await?;
         let canvas_pixels = (canvas_width as u64).saturating_mul(canvas_height as u64);
         if canvas_pixels > state.config.max_canvas_pixels {
             return Err(RenderLimitError::CanvasTooLarge.into());
@@ -633,68 +645,71 @@ pub(crate) async fn render_token_uncached(
         if canvas_pixels > state.config.max_total_raster_pixels {
             return Err(RenderLimitError::RasterPixelsExceeded.into());
         }
-        cache_selection = compute_render_cache_key_for_layers(
-            state,
-            request,
-            variant_key,
-            &layers,
-            render_policy,
-            theme_replace.as_deref(),
-            canvas_width,
-            canvas_height,
-        )
-        .await?;
-        if let Some(selection) = cache_selection.as_ref() {
-            if let Some(size) = state
-                .cache
-                .cached_file_len(&selection.key.path, state.cache.render_ttl)
-                .await?
-            {
-                return Ok(RenderResponse {
-                    bytes: Vec::new(),
-                    content_type: request.format.mime(),
-                    complete: true,
-                    missing_layers: 0,
-                    nonconforming_layers: 0,
-                    cache_hit: true,
-                    cache_control: cache_control_for_request(
-                        request,
-                        state.cache.render_ttl,
-                        state.config.default_cache_ttl,
-                    ),
-                    etag: Some(selection.key.etag.clone()),
-                    cached_path: Some(selection.key.path.clone()),
-                    content_length: Some(size),
-                });
-            }
-        }
-        if state.config.composite_cache_enabled {
+        if cache_allowed {
+            cache_selection = compute_render_cache_key_for_layers(
+                state,
+                request,
+                variant_key,
+                &layers,
+                render_policy,
+                theme_replace.as_deref(),
+                canvas_width,
+                canvas_height,
+            )
+            .await?;
             if let Some(selection) = cache_selection.as_ref() {
-                let composite_variant_key =
-                    format!("{composite_variant_key}_fp-{}", selection.fingerprint);
-                composite_key = Some(composite_cache_key(
-                    &state.cache,
-                    &request.chain,
-                    &request.collection,
-                    &request.token_id,
-                    &request.asset_id,
-                    request
-                        .cache_timestamp
-                        .as_ref()
-                        .ok_or_else(|| anyhow!("missing cache timestamp"))?,
-                    &composite_variant_key,
-                )?);
-                if let Some(key) = composite_key.as_ref() {
-                    if let Some(bytes) = state
-                        .cache
-                        .load_cached_file(&key.path, state.cache.render_ttl)
-                        .await?
-                    {
-                        let max_pixels = state.config.max_decoded_raster_pixels;
-                        let image = task::spawn_blocking(move || decode_raster(&bytes, max_pixels))
-                            .await??;
-                        composite_from_cache = true;
-                        canvas = Some(image);
+                if let Some(size) = state
+                    .cache
+                    .cached_file_len(&selection.key.path, state.cache.render_ttl)
+                    .await?
+                {
+                    return Ok(RenderResponse {
+                        bytes: Vec::new(),
+                        content_type: request.format.mime(),
+                        complete: true,
+                        missing_layers: 0,
+                        nonconforming_layers: 0,
+                        cache_hit: true,
+                        cache_control: cache_control_for_request(
+                            request,
+                            state.cache.render_ttl,
+                            state.config.default_cache_ttl,
+                        ),
+                        etag: Some(selection.key.etag.clone()),
+                        cached_path: Some(selection.key.path.clone()),
+                        content_length: Some(size),
+                    });
+                }
+            }
+            if state.config.composite_cache_enabled {
+                if let Some(selection) = cache_selection.as_ref() {
+                    let composite_variant_key =
+                        format!("{composite_variant_key}_fp-{}", selection.fingerprint);
+                    composite_key = Some(composite_cache_key(
+                        &state.cache,
+                        &request.chain,
+                        &request.collection,
+                        &request.token_id,
+                        &request.asset_id,
+                        request
+                            .cache_timestamp
+                            .as_ref()
+                            .ok_or_else(|| anyhow!("missing cache timestamp"))?,
+                        &composite_variant_key,
+                    )?);
+                    if let Some(key) = composite_key.as_ref() {
+                        if let Some(bytes) = state
+                            .cache
+                            .load_cached_file(&key.path, state.cache.render_ttl)
+                            .await?
+                        {
+                            let max_pixels = state.config.max_decoded_raster_pixels;
+                            let image =
+                                task::spawn_blocking(move || decode_raster(&bytes, max_pixels))
+                                    .await??;
+                            composite_from_cache = true;
+                            canvas = Some(image);
+                        }
                     }
                 }
             }
@@ -726,6 +741,8 @@ pub(crate) async fn render_token_uncached(
                 let raster_child = render_policy.raster_mismatch_child;
                 let theme_replace = theme_replace.clone();
                 let theme_source_cache = theme_source_cache.clone();
+                let prefer_thumb = prefer_thumb;
+                let allow_thumb_fallback = allow_thumb_fallback;
                 join_set.spawn(async move {
                     let _permit = permit;
                     let result = load_layer(
@@ -741,6 +758,8 @@ pub(crate) async fn render_token_uncached(
                         raster_child,
                         theme_replace,
                         theme_source_cache,
+                        prefer_thumb,
+                        allow_thumb_fallback,
                     )
                     .await;
                     (idx, result)
@@ -827,7 +846,11 @@ pub(crate) async fn render_token_uncached(
         task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
             let composite_bytes = if should_store_composite {
                 let mut bytes = Vec::new();
-                let encoder = PngEncoder::new(&mut bytes);
+                let encoder = PngEncoder::new_with_quality(
+                    &mut bytes,
+                    CompressionType::Best,
+                    PngFilterType::Adaptive,
+                );
                 encoder.write_image(
                     canvas.as_raw(),
                     canvas.width(),
@@ -854,7 +877,7 @@ pub(crate) async fn render_token_uncached(
         let _ = state.cache.store_file(&key.path, &bytes).await;
     }
     let complete = missing_layers == 0;
-    let cache_control = if complete {
+    let cache_control = if complete && cache_allowed {
         cache_control_for_request(
             request,
             state.cache.render_ttl,
@@ -865,7 +888,7 @@ pub(crate) async fn render_token_uncached(
     };
 
     let mut etag = None;
-    if complete {
+    if complete && cache_allowed {
         if let Some(selection) = cache_selection.as_ref() {
             state.cache.store_file(&selection.key.path, &bytes).await?;
             etag = Some(selection.key.etag.clone());
@@ -942,6 +965,69 @@ fn build_layers(compose: &ComposeResult, child_layer_mode: ChildLayerMode) -> Ve
         }
     }
     layers
+}
+
+fn is_non_composable_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains(NON_COMPOSABLE_ASSET_REVERT)
+            || message.contains("RMRKNotComposableAsset")
+    })
+}
+
+fn is_asset_too_large_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
+            matches!(fetch_error, AssetFetchError::TooLarge)
+        } else {
+            cause.to_string().contains("asset too large")
+        }
+    })
+}
+
+async fn load_compose_for_request(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+    token_id: &str,
+    asset_id: &str,
+) -> Result<(ComposeResult, bool)> {
+    match state
+        .chain
+        .compose_equippables(chain, collection, token_id, asset_id)
+        .await
+    {
+        Ok(compose) => Ok((compose, false)),
+        Err(err) => {
+            if !is_non_composable_error(&err) {
+                return Err(err);
+            }
+            debug!(
+                error = ?err,
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                asset_id = %asset_id,
+                "asset is non-composable; falling back to static asset metadata"
+            );
+            let metadata_uri = state
+                .chain
+                .get_asset_metadata(chain, collection, token_id, asset_id)
+                .await?;
+            let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
+            let compose = ComposeResult {
+                metadata_uri: metadata_uri.clone(),
+                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                fixed_parts: vec![FixedPart {
+                    part_id,
+                    z: 0,
+                    metadata_uri,
+                }],
+                slot_parts: Vec::<SlotPart>::new(),
+            };
+            Ok((compose, true))
+        }
+    }
 }
 
 fn layer_sort_key(layer: &Layer, child_layer_mode: ChildLayerMode) -> (u16, u8) {
@@ -1486,6 +1572,7 @@ async fn compute_render_cache_key_for_request(
     if request.cache_timestamp.is_none() {
         return Ok(None);
     }
+    let (width, _) = resolve_width(&request.width_param, request.og_mode)?;
     let render_policy =
         render_policy_for_collection(&state.config, &request.chain, &request.collection);
     let collection_config =
@@ -1510,18 +1597,29 @@ async fn compute_render_cache_key_for_request(
                 last_approval_check_at: None,
                 last_approval_check_result: None,
             });
-    let compose = state
-        .chain
-        .compose_equippables(
-            &request.chain,
-            &request.collection,
-            &request.token_id,
-            &request.asset_id,
-        )
-        .await?;
+    let (compose, fallback_used) = load_compose_for_request(
+        state,
+        &request.chain,
+        &request.collection,
+        &request.token_id,
+        &request.asset_id,
+    )
+    .await?;
+    if fallback_used && width.is_none() {
+        return Ok(None);
+    }
+    let prefer_thumb = fallback_used && width.is_some();
+    let allow_thumb_fallback = fallback_used;
     let theme_replace = load_theme_replace_map(state, &request.chain, &compose).await;
-    let (canvas_width, canvas_height) =
-        ensure_canvas_size(state, &compose, &collection_config, false).await?;
+    let (canvas_width, canvas_height) = ensure_canvas_size(
+        state,
+        &compose,
+        &collection_config,
+        false,
+        prefer_thumb,
+        allow_thumb_fallback,
+    )
+    .await?;
     let canvas_pixels = (canvas_width as u64).saturating_mul(canvas_height as u64);
     if canvas_pixels > state.config.max_canvas_pixels {
         return Err(RenderLimitError::CanvasTooLarge.into());
@@ -1620,6 +1718,8 @@ async fn ensure_canvas_size(
     compose: &ComposeResult,
     config: &CollectionConfig,
     force: bool,
+    prefer_thumb: bool,
+    allow_thumb_fallback: bool,
 ) -> Result<(u32, u32)> {
     let mut fixed_parts = compose.fixed_parts.clone();
     fixed_parts.sort_by(|a, b| a.z.cmp(&b.z));
@@ -1628,7 +1728,7 @@ async fn ensure_canvas_size(
         .ok_or_else(|| anyhow!("no fixed parts for canvas size derivation"))?;
     let resolved = state
         .assets
-        .resolve_metadata(&first.metadata_uri, false)
+        .resolve_metadata(&first.metadata_uri, prefer_thumb)
         .await
         .ok()
         .flatten();
@@ -1645,10 +1745,10 @@ async fn ensure_canvas_size(
             "base part metadata unavailable, using direct asset"
         );
     }
-    let art_uri = resolved
+    let mut art_uri = resolved
         .as_ref()
-        .map(|resolved| resolved.art_uri.as_str())
-        .unwrap_or(&first.metadata_uri);
+        .map(|resolved| resolved.art_uri.clone())
+        .unwrap_or_else(|| first.metadata_uri.clone());
 
     if !force {
         if let (Some(width), Some(height), Some(fingerprint)) = (
@@ -1663,7 +1763,7 @@ async fn ensure_canvas_size(
         }
     }
 
-    let (width, height, used_fallback) = match state.assets.fetch_asset(art_uri).await {
+    let (width, height, used_fallback) = match state.assets.fetch_asset(&art_uri).await {
         Ok(asset) => {
             let bytes = asset.bytes.to_vec();
             let default_width = state.config.default_canvas_width;
@@ -1697,12 +1797,81 @@ async fn ensure_canvas_size(
             }
         }
         Err(err) => {
-            warn!(error = ?err, "failed to fetch base asset, using defaults");
-            (
-                state.config.default_canvas_width,
-                state.config.default_canvas_height,
-                true,
-            )
+            if allow_thumb_fallback && !prefer_thumb && is_asset_too_large_error(&err) {
+                if let Ok(Some(thumb)) =
+                    state.assets.resolve_metadata(&first.metadata_uri, true).await
+                {
+                    if thumb.art_uri != art_uri {
+                        debug!(
+                            metadata_uri = %first.metadata_uri,
+                            art_uri = %thumb.art_uri,
+                            "base asset too large, using thumbnail for canvas"
+                        );
+                        art_uri = thumb.art_uri;
+                        if let Ok(asset) = state.assets.fetch_asset(&art_uri).await {
+                            let bytes = asset.bytes.to_vec();
+                            let default_width = state.config.default_canvas_width;
+                            let default_height = state.config.default_canvas_height;
+                            let max_svg_bytes = state.config.max_svg_bytes;
+                            let max_svg_nodes = state.config.max_svg_node_count;
+                            let max_decoded_raster_pixels =
+                                state.config.max_decoded_raster_pixels;
+                            let max_raster_bytes = state.config.max_raster_bytes;
+                            match task::spawn_blocking(move || {
+                                derive_canvas_from_asset(
+                                    &bytes,
+                                    default_width,
+                                    default_height,
+                                    max_svg_bytes,
+                                    max_svg_nodes,
+                                    max_raster_bytes,
+                                    max_decoded_raster_pixels,
+                                )
+                            })
+                            .await
+                            {
+                                Ok(Ok(result)) => result,
+                                Ok(Err(err)) => {
+                                    warn!(error = ?err, "failed to parse base asset, using defaults");
+                                    (default_width, default_height, true)
+                                }
+                                Err(err) => {
+                                    warn!(error = ?err, "failed to join base asset parse, using defaults");
+                                    (default_width, default_height, true)
+                                }
+                            }
+                        } else {
+                            warn!(error = ?err, "failed to fetch base asset, using defaults");
+                            (
+                                state.config.default_canvas_width,
+                                state.config.default_canvas_height,
+                                true,
+                            )
+                        }
+                    } else {
+                        warn!(error = ?err, "failed to fetch base asset, using defaults");
+                        (
+                            state.config.default_canvas_width,
+                            state.config.default_canvas_height,
+                            true,
+                        )
+                    }
+                } else {
+                    warn!(error = ?err, "failed to fetch base asset, using defaults");
+                    (
+                        state.config.default_canvas_width,
+                        state.config.default_canvas_height,
+                        true,
+                    )
+                }
+            } else {
+                warn!(error = ?err, "failed to fetch base asset, using defaults");
+                (
+                    state.config.default_canvas_width,
+                    state.config.default_canvas_height,
+                    true,
+                )
+            }
         }
     };
     let mut fingerprint = sha256_hex(&format!("{art_uri}:{width}x{height}"));
@@ -1744,10 +1913,8 @@ pub async fn refresh_canvas_size(
     token_id: String,
     asset_id: String,
 ) -> Result<(u32, u32)> {
-    let compose = state
-        .chain
-        .compose_equippables(&chain, &collection, &token_id, &asset_id)
-        .await?;
+    let (compose, fallback_used) =
+        load_compose_for_request(&state, &chain, &collection, &token_id, &asset_id).await?;
     let collection_config = get_collection_config_cached(&state, &chain, &collection)
         .await?
         .unwrap_or(CollectionConfig {
@@ -1769,7 +1936,15 @@ pub async fn refresh_canvas_size(
             last_approval_check_at: None,
             last_approval_check_result: None,
         });
-    ensure_canvas_size(&state, &compose, &collection_config, true).await
+    ensure_canvas_size(
+        &state,
+        &compose,
+        &collection_config,
+        true,
+        false,
+        fallback_used,
+    )
+    .await
 }
 
 fn derive_canvas_from_asset(
@@ -1823,6 +1998,8 @@ async fn load_layer(
     raster_mismatch_child: RasterMismatchPolicy,
     theme_replace: Option<Arc<ThemeReplaceMap>>,
     theme_source_cache: ThemeSourceCache,
+    prefer_thumb: bool,
+    allow_thumb_fallback: bool,
 ) -> Result<Option<LayerImage>> {
     debug!(
         metadata_uri = %layer.metadata_uri,
@@ -1856,15 +2033,43 @@ async fn load_layer(
         )?;
         return Ok(Some(layer_image));
     }
-    let asset = match assets.resolve_metadata(&layer.metadata_uri, false).await {
-        Ok(Some(resolved)) => {
+    let asset = match assets.resolve_metadata(&layer.metadata_uri, prefer_thumb).await {
+        Ok(Some(mut resolved)) => {
             debug!(
                 metadata_uri = %layer.metadata_uri,
                 art_uri = %resolved.art_uri,
                 field = %resolved.source,
                 "resolved layer metadata"
             );
-            assets.fetch_asset(&resolved.art_uri).await?
+            match assets.fetch_asset(&resolved.art_uri).await {
+                Ok(asset) => asset,
+                Err(err) => {
+                    if allow_thumb_fallback
+                        && !prefer_thumb
+                        && is_asset_too_large_error(&err)
+                    {
+                        if let Ok(Some(thumb)) =
+                            assets.resolve_metadata(&layer.metadata_uri, true).await
+                        {
+                            if thumb.art_uri != resolved.art_uri {
+                                debug!(
+                                    metadata_uri = %layer.metadata_uri,
+                                    art_uri = %thumb.art_uri,
+                                    "layer asset too large, using thumbnail"
+                                );
+                                resolved = thumb;
+                                assets.fetch_asset(&resolved.art_uri).await?
+                            } else {
+                                return Err(err);
+                            }
+                        } else {
+                            return Err(err);
+                        }
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
         }
         Ok(None) => {
             if matches!(
@@ -2610,7 +2815,18 @@ fn encode_image(image: DynamicImage, format: &OutputFormat) -> Result<Vec<u8>> {
             )?;
         }
         OutputFormat::Png => {
-            image.write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png)?;
+            let rgba = image.to_rgba8();
+            let encoder = PngEncoder::new_with_quality(
+                &mut bytes,
+                CompressionType::Best,
+                PngFilterType::Adaptive,
+            );
+            encoder.write_image(
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
+                image::ColorType::Rgba8.into(),
+            )?;
         }
         OutputFormat::Jpeg => {
             let rgb = image.to_rgb8();
