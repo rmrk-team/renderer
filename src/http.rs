@@ -2,6 +2,7 @@ use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::config::{AccessMode, Config};
 use crate::landing;
+use crate::failure_log::FailureLogEntry;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError, RenderRequest,
@@ -1057,21 +1058,20 @@ pub async fn access_middleware(
     mut request: axum::http::Request<Body>,
     next: Next,
 ) -> Response {
-    let path = request.uri().path();
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let path = uri.path();
     if path == "/healthz" {
         return next.run(request).await;
     }
     let route_group = route_group(path);
     let ip = client_ip(&request, &state);
-    if path == "/admin" || path.starts_with("/admin/") {
-        if let Some(ip) = ip {
-            let info = apply_ip_rate_limit(&state, ip).await;
-            if !info.allowed {
-                return rate_limit_response(Some(info));
-            }
-        }
-        return next.run(request).await;
-    }
+    let ip_identity = ip.map(|ip| AccessContext {
+        identity_key: Arc::from(format!("ip:{ip}")),
+        client_key_id: None,
+        max_concurrent_renders_override: None,
+    });
+    let is_admin = path == "/admin" || path.starts_with("/admin/");
     let is_public_landing = is_public_landing_path(&state, &path);
     let is_public_status = is_public_status_path(&state, &path);
     let is_public_openapi = is_public_openapi_path(&state, &path);
@@ -1079,7 +1079,19 @@ pub async fn access_middleware(
     if let Some(ip) = ip {
         let info = apply_ip_rate_limit(&state, ip).await;
         if !info.allowed {
-            return rate_limit_response(Some(info));
+            let response = rate_limit_response(Some(info));
+            let identity = ip_identity.clone();
+            log_failure_if_needed(
+                &state,
+                &response,
+                &method,
+                &uri,
+                route_group,
+                Some(ip),
+                identity.as_ref(),
+            );
+            record_usage(&state, route_group, &response, identity);
+            return response;
         }
     }
 
@@ -1116,17 +1128,14 @@ pub async fn access_middleware(
                 .max_concurrent_renders_override
                 .and_then(|value| value.try_into().ok()),
         })
-    } else if ip.is_some() {
-        Some(AccessContext {
-            identity_key: Arc::from("ip:anon"),
-            client_key_id: None,
-            max_concurrent_renders_override: None,
-        })
+    } else if ip_identity.is_some() {
+        ip_identity.clone()
     } else {
         None
     };
 
-    if !is_public_landing
+    if !is_admin
+        && !is_public_landing
         && !is_public_status
         && !is_public_openapi
         && !is_access_allowed(&state, ip, key_info.as_ref()).await
@@ -1134,21 +1143,54 @@ pub async fn access_middleware(
         if let Some(ip) = ip {
             let info = apply_auth_fail_limit(&state, ip).await;
             if !info.allowed {
-                return rate_limit_response(Some(info));
+                let response = rate_limit_response(Some(info));
+                log_failure_if_needed(
+                    &state,
+                    &response,
+                    &method,
+                    &uri,
+                    route_group,
+                    Some(ip),
+                    identity.as_ref(),
+                );
+                record_usage(&state, route_group, &response, identity.clone());
+                return response;
             }
         }
-        return ApiError::new(StatusCode::UNAUTHORIZED, "access denied")
+        let response = ApiError::new(StatusCode::UNAUTHORIZED, "access denied")
             .with_header(
                 header::WWW_AUTHENTICATE,
                 HeaderValue::from_static("Bearer realm=\"renderer\""),
             )
             .into_response();
+        log_failure_if_needed(
+            &state,
+            &response,
+            &method,
+            &uri,
+            route_group,
+            ip,
+            identity.as_ref(),
+        );
+        record_usage(&state, route_group, &response, identity.clone());
+        return response;
     }
 
     if let Some(key) = key_info.as_ref() {
         let info = apply_key_rate_limit(&state, key).await;
         if !info.allowed {
-            return rate_limit_response(Some(info));
+            let response = rate_limit_response(Some(info));
+            log_failure_if_needed(
+                &state,
+                &response,
+                &method,
+                &uri,
+                route_group,
+                ip,
+                identity.as_ref(),
+            );
+            record_usage(&state, route_group, &response, identity.clone());
+            return response;
         }
     }
 
@@ -1157,6 +1199,15 @@ pub async fn access_middleware(
     }
 
     let response = next.run(request).await;
+    log_failure_if_needed(
+        &state,
+        &response,
+        &method,
+        &uri,
+        route_group,
+        ip,
+        identity.as_ref(),
+    );
     record_usage(&state, route_group, &response, identity);
     response
 }
@@ -1524,6 +1575,53 @@ fn record_usage(
     let _ = sender.try_send(event);
 }
 
+fn log_failure_if_needed(
+    state: &AppState,
+    response: &Response,
+    method: &axum::http::Method,
+    uri: &axum::http::Uri,
+    route_group: &'static str,
+    ip: Option<IpAddr>,
+    identity: Option<&AccessContext>,
+) {
+    let Some(failure_log) = state.failure_log.as_ref() else {
+        return;
+    };
+    let status = response.status();
+    if !(status.is_client_error() || status.is_server_error()) {
+        return;
+    }
+    let reason = response
+        .extensions()
+        .get::<ErrorLogContext>()
+        .map(|context| context.detail.clone())
+        .or_else(|| {
+            response
+                .headers()
+                .get("X-Renderer-Error")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string())
+        });
+    let path = if let Some(query) = uri.query() {
+        format!("{}?{}", uri.path(), query)
+    } else {
+        uri.path().to_string()
+    };
+    let entry = FailureLogEntry::new(
+        method.to_string(),
+        path,
+        status.as_u16(),
+        route_group.to_string(),
+        ip.map(|ip| ip.to_string()),
+        identity.map(|ctx| ctx.identity_key.as_ref().to_string()),
+        reason,
+    );
+    let failure_log = failure_log.clone();
+    tokio::spawn(async move {
+        failure_log.write(entry).await;
+    });
+}
+
 fn current_hour_bucket() -> i64 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1537,6 +1635,7 @@ pub struct ApiError {
     pub status: StatusCode,
     pub body: Value,
     pub headers: HeaderMap,
+    pub log_detail: Option<String>,
 }
 
 impl ApiError {
@@ -1545,6 +1644,7 @@ impl ApiError {
             status,
             body: serde_json::json!({ "error": message }),
             headers: HeaderMap::new(),
+            log_detail: None,
         }
     }
 
@@ -1567,55 +1667,108 @@ impl ApiError {
         }
         self
     }
+
+    pub fn with_log_detail(mut self, detail: String) -> Self {
+        if !detail.is_empty() {
+            self.log_detail = Some(detail);
+        }
+        self
+    }
 }
 
 impl From<anyhow::Error> for ApiError {
     fn from(error: anyhow::Error) -> Self {
         tracing::warn!(error = ?error, "request failed");
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, "request failed")
+            .with_log_detail(error.to_string())
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let error_message = extract_error_message(&self.body);
         let body = Json(self.body);
         let mut response = (self.status, body).into_response();
         response.headers_mut().extend(self.headers);
+        if let Some(message) = error_message.as_ref() {
+            let sanitized = sanitize_error_header(message);
+            if let Ok(value) = HeaderValue::from_str(&sanitized) {
+                response.headers_mut().insert("X-Renderer-Error", value);
+            }
+        }
+        if let Some(detail) = self
+            .log_detail
+            .or_else(|| error_message.map(|message| sanitize_error_header(&message)))
+        {
+            response.extensions_mut().insert(ErrorLogContext { detail });
+        }
         response
     }
 }
 
+#[derive(Clone)]
+struct ErrorLogContext {
+    detail: String,
+}
+
+fn extract_error_message(body: &Value) -> Option<String> {
+    let Value::Object(map) = body else {
+        return None;
+    };
+    map.get("error").and_then(|value| value.as_str()).map(|value| value.to_string())
+}
+
+fn sanitize_error_header(value: &str) -> String {
+    let mut sanitized: String = value
+        .chars()
+        .filter(|ch| ch.is_ascii() && !ch.is_control())
+        .collect();
+    sanitized.truncate(200);
+    sanitized
+}
+
 fn map_render_error(error: anyhow::Error) -> ApiError {
+    let detail = error.to_string();
     if error.downcast_ref::<RenderInputError>().is_some() {
-        return ApiError::bad_request("invalid render request");
+        return ApiError::bad_request("invalid render request").with_log_detail(detail);
     }
     if error.downcast_ref::<RenderLimitError>().is_some() {
-        return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "render exceeds limits");
+        return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "render exceeds limits")
+            .with_log_detail(detail);
     }
     if error.downcast_ref::<render::RenderQueueError>().is_some() {
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "render queue full")
             .with_field("queue_full", Value::Bool(true))
-            .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"));
+            .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
+            .with_log_detail(detail);
     }
     if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
         return match fetch_error {
-            AssetFetchError::InvalidUri => ApiError::bad_request("invalid asset uri"),
-            AssetFetchError::Blocked => ApiError::bad_request("asset uri not allowed"),
+            AssetFetchError::InvalidUri => {
+                ApiError::bad_request("invalid asset uri").with_log_detail(detail)
+            }
+            AssetFetchError::Blocked => {
+                ApiError::bad_request("asset uri not allowed").with_log_detail(detail)
+            }
             AssetFetchError::TooLarge => {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
+                    .with_log_detail(detail)
             }
             AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream => {
                 ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")
+                    .with_log_detail(detail)
             }
         };
     }
     if error.downcast_ref::<reqwest::Error>().is_some() {
-        return ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed");
+        return ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")
+            .with_log_detail(detail);
     }
     let message = error.to_string();
     if message.contains("collection not approved") {
-        return ApiError::forbidden("collection not approved");
+        return ApiError::forbidden("collection not approved").with_log_detail(detail);
     }
     tracing::warn!(error = ?error, "render failed");
     ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "render failed")
+        .with_log_detail(detail)
 }

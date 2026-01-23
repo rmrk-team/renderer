@@ -82,6 +82,8 @@ pub struct Config {
     pub rpc_connect_timeout_seconds: u64,
     pub rpc_failure_threshold: u32,
     pub rpc_failure_cooldown_seconds: u64,
+    pub failure_log_path: Option<PathBuf>,
+    pub failure_log_max_bytes: u64,
     pub require_approval: bool,
     pub allow_http: bool,
     pub allow_private_networks: bool,
@@ -292,6 +294,13 @@ impl Config {
         let rpc_failure_threshold =
             parse_u64("RPC_FAILURE_THRESHOLD", 2).min(u32::MAX as u64) as u32;
         let rpc_failure_cooldown_seconds = parse_u64("RPC_FAILURE_COOLDOWN_SECONDS", 60);
+        let failure_log_path = env::var("FAILURE_LOG_PATH")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("off"))
+            .map(PathBuf::from)
+            .or_else(|| Some(PathBuf::from("/var/log/renderer-failures.log")));
+        let failure_log_max_bytes = parse_u64("FAILURE_LOG_MAX_BYTES", 102_400);
 
         if access_mode != AccessMode::Open && api_key_secret.is_none() {
             return Err(anyhow::anyhow!(
@@ -411,6 +420,8 @@ impl Config {
             rpc_connect_timeout_seconds,
             rpc_failure_threshold,
             rpc_failure_cooldown_seconds,
+            failure_log_path,
+            failure_log_max_bytes,
             require_approval,
             allow_http,
             allow_private_networks,

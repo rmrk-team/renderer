@@ -676,6 +676,8 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Non-composable primary assets fall back to a single-layer render using asset metadata.
 - Original-size fallback renders are not cached; resized/OG variants are.
 - If a static asset exceeds size limits and has `thumbnailUri`, the thumbnail is used.
+- Usage identity keys for non-API requests include the client IP (ensure `TRUSTED_PROXY_CIDRS` is set when proxying).
+- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable).
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.

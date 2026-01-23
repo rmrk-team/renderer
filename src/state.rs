@@ -6,6 +6,7 @@ use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
 use crate::rate_limit::{KeyRateLimiter, RateLimiter};
 use crate::render_queue::RenderJob;
 use crate::usage::UsageEvent;
+use crate::failure_log::FailureLog;
 use anyhow::Result;
 use ipnet::IpNet;
 use std::collections::{HashMap, VecDeque};
@@ -43,6 +44,7 @@ pub struct AppState {
     pub theme_source_cache: ThemeSourceCache,
     pub catalog_metadata_cache: CatalogMetadataCache,
     pub catalog_theme_cache: CatalogThemeCache,
+    pub failure_log: Option<FailureLog>,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
         chain: ChainClient,
         usage_tx: Option<mpsc::Sender<UsageEvent>>,
         render_queue_tx: Option<mpsc::Sender<RenderJob>>,
+        failure_log: Option<FailureLog>,
     ) -> Self {
         let render_singleflight = RenderSingleflight::new();
         let render_semaphore = Arc::new(Semaphore::new(config.max_concurrent_renders));
@@ -124,6 +127,7 @@ impl AppState {
             theme_source_cache,
             catalog_metadata_cache,
             catalog_theme_cache,
+            failure_log,
         }
     }
 

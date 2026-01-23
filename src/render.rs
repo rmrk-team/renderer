@@ -3176,7 +3176,16 @@ mod tests {
         let assets = AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore)
             .context("assets")?;
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
+        let state = Arc::new(AppState::new(
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            None,
+            None,
+            None,
+        ));
 
         let collection = "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004".to_string();
         let cache_timestamp = Some("1700787357000".to_string());

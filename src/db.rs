@@ -1777,6 +1777,8 @@ mod tests {
             rpc_connect_timeout_seconds: 1,
             rpc_failure_threshold: 0,
             rpc_failure_cooldown_seconds: 0,
+            failure_log_path: None,
+            failure_log_max_bytes: 0,
             require_approval: false,
             allow_http: true,
             allow_private_networks: false,

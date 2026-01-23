@@ -6,6 +6,7 @@ mod canonical;
 mod chain;
 mod config;
 mod db;
+mod failure_log;
 mod http;
 mod landing;
 mod rate_limit;
@@ -21,6 +22,7 @@ use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::Database;
 use crate::state::AppState;
+use crate::failure_log::FailureLog;
 use axum::Router;
 use axum::body::HttpBody;
 use axum::http::{Response, header};
@@ -149,6 +151,10 @@ async fn main() -> anyhow::Result<()> {
         let (tx, rx) = mpsc::channel(capacity);
         (Some(tx), Some(rx))
     };
+    let failure_log = match config.failure_log_path.clone() {
+        Some(path) => FailureLog::new(path, config.failure_log_max_bytes),
+        None => None,
+    };
     let state = Arc::new(AppState::new(
         config,
         db,
@@ -157,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
         chain,
         usage_tx,
         render_queue_tx,
+        failure_log,
     ));
     if let Err(err) = state.refresh_ip_rules().await {
         warn!(error = ?err, "failed to load ip rules cache");
@@ -310,6 +317,8 @@ mod tests {
             rpc_connect_timeout_seconds: 1,
             rpc_failure_threshold: 0,
             rpc_failure_cooldown_seconds: 0,
+            failure_log_path: None,
+            failure_log_max_bytes: 0,
             require_approval: false,
             allow_http: true,
             allow_private_networks: false,
@@ -360,7 +369,16 @@ mod tests {
         let assets =
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
+        let state = Arc::new(AppState::new(
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            None,
+            None,
+            None,
+        ));
         let app = build_app(state);
         let response = app
             .clone()
@@ -381,7 +399,16 @@ mod tests {
         let assets =
             AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
-        let state = Arc::new(AppState::new(config, db, cache, assets, chain, None, None));
+        let state = Arc::new(AppState::new(
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            None,
+            None,
+            None,
+        ));
         let app = build_app(state);
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
