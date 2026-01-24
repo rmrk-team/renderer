@@ -11,7 +11,7 @@ use tokio_util::io::ReaderStream;
 
 pub fn router(store: Arc<PinnedAssetStore>) -> Router {
     Router::new()
-        .route("/ipfs/*path", get(serve_ipfs))
+        .route("/ipfs/{*path}", get(serve_ipfs))
         .layer(Extension(store))
 }
 

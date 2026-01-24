@@ -16,6 +16,9 @@ spec-docs/
 dist/
 
 cache/
+pinned/
+pinned-test/
+pinned-test*/
 *.db*
 
 *.code-workspace

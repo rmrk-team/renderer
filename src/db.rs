@@ -1855,6 +1855,24 @@ impl Database {
         Ok(())
     }
 
+    pub async fn mark_token_warmup_invalid_uris_done(&self, job_id: i64) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE token_warmup_items
+            SET status = 'done', last_error = NULL, updated_at = ?1
+            WHERE job_id = ?2
+              AND status = 'failed'
+              AND last_error LIKE '%invalid asset uri%'
+            "#,
+        )
+        .bind(now)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn insert_token_warmup_items(&self, job_id: i64, tokens: &[String]) -> Result<()> {
         if tokens.is_empty() {
             return Ok(());
@@ -2927,6 +2945,8 @@ mod tests {
             max_svg_bytes: 1,
             max_svg_node_count: 1,
             max_raster_bytes: 1,
+            max_raster_resize_bytes: 1,
+            max_raster_resize_dim: 1,
             max_layers_per_render: 1,
             max_canvas_pixels: 1,
             max_total_raster_pixels: 1,

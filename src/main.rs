@@ -321,6 +321,8 @@ mod tests {
             max_svg_bytes: 1,
             max_svg_node_count: 1,
             max_raster_bytes: 1,
+            max_raster_resize_bytes: 1,
+            max_raster_resize_dim: 1,
             max_layers_per_render: 1,
             max_canvas_pixels: 1,
             max_total_raster_pixels: 1,

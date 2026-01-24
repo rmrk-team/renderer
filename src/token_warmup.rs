@@ -1,3 +1,4 @@
+use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::chain::{ComposeResult, FixedPart};
 use crate::db::TokenWarmupItem;
@@ -111,6 +112,20 @@ async fn run_worker(state: Arc<AppState>) {
             .await;
         let result = run_item(state.clone(), &item).await;
         if let Err(err) = result {
+            if is_invalid_uri_error(&err) {
+                warn!(
+                    error = ?err,
+                    chain = %item.chain,
+                    collection = %item.collection_address,
+                    token_id = %item.token_id,
+                    "token warmup invalid uri, skipping"
+                );
+                let _ = state
+                    .db
+                    .update_token_warmup_item_status(item.id, "done", None)
+                    .await;
+                continue;
+            }
             warn!(
                 error = ?err,
                 chain = %item.chain,
@@ -152,10 +167,31 @@ async fn run_item(state: Arc<AppState>, item: &TokenWarmupItem) -> Result<()> {
         art_uris.extend(resolved_uris.drain());
     }
     for art_uri in art_uris {
+        let art_uri = art_uri.trim().to_string();
+        if art_uri.is_empty() {
+            warn!(
+                chain = %item.chain,
+                collection = %item.collection_address,
+                token_id = %item.token_id,
+                "empty asset uri, skipping"
+            );
+            continue;
+        }
         let location = record_token_asset_ref(&state, item, &art_uri, "token_asset").await;
         if let Err(err) = state.assets.fetch_asset(&art_uri).await {
-            record_pinned_failure(&state, location.as_ref(), &art_uri, &err).await;
-            return Err(err);
+            if is_invalid_uri_error(&err) {
+                warn!(
+                    chain = %item.chain,
+                    collection = %item.collection_address,
+                    token_id = %item.token_id,
+                    art_uri = %art_uri,
+                    "invalid asset uri, skipping"
+                );
+                continue;
+            }
+            let wrapped = anyhow!("asset fetch failed for {art_uri}: {err}");
+            record_pinned_failure(&state, location.as_ref(), &art_uri, &wrapped).await;
+            return Err(wrapped);
         }
     }
     info!(
@@ -241,6 +277,15 @@ async fn scan_metadata_uri(
     item: &TokenWarmupItem,
     metadata_uri: &str,
 ) -> Result<HashSet<String>> {
+    if metadata_uri.trim().is_empty() {
+        warn!(
+            chain = %item.chain,
+            collection = %item.collection_address,
+            token_id = %item.token_id,
+            "empty metadata uri, skipping"
+        );
+        return Ok(HashSet::new());
+    }
     let location = record_token_asset_ref(state, item, metadata_uri, "token_metadata").await;
     let mut art_uris = HashSet::new();
     for prefer_thumb in [false, true] {
@@ -262,8 +307,19 @@ async fn scan_metadata_uri(
                 );
             }
             Err(err) => {
-                record_pinned_failure(state, location.as_ref(), metadata_uri, &err).await;
-                return Err(err);
+                if is_invalid_uri_error(&err) {
+                    warn!(
+                        chain = %item.chain,
+                        collection = %item.collection_address,
+                        token_id = %item.token_id,
+                        metadata_uri = %metadata_uri,
+                        "invalid metadata uri, skipping"
+                    );
+                    continue;
+                }
+                let wrapped = anyhow!("metadata resolve failed for {metadata_uri}: {err}");
+                record_pinned_failure(state, location.as_ref(), metadata_uri, &wrapped).await;
+                return Err(wrapped);
             }
         }
     }
@@ -321,7 +377,20 @@ async fn record_pinned_failure(
         .await;
 }
 
+fn is_invalid_uri_error(err: &anyhow::Error) -> bool {
+    if err.to_string().contains("invalid asset uri") {
+        return true;
+    }
+    err.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<AssetFetchError>(),
+            Some(AssetFetchError::InvalidUri)
+        )
+    })
+}
+
 async fn finalize_job_if_ready(state: &AppState, job_id: i64) -> Result<()> {
+    let _ = state.db.mark_token_warmup_invalid_uris_done(job_id).await;
     let (queued, running, _done, failed, total) = state.db.token_warmup_item_counts(job_id).await?;
     if total == 0 {
         return Ok(());

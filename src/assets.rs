@@ -3,13 +3,19 @@ use crate::config::Config;
 use crate::db::Database;
 use crate::pinning::{PinnedAssetStore, content_type_from_path};
 use anyhow::{Context, Result, anyhow};
+use base64::Engine;
 use bytes::{Bytes, BytesMut};
+use image::codecs::jpeg::JpegEncoder;
+use image::codecs::png::{CompressionType, FilterType as PngFilterType, PngEncoder};
+use image::codecs::webp::WebPEncoder;
+use image::imageops::FilterType;
+use image::{DynamicImage, GenericImageView, ImageEncoder, ImageFormat, ImageReader};
 use mime::Mime;
 use reqwest::{StatusCode, header};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
-use std::io::ErrorKind;
+use std::io::{Cursor, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -237,6 +243,25 @@ impl AssetResolver {
             }
         };
         if let Some((art_uri, source)) = select_render_uri(&json, prefer_thumb) {
+            let mut art_uri = art_uri.trim().to_string();
+            if let Some(normalized) = normalize_ipfs_uri(&art_uri) {
+                art_uri = normalized;
+            }
+            if art_uri.is_empty() || !is_supported_asset_uri(&art_uri) {
+                debug!(
+                    metadata_uri = %metadata_uri,
+                    art_uri = %art_uri,
+                    field = %source,
+                    "metadata render uri invalid, treating as non-renderable"
+                );
+                let mut cache = self.nonrenderable_meta_cache.lock().await;
+                cache.insert(
+                    metadata_uri.to_string(),
+                    NONRENDERABLE_META_CACHE_TTL,
+                    NONRENDERABLE_META_CACHE_CAPACITY,
+                );
+                return Ok(None);
+            }
             debug!(
                 metadata_uri = %metadata_uri,
                 art_uri = %art_uri,
@@ -261,6 +286,27 @@ impl AssetResolver {
     }
 
     pub async fn fetch_asset(&self, uri: &str) -> Result<ResolvedAsset> {
+        let uri = uri.trim();
+        if uri.starts_with("data:") {
+            let (bytes, content_type) = parse_data_uri(uri)?;
+            let bytes = if bytes.len() > self.config.max_raster_bytes {
+                if let Some(format) = infer_image_format(content_type.as_ref(), &bytes) {
+                    resize_raster_bytes(
+                        &bytes,
+                        format,
+                        self.config.max_raster_resize_dim,
+                        self.config.max_decoded_raster_pixels,
+                    )
+                    .map(Bytes::from)
+                    .unwrap_or(bytes)
+                } else {
+                    bytes
+                }
+            } else {
+                bytes
+            };
+            return Ok(ResolvedAsset { bytes });
+        }
         let resolved = self.resolve_uri(uri)?;
         if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
             return Ok(ResolvedAsset { bytes });
@@ -279,9 +325,31 @@ impl AssetResolver {
             }
             return Ok(ResolvedAsset { bytes });
         }
-        let fetched = self
+        let fetched = match self
             .fetch_bytes_with_retry(&resolved, FetchKind::Asset)
-            .await?;
+            .await
+        {
+            Ok(fetched) => fetched,
+            Err(err) => {
+                if is_too_large_asset_error(&err) {
+                    if let Some(resized) = self.fetch_resized_raster(&resolved).await? {
+                        self.cache.store_file(&cache_path, &resized.bytes).await?;
+                        if resolved.is_ipfs {
+                            self.pin_ipfs_bytes(
+                                &resolved,
+                                &resized.bytes,
+                                resized.content_type.as_ref(),
+                            )
+                            .await;
+                        }
+                        return Ok(ResolvedAsset {
+                            bytes: resized.bytes,
+                        });
+                    }
+                }
+                return Err(err);
+            }
+        };
         self.cache.store_file(&cache_path, &fetched.bytes).await?;
         if resolved.is_ipfs {
             self.pin_ipfs_bytes(&resolved, &fetched.bytes, fetched.content_type.as_ref())
@@ -293,7 +361,15 @@ impl AssetResolver {
     }
 
     pub async fn fetch_metadata_json(&self, metadata_uri: &str) -> Result<Bytes> {
-        let resolved = self.resolve_uri(metadata_uri)?;
+        let uri = metadata_uri.trim();
+        if uri.starts_with("data:") {
+            let (bytes, _) = parse_data_uri(uri)?;
+            if bytes.len() > self.config.max_metadata_json_bytes {
+                return Err(anyhow!("metadata json too large ({} bytes)", bytes.len()));
+            }
+            return Ok(bytes);
+        }
+        let resolved = self.resolve_uri(uri)?;
         if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
             return Ok(bytes);
         }
@@ -483,14 +559,17 @@ impl AssetResolver {
 
     fn resolve_uri(&self, uri: &str) -> Result<ResolvedUri> {
         let uri = uri.trim();
-        if uri.starts_with("ipfs://") {
-            let (cid, path) = parse_ipfs_uri(uri)?;
+        if let Some(ipfs_uri) = normalize_ipfs_uri(uri) {
+            let (cid, path) = parse_ipfs_uri(&ipfs_uri)?;
             let gateway = self
                 .config
                 .ipfs_gateways
                 .first()
                 .ok_or_else(|| anyhow!("no ipfs gateways configured"))?;
-            let url = format!("{}{}{}", gateway, cid, path);
+            let url = Url::parse(gateway)
+                .and_then(|base| base.join(&format!("{cid}{path}")))
+                .map(|value| value.to_string())
+                .map_err(|_| AssetFetchError::InvalidUri)?;
             return Ok(ResolvedUri {
                 url,
                 cache_key: sha256_hex(&format!("{cid}{path}")),
@@ -499,17 +578,22 @@ impl AssetResolver {
                 path,
             });
         }
-        let parsed = Url::parse(uri).map_err(|_| AssetFetchError::InvalidUri)?;
+        let parsed = Url::parse(uri)
+            .or_else(|_| Url::parse(&uri.replace(' ', "%20")))
+            .map_err(|_| AssetFetchError::InvalidUri)
+            .with_context(|| format!("invalid asset uri: {uri}"))?;
         let scheme = parsed.scheme();
         if scheme == "http" && !self.config.allow_http {
             return Err(AssetFetchError::Blocked.into());
         }
         if scheme != "http" && scheme != "https" {
-            return Err(AssetFetchError::InvalidUri.into());
+            return Err(AssetFetchError::InvalidUri)
+                .with_context(|| format!("invalid asset uri: {uri}"));
         }
+        let normalized = parsed.to_string();
         Ok(ResolvedUri {
-            url: uri.to_string(),
-            cache_key: sha256_hex(uri),
+            url: normalized.clone(),
+            cache_key: sha256_hex(&normalized),
             is_ipfs: false,
             cid: String::new(),
             path: String::new(),
@@ -604,6 +688,79 @@ impl AssetResolver {
             bytes: buffer.freeze(),
             content_type,
         })
+    }
+
+    async fn fetch_http_bytes_with_limit(
+        &self,
+        url: &str,
+        max_bytes: usize,
+    ) -> Result<FetchedBytes> {
+        let resolved = self.validate_http_url(url).await?;
+        let _permit = self.ipfs_semaphore.acquire().await?;
+        let mut response = self.send_pinned_request(&resolved).await?;
+        if response.status() != StatusCode::OK {
+            return Err(AssetFetchError::UpstreamStatus {
+                status: response.status(),
+                url: resolved.parsed.as_str().to_string(),
+            }
+            .into());
+        }
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<Mime>().ok());
+        if let Some(length) = response.content_length() {
+            if length > max_bytes as u64 {
+                return Err(AssetFetchError::TooLarge.into());
+            }
+        }
+        let mut buffer = BytesMut::with_capacity(std::cmp::min(max_bytes, 64 * 1024));
+        let mut total = 0usize;
+        while let Some(chunk) = response.chunk().await? {
+            total = total.saturating_add(chunk.len());
+            if total > max_bytes {
+                return Err(AssetFetchError::TooLarge.into());
+            }
+            buffer.extend_from_slice(&chunk);
+        }
+        debug!(url = %url, size = total, "fetched asset");
+        Ok(FetchedBytes {
+            bytes: buffer.freeze(),
+            content_type,
+        })
+    }
+
+    async fn fetch_resized_raster(&self, resolved: &ResolvedUri) -> Result<Option<FetchedBytes>> {
+        let max_bytes = self.config.max_raster_resize_bytes;
+        if max_bytes == 0 || max_bytes <= self.config.max_raster_bytes {
+            return Ok(None);
+        }
+        let fetched = self
+            .fetch_http_bytes_with_limit(&resolved.url, max_bytes)
+            .await?;
+        let format = match infer_image_format(fetched.content_type.as_ref(), &fetched.bytes) {
+            Some(format) => format,
+            None => {
+                return Ok(None);
+            }
+        };
+        if !matches!(
+            format,
+            ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP
+        ) {
+            return Ok(None);
+        }
+        let encoded = resize_raster_bytes(
+            &fetched.bytes,
+            format,
+            self.config.max_raster_resize_dim,
+            self.config.max_decoded_raster_pixels,
+        )?;
+        Ok(Some(FetchedBytes {
+            bytes: Bytes::from(encoded),
+            content_type: mime_for_format(format),
+        }))
     }
 
     async fn validate_http_url(
@@ -854,11 +1011,219 @@ fn parse_ipfs_uri(uri: &str) -> Result<(String, String)> {
     Ok((cid, path))
 }
 
+fn normalize_ipfs_uri(uri: &str) -> Option<String> {
+    let trimmed = uri.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("ipfs://") {
+        return Some(format!("ipfs://{}", &trimmed[7..]));
+    }
+    if lower.starts_with("ipfs/") {
+        return Some(format!("ipfs://{}", &trimmed[5..]));
+    }
+    if lower.starts_with("/ipfs/") {
+        return Some(format!("ipfs://{}", &trimmed[6..]));
+    }
+    if is_valid_cid(trimmed) {
+        return Some(format!("ipfs://{trimmed}"));
+    }
+    if let Some((cid, rest)) = trimmed.split_once('/') {
+        if is_valid_cid(cid) {
+            return Some(format!("ipfs://{cid}/{rest}"));
+        }
+    }
+    None
+}
+
 fn is_valid_cid(cid: &str) -> bool {
     if cid.is_empty() {
         return false;
     }
     cid.chars().all(|ch| ch.is_ascii_alphanumeric())
+}
+
+fn parse_data_uri(uri: &str) -> Result<(Bytes, Option<Mime>)> {
+    let Some((meta, data)) = uri.split_once(',') else {
+        return Err(anyhow!("invalid data uri"));
+    };
+    let meta = meta
+        .strip_prefix("data:")
+        .ok_or_else(|| anyhow!("invalid data uri"))?;
+    let mut content_type = None;
+    let mut is_base64 = false;
+    for (idx, part) in meta.split(';').enumerate() {
+        if idx == 0 && !part.is_empty() && part.contains('/') {
+            content_type = part.parse::<Mime>().ok();
+            continue;
+        }
+        if part.eq_ignore_ascii_case("base64") {
+            is_base64 = true;
+        }
+    }
+    let bytes = if is_base64 {
+        Bytes::from(
+            base64::engine::general_purpose::STANDARD
+                .decode(data.as_bytes())
+                .context("data uri base64 decode failed")?,
+        )
+    } else {
+        Bytes::from(percent_decode_bytes(data)?)
+    };
+    Ok((bytes, content_type))
+}
+
+fn percent_decode_bytes(data: &str) -> Result<Vec<u8>> {
+    let mut output = Vec::with_capacity(data.len());
+    let mut bytes = data.as_bytes().iter().copied();
+    while let Some(value) = bytes.next() {
+        if value == b'%' {
+            let hi = bytes
+                .next()
+                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+            let lo = bytes
+                .next()
+                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+            let hi = (hi as char)
+                .to_digit(16)
+                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+            let lo = (lo as char)
+                .to_digit(16)
+                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+            output.push(((hi << 4) + lo) as u8);
+        } else {
+            output.push(value);
+        }
+    }
+    Ok(output)
+}
+
+fn is_too_large_asset_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<AssetFetchError>(),
+            Some(AssetFetchError::TooLarge)
+        )
+    })
+}
+
+fn is_supported_asset_uri(uri: &str) -> bool {
+    let trimmed = uri.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.to_ascii_lowercase().starts_with("data:") {
+        return true;
+    }
+    if normalize_ipfs_uri(trimmed).is_some() {
+        return true;
+    }
+    let parsed = Url::parse(trimmed).or_else(|_| Url::parse(&trimmed.replace(' ', "%20")));
+    if let Ok(parsed) = parsed {
+        return matches!(parsed.scheme(), "http" | "https");
+    }
+    false
+}
+
+fn infer_image_format(content_type: Option<&Mime>, bytes: &[u8]) -> Option<ImageFormat> {
+    if let Some(content_type) = content_type {
+        match content_type.essence_str() {
+            "image/png" => return Some(ImageFormat::Png),
+            "image/jpeg" | "image/jpg" => return Some(ImageFormat::Jpeg),
+            "image/webp" => return Some(ImageFormat::WebP),
+            _ => {}
+        }
+    }
+    image::guess_format(bytes).ok()
+}
+
+fn mime_for_format(format: ImageFormat) -> Option<Mime> {
+    match format {
+        ImageFormat::Png => Some(mime::IMAGE_PNG),
+        ImageFormat::Jpeg => Some(mime::IMAGE_JPEG),
+        ImageFormat::WebP => Some("image/webp".parse().ok()?),
+        _ => None,
+    }
+}
+
+fn resize_image_to_limit(image: DynamicImage, max_dim: u32) -> DynamicImage {
+    if max_dim == 0 {
+        return image;
+    }
+    let (width, height) = image.dimensions();
+    if width <= max_dim && height <= max_dim {
+        return image;
+    }
+    let ratio = (max_dim as f32 / width as f32).min(max_dim as f32 / height as f32);
+    let target_w = ((width as f32) * ratio).round().max(1.0) as u32;
+    let target_h = ((height as f32) * ratio).round().max(1.0) as u32;
+    image.resize_exact(target_w, target_h, FilterType::Lanczos3)
+}
+
+fn resize_raster_bytes(
+    bytes: &[u8],
+    format: ImageFormat,
+    max_dim: u32,
+    max_pixels: u64,
+) -> Result<Vec<u8>> {
+    let mut reader = ImageReader::new(Cursor::new(bytes));
+    reader.set_format(format);
+    reader.limits(raster_limits(max_pixels));
+    let image = reader.decode()?;
+    let resized = resize_image_to_limit(image, max_dim);
+    encode_raster_image(resized, format)
+}
+
+fn encode_raster_image(image: DynamicImage, format: ImageFormat) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    match format {
+        ImageFormat::Png => {
+            let rgba = image.to_rgba8();
+            let encoder = PngEncoder::new_with_quality(
+                &mut bytes,
+                CompressionType::Best,
+                PngFilterType::Adaptive,
+            );
+            encoder.write_image(
+                rgba.as_raw(),
+                image.width(),
+                image.height(),
+                image::ExtendedColorType::Rgba8,
+            )?;
+        }
+        ImageFormat::Jpeg => {
+            let rgb = image.to_rgb8();
+            let mut encoder = JpegEncoder::new_with_quality(&mut bytes, 85);
+            encoder.encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ColorType::Rgb8.into(),
+            )?;
+        }
+        ImageFormat::WebP => {
+            let encoder = WebPEncoder::new_lossless(&mut bytes);
+            encoder.encode(
+                image.to_rgba8().as_raw(),
+                image.width(),
+                image.height(),
+                image::ColorType::Rgba8.into(),
+            )?;
+        }
+        _ => return Err(anyhow!("unsupported raster format for resize")),
+    }
+    Ok(bytes)
+}
+
+fn raster_limits(max_pixels: u64) -> image::Limits {
+    let max_dim = max_pixels.min(u32::MAX as u64) as u32;
+    let max_alloc = max_pixels.saturating_mul(4);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(max_dim);
+    limits.max_image_height = Some(max_dim);
+    limits.max_alloc = Some(max_alloc);
+    limits
 }
 
 fn sha256_hex(input: &str) -> String {
@@ -944,7 +1309,9 @@ fn select_render_uri(
         .or(metadata.thumbnail_uri_alt.as_ref());
     if prefer_thumb {
         if let Some(value) = thumb {
-            return Some((value.clone(), "thumbnailUri"));
+            if !value.trim().is_empty() {
+                return Some((value.clone(), "thumbnailUri"));
+            }
         }
     }
     let media = metadata
@@ -952,22 +1319,34 @@ fn select_render_uri(
         .as_ref()
         .or(metadata.media_uri_alt.as_ref());
     if let Some(value) = media {
-        return Some((value.clone(), "mediaUri"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "mediaUri"));
+        }
     }
     if let Some(value) = metadata.animation_url.as_ref() {
-        return Some((value.clone(), "animation_url"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "animation_url"));
+        }
     }
     if let Some(value) = metadata.animation_url_alt.as_ref() {
-        return Some((value.clone(), "animationUrl"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "animationUrl"));
+        }
     }
     if let Some(value) = metadata.image.as_ref() {
-        return Some((value.clone(), "image"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "image"));
+        }
     }
     if let Some(value) = metadata.src.as_ref() {
-        return Some((value.clone(), "src"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "src"));
+        }
     }
     if let Some(value) = thumb {
-        return Some((value.clone(), "thumbnailUri"));
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "thumbnailUri"));
+        }
     }
     None
 }
@@ -1009,6 +1388,25 @@ mod tests {
     fn parse_ipfs_uri_rejects_invalid_cid() {
         assert!(parse_ipfs_uri("ipfs://ba..fy").is_err());
         assert!(parse_ipfs_uri("ipfs://bafy?123").is_err());
+    }
+
+    #[test]
+    fn normalize_ipfs_uri_accepts_bare_cid() {
+        let normalized = normalize_ipfs_uri("bafy123").unwrap();
+        assert_eq!(normalized, "ipfs://bafy123");
+    }
+
+    #[test]
+    fn normalize_ipfs_uri_accepts_cid_path() {
+        let normalized = normalize_ipfs_uri("bafy123/metadata.json").unwrap();
+        assert_eq!(normalized, "ipfs://bafy123/metadata.json");
+    }
+
+    #[test]
+    fn parse_data_uri_base64() {
+        let (bytes, mime) = parse_data_uri("data:text/plain;base64,SGVsbG8=").unwrap();
+        assert_eq!(mime.unwrap().essence_str(), "text/plain");
+        assert_eq!(bytes.as_ref(), b"Hello");
     }
 
     #[test]
@@ -1054,6 +1452,21 @@ mod tests {
             animation_url: None,
             animation_url_alt: None,
             src: None,
+            thumbnail_uri: None,
+            thumbnail_uri_alt: None,
+        };
+        assert!(select_render_uri(&metadata, false).is_none());
+    }
+
+    #[test]
+    fn metadata_skips_empty_strings() {
+        let metadata = MetadataJson {
+            image: Some("   ".to_string()),
+            media_uri: None,
+            media_uri_alt: None,
+            animation_url: None,
+            animation_url_alt: None,
+            src: Some("".to_string()),
             thumbnail_uri: None,
             thumbnail_uri_alt: None,
         };

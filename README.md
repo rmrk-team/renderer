@@ -47,6 +47,8 @@ Render safety caps:
 - `MAX_CANVAS_PIXELS` caps the canvas area (width × height).
 - `MAX_TOTAL_RASTER_PIXELS` caps total raster pixels across layers.
 - `MAX_DECODED_RASTER_PIXELS` caps raster decode dimensions before allocation.
+- `MAX_RASTER_RESIZE_BYTES` allows oversized raster downloads for resize.
+- `MAX_RASTER_RESIZE_DIM` rescales oversized rasters to fit within a max dimension.
 - `MAX_CACHE_VARIANTS_PER_KEY` limits cached timestamps per token/variant (evicts oldest).
 - `MAX_OVERLAY_LENGTH` and `MAX_BG_LENGTH` cap query param length.
 
@@ -146,6 +148,28 @@ Cacheless requests default to `DEFAULT_CACHE_TIMESTAMP=0`, which also powers war
 renders. When `cache=` is omitted, the renderer prefers a collection `cache_epoch`
 (if set) and falls back to `DEFAULT_CACHE_TIMESTAMP`. Set
 `DEFAULT_CACHE_TIMESTAMP=off` to disable default caching.
+
+### Token state cache + fresh revalidation
+
+```env
+TOKEN_STATE_CHECK_TTL_SECONDS=86400
+FRESH_RATE_LIMIT_SECONDS=300
+```
+
+- `TOKEN_STATE_CHECK_TTL_SECONDS` controls how long token state is considered fresh.
+- `FRESH_RATE_LIMIT_SECONDS` enforces the per-NFT cooldown for `?fresh=1`.
+- `?fresh=1` forces an on-chain state refresh, returns `Cache-Control: no-store`, and
+  still updates the canonical cache for subsequent non-fresh requests.
+- Client keys can bypass the fresh limiter by setting `allow_fresh=true` in the admin UI.
+
+### Disk sizing guidance
+
+- `PINNED_DIR` holds all unique IPFS assets discovered in Phase A+B. Plan for growth
+  equal to the total distinct media for your collections (often tens of GB).
+- `CACHE_DIR` stores rendered outputs and resized variants; allocate 2-4x the total
+  expected pinned asset size if you plan to cache multiple widths/OG renders.
+- Start with 50-200 GB for mid-sized collections and adjust after observing
+  `/status` cache stats and warmup asset counts.
 
 ### Landing page (optional)
 
@@ -524,7 +548,39 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
 
 Omit `epoch` to auto-bump by 1.
 
-### Warmup queue
+### Recommended ops flow (Phases A/B/C)
+
+1. Approve the collection (if approvals are required).
+2. Phase A: catalog warmup (pins shared assets).
+3. Phase B: token scan warmup (pins token-specific assets).
+4. Phase C: render warmup (optional pre-render of thumbnails/OG).
+
+### Catalog warmup (Phase A)
+
+```bash
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","token_id":"1","asset_id":"100"}' \
+  http://localhost:8080/admin/api/warmup/catalog
+```
+
+### Token warmup (Phase B)
+
+```bash
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","start_token":1,"end_token":100}' \
+  http://localhost:8080/admin/api/warmup/tokens
+
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","token_ids":["1","2","3"]}' \
+  http://localhost:8080/admin/api/warmup/tokens/manual
+```
+
+### Render warmup (Phase C, optional)
+
+Render warmup uses the normal render pipeline (pinned assets + token state cache).
 
 ```bash
 curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
@@ -538,6 +594,13 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
     "cache_timestamp":"1700000000000"
   }' \
   http://localhost:8080/admin/api/warmup
+```
+
+### Warmup status (Phases A/B)
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  "http://localhost:8080/admin/api/warmup/status?chain=base&collection=0x..."
 ```
 
 ### Warmup jobs (list + cancel)
@@ -593,6 +656,47 @@ cargo build --release
 
 ```bash
 cargo test
+```
+
+### Local smoke test (prod-style env)
+
+```bash
+set -a
+source .env
+set +a
+
+# Terminal 1
+cargo run
+```
+
+```bash
+# Terminal 2 (warmup A + B + optional C)
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","token_id":"1","asset_id":"100"}' \
+  http://localhost:8085/admin/api/warmup/catalog
+
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","start_token":1,"end_token":50}' \
+  http://localhost:8085/admin/api/warmup/tokens
+
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","token_ids":["1","2","3"],"widths":["medium"],"cache_timestamp":"1700000000000"}' \
+  http://localhost:8085/admin/api/warmup
+```
+
+```bash
+# Terminal 3 (simulate a marketplace grid)
+bun run scripts/marketplace-sim.ts \
+  --base-url http://127.0.0.1:8085 \
+  --chain base \
+  --collection 0x... \
+  --start 1 \
+  --count 100 \
+  --concurrency 20 \
+  --width medium
 ```
 
 ### CI suggestions
@@ -677,6 +781,20 @@ cargo run
 Put a CDN or reverse proxy (e.g., Cloudflare or Nginx) in front if desired.
 Cache control is safe because cache busting is URL-driven via the `cache=` parameter.
 
+## Troubleshooting
+
+### Failure log
+
+- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH`.
+- Set `FAILURE_LOG_PATH=off` to disable logging.
+- `FAILURE_LOG_MAX_BYTES` caps file size (oldest entries are truncated).
+
+### Warmup status
+
+- `/status` and `/admin/api/warmup/status` include queued/running/done/failed counts.
+- If warmups stop progressing, check pause state and resume via `/admin/api/warmup/resume`.
+- Use `/admin/api/warmup/jobs` and `/admin/api/warmup/jobs/{id}/cancel` to inspect or stop jobs.
+
 ## Notes
 
 - Canvas size is derived from the first fixed part’s art. If SVG sizing is invalid,
@@ -687,6 +805,9 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - If a static asset exceeds size limits and has `thumbnailUri`, the thumbnail is used.
 - Usage identity keys for non-API requests include the client IP (ensure `TRUSTED_PROXY_CIDRS` is set when proxying).
 - Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable).
+- `?fresh=1` forces a state refresh and returns `Cache-Control: no-store`. If rate-limited, expect 429 with `Retry-After`.
+- Oversized raster assets are fetched with a higher byte cap and resized to `MAX_RASTER_RESIZE_DIM` during pinning/asset fetch.
+- Token warmup skips invalid/empty asset URIs (logged) so jobs can complete.
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.

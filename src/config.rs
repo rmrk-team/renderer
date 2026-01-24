@@ -52,6 +52,8 @@ pub struct Config {
     pub max_svg_bytes: usize,
     pub max_svg_node_count: usize,
     pub max_raster_bytes: usize,
+    pub max_raster_resize_bytes: usize,
+    pub max_raster_resize_dim: u32,
     pub max_layers_per_render: usize,
     pub max_canvas_pixels: u64,
     pub max_total_raster_pixels: u64,
@@ -281,6 +283,11 @@ impl Config {
         let max_svg_bytes = parse_usize("MAX_SVG_BYTES", 2_097_152);
         let max_svg_node_count = parse_usize("MAX_SVG_NODE_COUNT", 200_000);
         let max_raster_bytes = parse_usize("MAX_RASTER_BYTES", 10 * 1024 * 1024);
+        let max_raster_resize_bytes = parse_usize(
+            "MAX_RASTER_RESIZE_BYTES",
+            max_raster_bytes.saturating_mul(5),
+        );
+        let max_raster_resize_dim = parse_u32("MAX_RASTER_RESIZE_DIM", 2048);
         let max_layers_per_render = parse_usize("MAX_LAYERS_PER_RENDER", 200);
         let max_canvas_pixels = parse_u64("MAX_CANVAS_PIXELS", 16_000_000);
         let max_total_raster_pixels = parse_u64("MAX_TOTAL_RASTER_PIXELS", 64_000_000);
@@ -426,6 +433,8 @@ impl Config {
             max_svg_bytes,
             max_svg_node_count,
             max_raster_bytes,
+            max_raster_resize_bytes,
+            max_raster_resize_dim,
             max_layers_per_render,
             max_canvas_pixels,
             max_total_raster_pixels,
