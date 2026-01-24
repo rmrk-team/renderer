@@ -599,6 +599,24 @@ impl AssetResolver {
             return Err(AssetFetchError::InvalidUri)
                 .with_context(|| format!("invalid asset uri: {uri}"));
         }
+        if let Some((cid, path)) = parse_ipfs_http_url(&parsed) {
+            let gateway = self
+                .config
+                .ipfs_gateways
+                .first()
+                .ok_or_else(|| anyhow!("no ipfs gateways configured"))?;
+            let url = Url::parse(gateway)
+                .and_then(|base| base.join(&format!("{cid}{path}")))
+                .map(|value| value.to_string())
+                .map_err(|_| AssetFetchError::InvalidUri)?;
+            return Ok(ResolvedUri {
+                url,
+                cache_key: sha256_hex(&format!("{cid}{path}")),
+                is_ipfs: true,
+                cid,
+                path,
+            });
+        }
         let normalized = parsed.to_string();
         Ok(ResolvedUri {
             url: normalized.clone(),
@@ -1085,6 +1103,26 @@ fn normalize_arweave_uri(uri: &str) -> Option<String> {
     None
 }
 
+fn parse_ipfs_http_url(parsed: &Url) -> Option<(String, String)> {
+    let path = parsed.path().trim_start_matches('/');
+    let mut parts = path.splitn(3, '/');
+    let prefix = parts.next()?.to_ascii_lowercase();
+    if prefix != "ipfs" {
+        return None;
+    }
+    let cid = parts.next()?.to_string();
+    if !is_valid_cid(&cid) {
+        return None;
+    }
+    let rest = parts.next().unwrap_or("");
+    let path = if rest.is_empty() {
+        String::new()
+    } else {
+        format!("/{rest}")
+    };
+    Some((cid, path))
+}
+
 fn is_valid_cid(cid: &str) -> bool {
     if cid.is_empty() {
         return false;
@@ -1508,6 +1546,14 @@ mod tests {
         let resolved =
             resolve_relative_art_uri("image.png", "ipfs://bafy123/metadata/metadata.json").unwrap();
         assert_eq!(resolved, "ipfs://bafy123/metadata/image.png");
+    }
+
+    #[test]
+    fn parse_ipfs_http_url_extracts_cid() {
+        let parsed = Url::parse("https://ipfs.io/ipfs/bafy123/dir/file.png").unwrap();
+        let (cid, path) = parse_ipfs_http_url(&parsed).unwrap();
+        assert_eq!(cid, "bafy123");
+        assert_eq!(path, "/dir/file.png");
     }
 
     #[test]

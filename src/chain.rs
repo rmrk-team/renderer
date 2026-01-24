@@ -274,8 +274,30 @@ impl ChainClient {
                         .map_err(|err| err.into())
                 }
             })
-            .await?;
-        Ok(response.0)
+            .await;
+        match response {
+            Ok(response) => Ok(response.0),
+            Err(primary_err) => {
+                let fallback = self
+                    .call_with_failover(chain, move |provider| {
+                        let contract = RmrkEquipRenderUtils::new(render_utils_address, provider);
+                        let collection = collection;
+                        let token_id = token_id;
+                        async move {
+                            contract
+                                .get_top_asset_and_equippable_data_for_token(collection, token_id)
+                                .call()
+                                .await
+                                .map_err(|err| err.into())
+                        }
+                    })
+                    .await;
+                match fallback {
+                    Ok(response) => Ok(response.0),
+                    Err(_) => Err(primary_err),
+                }
+            }
+        }
     }
 
     pub async fn get_asset_metadata(
