@@ -9,6 +9,7 @@ use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::refresh_canvas_size;
 use crate::state::AppState;
+use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
 use crate::warmup::{WarmupRequest, enqueue_warmup};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -56,6 +57,8 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         )
         .route("/api/warmup", get(warmup_stats).post(start_warmup))
         .route("/api/warmup/catalog", post(start_catalog_warmup))
+        .route("/api/warmup/tokens", post(start_token_warmup_range))
+        .route("/api/warmup/tokens/manual", post(start_token_warmup_manual))
         .route("/api/warmup/status", get(catalog_warmup_status))
         .route("/api/warmup/jobs", get(list_warmup_jobs))
         .route("/api/warmup/jobs/{id}/cancel", post(cancel_warmup_job))
@@ -350,6 +353,7 @@ async fn resume_warmup(
     state.db.set_warmup_paused(false).await?;
     state.warmup_notify.notify_one();
     state.catalog_warmup_notify.notify_one();
+    state.token_warmup_notify.notify_one();
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -367,6 +371,17 @@ struct CatalogWarmupStatus {
     assets_total: i64,
     assets_pinned: i64,
     assets_failed: i64,
+    token_job_id: Option<i64>,
+    token_status: String,
+    token_last_error: Option<String>,
+    tokens_total: i64,
+    tokens_queued: i64,
+    tokens_running: i64,
+    tokens_done: i64,
+    tokens_failed: i64,
+    token_assets_total: i64,
+    token_assets_pinned: i64,
+    token_assets_failed: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +414,74 @@ async fn start_catalog_warmup(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+struct TokenWarmupRangeRequest {
+    chain: String,
+    collection: String,
+    start_token: u64,
+    end_token: u64,
+    step: Option<u64>,
+    asset_id: Option<String>,
+    force: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenWarmupManualRequest {
+    chain: String,
+    collection: String,
+    token_ids: Vec<String>,
+    asset_id: Option<String>,
+    force: Option<bool>,
+}
+
+async fn start_token_warmup_range(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TokenWarmupRangeRequest>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) =
+        canonicalize_chain_collection(&state, &payload.chain, &payload.collection)?;
+    let request = TokenWarmupRequest {
+        chain,
+        collection,
+        start_token: Some(payload.start_token),
+        end_token: Some(payload.end_token),
+        step: payload.step,
+        token_ids: None,
+        asset_id: payload.asset_id,
+        force: payload.force,
+    };
+    let result = enqueue_token_warmup(state.clone(), request).await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "job_id": result.job_id,
+        "tokens_total": result.tokens_total
+    })))
+}
+
+async fn start_token_warmup_manual(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TokenWarmupManualRequest>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) =
+        canonicalize_chain_collection(&state, &payload.chain, &payload.collection)?;
+    let request = TokenWarmupRequest {
+        chain,
+        collection,
+        start_token: None,
+        end_token: None,
+        step: None,
+        token_ids: Some(payload.token_ids),
+        asset_id: payload.asset_id,
+        force: payload.force,
+    };
+    let result = enqueue_token_warmup(state.clone(), request).await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "job_id": result.job_id,
+        "tokens_total": result.tokens_total
+    })))
+}
+
 async fn catalog_warmup_status(
     State(state): State<Arc<AppState>>,
     Query(query): Query<CatalogWarmupStatusQuery>,
@@ -418,6 +501,18 @@ async fn catalog_warmup_status(
     };
     let (assets_total, assets_pinned, assets_failed) =
         state.db.catalog_asset_counts(&chain, &collection).await?;
+    let token_job = state.db.get_token_warmup_job(&chain, &collection).await?;
+    let (token_job_id, token_status, token_last_error) = match token_job {
+        Some((job_id, _asset_id, status, last_error)) => (Some(job_id), status, last_error),
+        None => (None, "idle".to_string(), None),
+    };
+    let (tokens_queued, tokens_running, tokens_done, tokens_failed, tokens_total) =
+        match token_job_id {
+            Some(job_id) => state.db.token_warmup_item_counts(job_id).await?,
+            None => (0, 0, 0, 0, 0),
+        };
+    let (token_assets_total, token_assets_pinned, token_assets_failed) =
+        state.db.token_asset_counts(&chain, &collection).await?;
     Ok(Json(CatalogWarmupStatus {
         job_id,
         status,
@@ -431,6 +526,17 @@ async fn catalog_warmup_status(
         assets_total,
         assets_pinned,
         assets_failed,
+        token_job_id,
+        token_status,
+        token_last_error,
+        tokens_total,
+        tokens_queued,
+        tokens_running,
+        tokens_done,
+        tokens_failed,
+        token_assets_total,
+        token_assets_pinned,
+        token_assets_failed,
     }))
 }
 
@@ -1150,6 +1256,54 @@ const ADMIN_HTML: &str = r#"<!doctype html>
       <button id="startCatalogWarmupBtn">Warm Catalog</button>
       <button id="loadCatalogWarmupBtn">Refresh Catalog Status</button>
       <div class="small" id="catalogWarmupStatus"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Token Warmup</legend>
+      <div class="small">Scans tokens to pin token-specific assets.</div>
+      <div class="row">
+        <div>
+          <label>Chain</label>
+          <input id="tokenWarmChain" placeholder="base" />
+        </div>
+        <div>
+          <label>Collection</label>
+          <input id="tokenWarmCollection" placeholder="0x..." />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Start token</label>
+          <input id="tokenWarmStart" placeholder="1" />
+        </div>
+        <div>
+          <label>End token</label>
+          <input id="tokenWarmEnd" placeholder="1000" />
+        </div>
+        <div>
+          <label>Step</label>
+          <input id="tokenWarmStep" placeholder="1" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Asset ID (optional)</label>
+          <input id="tokenWarmAsset" placeholder="100" />
+        </div>
+        <div>
+          <label>Force</label>
+          <select id="tokenWarmForce">
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </div>
+      </div>
+      <label>Token IDs (comma separated)</label>
+      <input id="tokenWarmTokens" placeholder="1,2,3" />
+      <button id="startTokenWarmRangeBtn">Warm Token Range</button>
+      <button id="startTokenWarmManualBtn">Warm Token IDs</button>
+      <button id="loadTokenWarmupBtn">Refresh Token Status</button>
+      <div class="small" id="tokenWarmupStatus"></div>
     </fieldset>
 
     <fieldset>

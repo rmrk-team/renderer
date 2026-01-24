@@ -130,6 +130,19 @@ pub struct CatalogWarmupItem {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenWarmupItem {
+    pub id: i64,
+    pub job_id: i64,
+    pub chain: String,
+    pub collection_address: String,
+    pub token_id: String,
+    pub asset_id: Option<String>,
+    pub status: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+}
+
 impl Database {
     pub async fn new(config: &Config) -> Result<Self> {
         if let Some(parent) = config.db_path.parent() {
@@ -314,6 +327,44 @@ impl Database {
         );
         CREATE INDEX IF NOT EXISTS collection_asset_refs_lookup_idx
           ON collection_asset_refs(chain, collection_address, source);
+        CREATE TABLE IF NOT EXISTS token_warmup_jobs (
+          id INTEGER PRIMARY KEY,
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          asset_id TEXT,
+          status TEXT NOT NULL,
+          last_error TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(chain, collection_address)
+        );
+        CREATE TABLE IF NOT EXISTS token_warmup_items (
+          id INTEGER PRIMARY KEY,
+          job_id INTEGER NOT NULL,
+          token_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER DEFAULT 0,
+          last_error TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(job_id, token_id),
+          FOREIGN KEY(job_id) REFERENCES token_warmup_jobs(id)
+        );
+        CREATE INDEX IF NOT EXISTS token_warmup_items_status_idx
+          ON token_warmup_items(job_id, status);
+        CREATE TABLE IF NOT EXISTS token_asset_refs (
+          id INTEGER PRIMARY KEY,
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          asset_key TEXT NOT NULL,
+          source TEXT NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(chain, collection_address, token_id, asset_key, source)
+        );
+        CREATE INDEX IF NOT EXISTS token_asset_refs_lookup_idx
+          ON token_asset_refs(chain, collection_address, token_id, source);
         INSERT OR IGNORE INTO warmup_state (id, paused) VALUES (1, 0);
         "#;
         sqlx::query(schema).execute(&self.pool).await?;
@@ -1674,6 +1725,233 @@ impl Database {
         Ok(())
     }
 
+    pub async fn upsert_token_warmup_job(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        asset_id: Option<&str>,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<i64> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO token_warmup_jobs (
+              chain, collection_address, asset_id, status, last_error, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              asset_id = COALESCE(excluded.asset_id, token_warmup_jobs.asset_id),
+              status = excluded.status,
+              last_error = excluded.last_error,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(asset_id)
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        let row = sqlx::query(
+            r#"
+            SELECT id
+            FROM token_warmup_jobs
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get("id"))
+    }
+
+    pub async fn get_token_warmup_job(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<Option<(i64, Option<String>, String, Option<String>)>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, asset_id, status, last_error
+            FROM token_warmup_jobs
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| {
+            (
+                row.get("id"),
+                row.get("asset_id"),
+                row.get("status"),
+                row.get("last_error"),
+            )
+        }))
+    }
+
+    pub async fn clear_token_warmup_items(&self, job_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM token_warmup_items WHERE job_id = ?1")
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn insert_token_warmup_items(&self, job_id: i64, tokens: &[String]) -> Result<()> {
+        if tokens.is_empty() {
+            return Ok(());
+        }
+        let now = now_epoch();
+        let mut tx = self.pool.begin().await?;
+        for token_id in tokens {
+            sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO token_warmup_items (
+                  job_id, token_id, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, 'queued', ?3, ?4)
+                "#,
+            )
+            .bind(job_id)
+            .bind(token_id)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_next_token_warmup_item(&self) -> Result<Option<TokenWarmupItem>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            SELECT i.id, i.job_id, j.chain, j.collection_address, i.token_id,
+                   j.asset_id, i.status, i.attempts, i.last_error
+            FROM token_warmup_items i
+            JOIN token_warmup_jobs j ON i.job_id = j.id
+            WHERE i.status = 'queued'
+            ORDER BY i.id ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let row = match row {
+            Some(row) => row,
+            None => {
+                tx.commit().await?;
+                return Ok(None);
+            }
+        };
+        let id: i64 = row.get("id");
+        let attempts: i64 = row.get("attempts");
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE token_warmup_items
+            SET status = 'running', attempts = ?1, updated_at = ?2
+            WHERE id = ?3
+            "#,
+        )
+        .bind(attempts + 1)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Some(TokenWarmupItem {
+            id,
+            job_id: row.get("job_id"),
+            chain: row.get("chain"),
+            collection_address: row.get("collection_address"),
+            token_id: row.get("token_id"),
+            asset_id: row.get("asset_id"),
+            status: "running".to_string(),
+            attempts: attempts + 1,
+            last_error: row.get("last_error"),
+        }))
+    }
+
+    pub async fn update_token_warmup_item_status(
+        &self,
+        id: i64,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE token_warmup_items
+            SET status = ?1, last_error = ?2, updated_at = ?3
+            WHERE id = ?4
+            "#,
+        )
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn token_warmup_item_counts(&self, job_id: i64) -> Result<(i64, i64, i64, i64, i64)> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+              SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+              COUNT(1) AS total
+            FROM token_warmup_items
+            WHERE job_id = ?1
+            "#,
+        )
+        .bind(job_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.get::<Option<i64>, _>("queued").unwrap_or(0),
+            row.get::<Option<i64>, _>("running").unwrap_or(0),
+            row.get::<Option<i64>, _>("done").unwrap_or(0),
+            row.get::<Option<i64>, _>("failed").unwrap_or(0),
+            row.get::<Option<i64>, _>("total").unwrap_or(0),
+        ))
+    }
+
+    pub async fn set_token_warmup_job_status(
+        &self,
+        job_id: i64,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE token_warmup_jobs
+            SET status = ?1, last_error = ?2, updated_at = ?3
+            WHERE id = ?4
+            "#,
+        )
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn upsert_collection_asset_ref(
         &self,
         chain: &str,
@@ -1766,6 +2044,115 @@ impl Database {
             WHERE refs.chain = ?1
               AND refs.collection_address = ?2
               AND refs.source = 'catalog_asset'
+              AND pinned.status = 'failed'
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let failed = failed_row.get::<Option<i64>, _>("count").unwrap_or(0);
+
+        Ok((total, pinned, failed))
+    }
+
+    pub async fn upsert_token_asset_ref(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+        asset_key: &str,
+        source: &str,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO token_asset_refs (
+              chain, collection_address, token_id, asset_key, source, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .bind(asset_key)
+        .bind(source)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn clear_token_asset_refs_for_tokens(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_ids: &[String],
+    ) -> Result<()> {
+        if token_ids.is_empty() {
+            return Ok(());
+        }
+        let mut tx = self.pool.begin().await?;
+        for token_id in token_ids {
+            sqlx::query(
+                r#"
+                DELETE FROM token_asset_refs
+                WHERE chain = ?1 AND collection_address = ?2 AND token_id = ?3
+                "#,
+            )
+            .bind(chain)
+            .bind(collection_address)
+            .bind(token_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn token_asset_counts(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<(i64, i64, i64)> {
+        let total_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT asset_key) AS total
+            FROM token_asset_refs
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let total = total_row.get::<Option<i64>, _>("total").unwrap_or(0);
+
+        let pinned_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT refs.asset_key) AS count
+            FROM token_asset_refs refs
+            JOIN pinned_assets pinned ON refs.asset_key = pinned.asset_key
+            WHERE refs.chain = ?1
+              AND refs.collection_address = ?2
+              AND pinned.status = 'pinned'
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let pinned = pinned_row.get::<Option<i64>, _>("count").unwrap_or(0);
+
+        let failed_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT refs.asset_key) AS count
+            FROM token_asset_refs refs
+            JOIN pinned_assets pinned ON refs.asset_key = pinned.asset_key
+            WHERE refs.chain = ?1
+              AND refs.collection_address = ?2
               AND pinned.status = 'failed'
             "#,
         )
@@ -2503,6 +2890,72 @@ mod tests {
 
         let (assets_total, assets_pinned, assets_failed) =
             db.catalog_asset_counts("base", "0xabc").await.unwrap();
+        assert_eq!(assets_total, 2);
+        assert_eq!(assets_pinned, 1);
+        assert_eq!(assets_failed, 1);
+    }
+
+    #[tokio::test]
+    async fn token_warmup_roundtrip() {
+        let dir = tempdir().unwrap();
+        let config = test_config(dir.path().join("renderer.db"));
+        let db = Database::new(&config).await.unwrap();
+
+        let job_id = db
+            .upsert_token_warmup_job("base", "0xabc", None, "queued", None)
+            .await
+            .unwrap();
+        db.insert_token_warmup_items(job_id, &["1".to_string(), "2".to_string(), "3".to_string()])
+            .await
+            .unwrap();
+
+        let (queued, running, done, failed, total) =
+            db.token_warmup_item_counts(job_id).await.unwrap();
+        assert_eq!(queued, 3);
+        assert_eq!(running, 0);
+        assert_eq!(done, 0);
+        assert_eq!(failed, 0);
+        assert_eq!(total, 3);
+
+        let first = db.fetch_next_token_warmup_item().await.unwrap().unwrap();
+        assert_eq!(first.token_id, "1");
+        db.update_token_warmup_item_status(first.id, "done", None)
+            .await
+            .unwrap();
+        let second = db.fetch_next_token_warmup_item().await.unwrap().unwrap();
+        assert_eq!(second.token_id, "2");
+        db.update_token_warmup_item_status(second.id, "failed", Some("boom"))
+            .await
+            .unwrap();
+        let third = db.fetch_next_token_warmup_item().await.unwrap().unwrap();
+        assert_eq!(third.token_id, "3");
+        db.update_token_warmup_item_status(third.id, "done", None)
+            .await
+            .unwrap();
+
+        let (queued, running, done, failed, total) =
+            db.token_warmup_item_counts(job_id).await.unwrap();
+        assert_eq!(queued, 0);
+        assert_eq!(running, 0);
+        assert_eq!(done, 2);
+        assert_eq!(failed, 1);
+        assert_eq!(total, 3);
+
+        db.upsert_token_asset_ref("base", "0xabc", "1", "ipfs://cid/token1.svg", "token_asset")
+            .await
+            .unwrap();
+        db.upsert_token_asset_ref("base", "0xabc", "2", "ipfs://cid/token2.svg", "token_asset")
+            .await
+            .unwrap();
+        db.upsert_pinned_asset("ipfs://cid/token1.svg", "cid", "token1.svg", None, 12)
+            .await
+            .unwrap();
+        db.record_pinned_asset_failure("ipfs://cid/token2.svg", "cid", "token2.svg", "failure")
+            .await
+            .unwrap();
+
+        let (assets_total, assets_pinned, assets_failed) =
+            db.token_asset_counts("base", "0xabc").await.unwrap();
         assert_eq!(assets_total, 2);
         assert_eq!(assets_pinned, 1);
         assert_eq!(assets_failed, 1);

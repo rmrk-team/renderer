@@ -18,6 +18,7 @@ mod rate_limit;
 mod render;
 mod render_queue;
 mod state;
+mod token_warmup;
 mod usage;
 mod warmup;
 
@@ -240,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
         warmup::spawn_worker(warmup_state).await;
     });
     catalog_warmup::spawn_workers(state.clone()).await;
+    token_warmup::spawn_workers(state.clone()).await;
 
     approvals::spawn_approval_watchers(state.clone()).await;
     approvals::spawn_approval_sync(state.clone()).await;

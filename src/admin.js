@@ -171,6 +171,43 @@ async function startCatalogWarmup() {
     `Job ${result.job_id}: ${result.parts_total} parts queued`;
 }
 
+async function startTokenWarmupRange() {
+  const payload = {
+    chain: document.getElementById('tokenWarmChain').value.trim(),
+    collection: document.getElementById('tokenWarmCollection').value.trim(),
+    start_token: parseInt(document.getElementById('tokenWarmStart').value, 10),
+    end_token: parseInt(document.getElementById('tokenWarmEnd').value, 10),
+    step: document.getElementById('tokenWarmStep').value
+      ? parseInt(document.getElementById('tokenWarmStep').value, 10)
+      : null,
+    asset_id: document.getElementById('tokenWarmAsset').value.trim() || null,
+    force: document.getElementById('tokenWarmForce').value === 'true',
+  };
+  const result = await apiFetch('/admin/api/warmup/tokens', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  document.getElementById('tokenWarmupStatus').textContent =
+    `Job ${result.job_id}: ${result.tokens_total} tokens queued`;
+}
+
+async function startTokenWarmupManual() {
+  const tokensRaw = document.getElementById('tokenWarmTokens').value.trim();
+  const payload = {
+    chain: document.getElementById('tokenWarmChain').value.trim(),
+    collection: document.getElementById('tokenWarmCollection').value.trim(),
+    token_ids: tokensRaw ? tokensRaw.split(',').map(x => x.trim()).filter(Boolean) : [],
+    asset_id: document.getElementById('tokenWarmAsset').value.trim() || null,
+    force: document.getElementById('tokenWarmForce').value === 'true',
+  };
+  const result = await apiFetch('/admin/api/warmup/tokens/manual', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  document.getElementById('tokenWarmupStatus').textContent =
+    `Job ${result.job_id}: ${result.tokens_total} tokens queued`;
+}
+
 async function loadWarmupStats() {
   const result = await apiFetch('/admin/api/warmup');
   document.getElementById('warmupStatus').textContent =
@@ -184,6 +221,15 @@ async function loadCatalogWarmupStatus() {
   const result = await apiFetch(`/admin/api/warmup/status?chain=${encodeURIComponent(chain)}&collection=${encodeURIComponent(collection)}`);
   document.getElementById('catalogWarmupStatus').textContent =
     `status=${result.status}, parts=${result.parts_done}/${result.parts_total}, assets=${result.assets_pinned}/${result.assets_total}, failed=${result.assets_failed}`;
+}
+
+async function loadTokenWarmupStatus() {
+  const chain = document.getElementById('tokenWarmChain').value.trim();
+  const collection = document.getElementById('tokenWarmCollection').value.trim();
+  if (!chain || !collection) return;
+  const result = await apiFetch(`/admin/api/warmup/status?chain=${encodeURIComponent(chain)}&collection=${encodeURIComponent(collection)}`);
+  document.getElementById('tokenWarmupStatus').textContent =
+    `status=${result.token_status}, tokens=${result.tokens_done}/${result.tokens_total}, assets=${result.token_assets_pinned}/${result.token_assets_total}, failed=${result.token_assets_failed}`;
 }
 
 async function loadWarmupJobs() {
@@ -499,6 +545,9 @@ bindClick('pauseWarmupBtn', pauseWarmup);
 bindClick('resumeWarmupBtn', resumeWarmup);
 bindClick('loadWarmupStatsBtn', loadWarmupStats);
 bindClick('loadCatalogWarmupBtn', loadCatalogWarmupStatus);
+bindClick('startTokenWarmRangeBtn', startTokenWarmupRange);
+bindClick('startTokenWarmManualBtn', startTokenWarmupManual);
+bindClick('loadTokenWarmupBtn', loadTokenWarmupStatus);
 bindClick('loadWarmupJobsBtn', loadWarmupJobs);
 bindClick('loadCacheStatsBtn', loadCacheStats);
 bindClick('purgeCollectionBtn', purgeCollection);

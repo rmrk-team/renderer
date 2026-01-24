@@ -28,6 +28,7 @@ pub struct AppState {
     pub rpc_semaphore: Arc<Semaphore>,
     pub warmup_notify: Arc<Notify>,
     pub catalog_warmup_notify: Arc<Notify>,
+    pub token_warmup_notify: Arc<Notify>,
     pub render_cache_limiter: RenderCacheLimiter,
     pub rate_limiter: RateLimiter,
     pub key_rate_limiter: KeyRateLimiter,
@@ -70,6 +71,7 @@ impl AppState {
         let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
         let warmup_notify = Arc::new(Notify::new());
         let catalog_warmup_notify = Arc::new(Notify::new());
+        let token_warmup_notify = Arc::new(Notify::new());
         let render_cache_limiter = RenderCacheLimiter::new(config.max_cache_variants_per_key);
         let rate_limiter = RateLimiter::new(config.rate_limit_per_minute, config.rate_limit_burst);
         let key_rate_limiter = KeyRateLimiter::new();
@@ -114,6 +116,7 @@ impl AppState {
             rpc_semaphore,
             warmup_notify,
             catalog_warmup_notify,
+            token_warmup_notify,
             render_cache_limiter,
             rate_limiter,
             key_rate_limiter,
