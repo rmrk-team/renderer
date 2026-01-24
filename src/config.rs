@@ -99,6 +99,8 @@ pub struct Config {
     pub warmup_job_timeout_seconds: u64,
     pub warmup_max_block_span: u64,
     pub warmup_max_concurrent_asset_pins: usize,
+    pub token_state_check_ttl_seconds: u64,
+    pub fresh_rate_limit_seconds: u64,
     pub primary_asset_cache_ttl: Duration,
     pub primary_asset_negative_ttl: Duration,
     pub primary_asset_cache_capacity: usize,
@@ -351,6 +353,8 @@ impl Config {
         let warmup_job_timeout_seconds = parse_u64("WARMUP_JOB_TIMEOUT_SECONDS", 600);
         let warmup_max_block_span = parse_u64("WARMUP_MAX_BLOCK_SPAN", 0);
         let warmup_max_concurrent_asset_pins = parse_usize("WARMUP_MAX_CONCURRENT_ASSET_PINS", 4);
+        let token_state_check_ttl_seconds = parse_u64("TOKEN_STATE_CHECK_TTL_SECONDS", 86400);
+        let fresh_rate_limit_seconds = parse_u64("FRESH_RATE_LIMIT_SECONDS", 300);
         let primary_asset_cache_ttl =
             Duration::from_secs(parse_u64("PRIMARY_ASSET_CACHE_TTL_SECONDS", 60));
         let primary_asset_negative_ttl =
@@ -469,6 +473,8 @@ impl Config {
             warmup_job_timeout_seconds,
             warmup_max_block_span,
             warmup_max_concurrent_asset_pins,
+            token_state_check_ttl_seconds,
+            fresh_rate_limit_seconds,
             primary_asset_cache_ttl,
             primary_asset_negative_ttl,
             primary_asset_cache_capacity,

@@ -708,6 +708,7 @@ struct ClientKeyCreateRequest {
     rate_limit_per_minute: Option<i64>,
     burst: Option<i64>,
     max_concurrent_renders_override: Option<i64>,
+    allow_fresh: Option<bool>,
 }
 
 async fn list_client_keys(
@@ -740,6 +741,7 @@ async fn create_client_key(
             payload.rate_limit_per_minute,
             payload.burst,
             payload.max_concurrent_renders_override,
+            payload.allow_fresh.unwrap_or(false),
         )
         .await?;
     Ok(Json(serde_json::json!({
@@ -1417,6 +1419,13 @@ const ADMIN_HTML: &str = r#"<!doctype html>
           <label>Max concurrent renders override (optional)</label>
           <input id="clientKeyConcurrent" placeholder="0" />
         </div>
+        <div>
+          <label>Allow fresh bypass</label>
+          <select id="clientKeyAllowFresh">
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </div>
       </div>
       <button id="createClientKeyBtn">Create Key</button>
       <button id="loadClientKeysBtn">Load Keys</button>
@@ -1429,6 +1438,7 @@ const ADMIN_HTML: &str = r#"<!doctype html>
             <th>Active</th>
             <th>Rate/min</th>
             <th>Burst</th>
+            <th>Fresh</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -1597,6 +1607,8 @@ mod tests {
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
             warmup_max_concurrent_asset_pins: 1,
+            token_state_check_ttl_seconds: 0,
+            fresh_rate_limit_seconds: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

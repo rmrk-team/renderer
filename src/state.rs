@@ -24,6 +24,7 @@ pub struct AppState {
     pub assets: AssetResolver,
     pub chain: ChainClient,
     pub render_singleflight: RenderSingleflight,
+    pub token_state_singleflight: RenderSingleflight,
     pub render_semaphore: Arc<Semaphore>,
     pub rpc_semaphore: Arc<Semaphore>,
     pub warmup_notify: Arc<Notify>,
@@ -62,6 +63,7 @@ impl AppState {
         failure_log: Option<FailureLog>,
     ) -> Self {
         let render_singleflight = RenderSingleflight::new();
+        let token_state_singleflight = RenderSingleflight::new();
         let render_semaphore = Arc::new(Semaphore::new(config.max_concurrent_renders));
         let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
             usize::MAX
@@ -112,6 +114,7 @@ impl AppState {
             assets,
             chain,
             render_singleflight,
+            token_state_singleflight,
             render_semaphore,
             rpc_semaphore,
             warmup_notify,

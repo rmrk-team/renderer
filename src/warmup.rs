@@ -200,6 +200,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
             og_mode: false,
             overlay: None,
             background: None,
+            fresh: false,
         };
         match render_token(state.clone(), request).await {
             Ok(response) => {
@@ -227,6 +228,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
             og_mode: true,
             overlay: None,
             background: None,
+            fresh: false,
         };
         match render_token(state.clone(), request).await {
             Ok(response) => {

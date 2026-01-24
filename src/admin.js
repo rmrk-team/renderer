@@ -423,6 +423,8 @@ async function loadClientKeys() {
     rateCell.textContent = item.rate_limit_per_minute ?? '-';
     const burstCell = document.createElement('td');
     burstCell.textContent = item.burst ?? '-';
+    const freshCell = document.createElement('td');
+    freshCell.textContent = item.allow_fresh ? 'true' : 'false';
     const actionsCell = document.createElement('td');
     const revokeBtn = document.createElement('button');
     revokeBtn.textContent = 'Revoke';
@@ -433,6 +435,7 @@ async function loadClientKeys() {
     row.appendChild(activeCell);
     row.appendChild(rateCell);
     row.appendChild(burstCell);
+    row.appendChild(freshCell);
     row.appendChild(actionsCell);
     table.appendChild(row);
   });
@@ -444,7 +447,8 @@ async function createClientKey() {
   const payload = {
     rate_limit_per_minute: document.getElementById('clientKeyRate').value ? parseInt(document.getElementById('clientKeyRate').value, 10) : null,
     burst: document.getElementById('clientKeyBurst').value ? parseInt(document.getElementById('clientKeyBurst').value, 10) : null,
-    max_concurrent_renders_override: document.getElementById('clientKeyConcurrent').value ? parseInt(document.getElementById('clientKeyConcurrent').value, 10) : null
+    max_concurrent_renders_override: document.getElementById('clientKeyConcurrent').value ? parseInt(document.getElementById('clientKeyConcurrent').value, 10) : null,
+    allow_fresh: document.getElementById('clientKeyAllowFresh').value === 'true'
   };
   const result = await apiFetch(`/admin/api/clients/${clientId}/keys`, { method: 'POST', body: JSON.stringify(payload) });
   document.getElementById('clientKeyStatus').textContent = `Key created: ${result.api_key} (copy now)`;

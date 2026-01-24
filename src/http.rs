@@ -87,6 +87,7 @@ pub struct RenderQuery {
     pub overlay: Option<String>,
     pub bg: Option<String>,
     pub onerror: Option<String>,
+    pub fresh: Option<String>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -233,6 +234,32 @@ async fn render_canonical(
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
+    let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
+    let allow_fresh = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_fresh)
+        .unwrap_or(false);
+    let fresh = if fresh_requested {
+        if allow_fresh {
+            true
+        } else {
+            let key = fresh_key(&chain, &collection, &token_id, &asset_id);
+            let limit = state
+                .db
+                .check_fresh_request(&key, state.config.fresh_rate_limit_seconds)
+                .await
+                .map_err(map_render_error_anyhow)?;
+            if !limit.allowed {
+                let retry_after = limit.retry_after_seconds.unwrap_or(60);
+                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
+                    retry_after,
+                ))));
+            }
+            true
+        }
+    } else {
+        false
+    };
     let request = RenderRequest {
         chain,
         collection,
@@ -245,6 +272,7 @@ async fn render_canonical(
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     match render_token_with_limit(state.clone(), request, render_limit).await {
@@ -281,6 +309,32 @@ async fn render_og(
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
+    let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
+    let allow_fresh = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_fresh)
+        .unwrap_or(false);
+    let fresh = if fresh_requested {
+        if allow_fresh {
+            true
+        } else {
+            let key = fresh_key(&chain, &collection, &token_id, &asset_id);
+            let limit = state
+                .db
+                .check_fresh_request(&key, state.config.fresh_rate_limit_seconds)
+                .await
+                .map_err(map_render_error_anyhow)?;
+            if !limit.allowed {
+                let retry_after = limit.retry_after_seconds.unwrap_or(60);
+                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
+                    retry_after,
+                ))));
+            }
+            true
+        }
+    } else {
+        false
+    };
     let request = RenderRequest {
         chain,
         collection,
@@ -293,6 +347,7 @@ async fn render_og(
         og_mode: true,
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     match render_token_with_limit(state.clone(), request, render_limit).await {
@@ -328,6 +383,32 @@ async fn render_legacy(
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
+    let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
+    let allow_fresh = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_fresh)
+        .unwrap_or(false);
+    let fresh = if fresh_requested {
+        if allow_fresh {
+            true
+        } else {
+            let key = fresh_key(&chain, &collection, &token_id, &asset_id);
+            let limit = state
+                .db
+                .check_fresh_request(&key, state.config.fresh_rate_limit_seconds)
+                .await
+                .map_err(map_render_error_anyhow)?;
+            if !limit.allowed {
+                let retry_after = limit.retry_after_seconds.unwrap_or(60);
+                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
+                    retry_after,
+                ))));
+            }
+            true
+        }
+    } else {
+        false
+    };
     let request = RenderRequest {
         chain,
         collection,
@@ -340,6 +421,7 @@ async fn render_legacy(
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     match render_token_with_limit(state.clone(), request, render_limit).await {
@@ -377,38 +459,67 @@ async fn render_primary(
         .clone()
         .unwrap_or_else(|| "none".to_string());
     let primary_cache_key = format!("{chain}:{collection}:{token_id}:{cache_stamp}");
-    let asset_id = match state.primary_asset_cache.get(&primary_cache_key).await {
-        Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
-        Some(crate::state::PrimaryAssetCacheValue::Negative) => {
-            return Err(ApiError::new(
-                StatusCode::BAD_GATEWAY,
-                "primary asset lookup failed",
-            ));
+    let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
+    let asset_id = if fresh_requested {
+        let _permit = state
+            .rpc_semaphore
+            .acquire()
+            .await
+            .map_err(|err| ApiError::from(anyhow::Error::new(err)))?;
+        match state
+            .chain
+            .get_top_asset_id(&chain, &collection, &token_id)
+            .await
+        {
+            Ok(asset_id) => {
+                state
+                    .primary_asset_cache
+                    .insert(primary_cache_key.clone(), asset_id)
+                    .await;
+                asset_id
+            }
+            Err(err) => {
+                state
+                    .primary_asset_cache
+                    .insert_negative(primary_cache_key.clone())
+                    .await;
+                return Err(ApiError::from(err));
+            }
         }
-        None => {
-            let _permit = state
-                .rpc_semaphore
-                .acquire()
-                .await
-                .map_err(|err| ApiError::from(anyhow::Error::new(err)))?;
-            match state
-                .chain
-                .get_top_asset_id(&chain, &collection, &token_id)
-                .await
-            {
-                Ok(asset_id) => {
-                    state
-                        .primary_asset_cache
-                        .insert(primary_cache_key.clone(), asset_id)
-                        .await;
-                    asset_id
-                }
-                Err(err) => {
-                    state
-                        .primary_asset_cache
-                        .insert_negative(primary_cache_key.clone())
-                        .await;
-                    return Err(ApiError::from(err));
+    } else {
+        match state.primary_asset_cache.get(&primary_cache_key).await {
+            Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
+            Some(crate::state::PrimaryAssetCacheValue::Negative) => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "primary asset lookup failed",
+                ));
+            }
+            None => {
+                let _permit = state
+                    .rpc_semaphore
+                    .acquire()
+                    .await
+                    .map_err(|err| ApiError::from(anyhow::Error::new(err)))?;
+                match state
+                    .chain
+                    .get_top_asset_id(&chain, &collection, &token_id)
+                    .await
+                {
+                    Ok(asset_id) => {
+                        state
+                            .primary_asset_cache
+                            .insert(primary_cache_key.clone(), asset_id)
+                            .await;
+                        asset_id
+                    }
+                    Err(err) => {
+                        state
+                            .primary_asset_cache
+                            .insert_negative(primary_cache_key.clone())
+                            .await;
+                        return Err(ApiError::from(err));
+                    }
                 }
             }
         }
@@ -560,6 +671,7 @@ async fn head_render_canonical(
     let width_param = query.width.or(query.img_width);
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
+    let fresh = parse_fresh_flag(query.fresh.as_deref());
     let request = RenderRequest {
         chain,
         collection,
@@ -572,6 +684,7 @@ async fn head_render_canonical(
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     head_cached_response(state, request).await
 }
@@ -592,6 +705,7 @@ async fn head_render_og(
     let width_param = query.width.or(query.img_width);
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
+    let fresh = parse_fresh_flag(query.fresh.as_deref());
     let request = RenderRequest {
         chain,
         collection,
@@ -604,6 +718,7 @@ async fn head_render_og(
         og_mode: true,
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     head_cached_response(state, request).await
 }
@@ -623,6 +738,7 @@ async fn head_render_legacy(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
+    let fresh = parse_fresh_flag(query.fresh.as_deref());
     let request = RenderRequest {
         chain,
         collection,
@@ -635,6 +751,7 @@ async fn head_render_legacy(
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
         background: query.bg,
+        fresh,
     };
     head_cached_response(state, request).await
 }
@@ -722,6 +839,9 @@ async fn head_cached_response(
     let mut request = request;
     request.chain = chain;
     request.collection = collection;
+    if request.fresh {
+        return Ok(head_cache_miss_response(&request));
+    }
     render::apply_cache_epoch(&state, &mut request)
         .await
         .map_err(map_render_error_anyhow)?;
@@ -1052,11 +1172,33 @@ fn canonicalize_chain_collection(
         .map_err(|err| ApiError::bad_request(&err.to_string()))
 }
 
+fn parse_fresh_flag(raw: Option<&str>) -> bool {
+    raw.map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
+        .map(|value| value == "1" || value == "true" || value == "yes")
+        .unwrap_or(false)
+}
+
+fn fresh_key(chain: &str, collection: &str, token_id: &str, asset_id: &str) -> String {
+    format!("{chain}:{collection}:{token_id}:{asset_id}")
+}
+
+fn fresh_rate_limit_info(retry_after_seconds: u64) -> RateLimitInfo {
+    RateLimitInfo {
+        allowed: false,
+        limit: 1,
+        remaining: 0,
+        reset_seconds: retry_after_seconds,
+    }
+}
+
 #[derive(Clone, Debug)]
 struct AccessContext {
     identity_key: Arc<str>,
     client_key_id: Option<i64>,
     max_concurrent_renders_override: Option<usize>,
+    allow_fresh: bool,
 }
 
 impl AccessContext {
@@ -1090,6 +1232,7 @@ pub async fn access_middleware(
         identity_key: Arc::from(format!("ip:{ip}")),
         client_key_id: None,
         max_concurrent_renders_override: None,
+        allow_fresh: false,
     });
     let is_admin = path == "/admin" || path.starts_with("/admin/");
     let is_public_landing = is_public_landing_path(&state, path);
@@ -1147,6 +1290,7 @@ pub async fn access_middleware(
             max_concurrent_renders_override: key
                 .max_concurrent_renders_override
                 .and_then(|value| value.try_into().ok()),
+            allow_fresh: key.allow_fresh,
         })
     } else if ip_identity.is_some() {
         ip_identity.clone()

@@ -703,6 +703,8 @@ mod tests {
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
             warmup_max_concurrent_asset_pins: 1,
+            token_state_check_ttl_seconds: 0,
+            fresh_rate_limit_seconds: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

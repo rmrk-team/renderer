@@ -72,6 +72,12 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
@@ -123,6 +129,12 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
@@ -232,6 +244,9 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
@@ -287,6 +302,9 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image

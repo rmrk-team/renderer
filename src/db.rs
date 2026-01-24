@@ -75,6 +75,7 @@ pub struct ClientKey {
     pub rate_limit_per_minute: Option<i64>,
     pub burst: Option<i64>,
     pub max_concurrent_renders_override: Option<i64>,
+    pub allow_fresh: bool,
     pub created_at: Option<i64>,
     pub revoked_at: Option<i64>,
 }
@@ -141,6 +142,27 @@ pub struct TokenWarmupItem {
     pub status: String,
     pub attempts: i64,
     pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenStateCacheEntry {
+    pub chain: String,
+    pub collection_address: String,
+    pub token_id: String,
+    pub asset_id: String,
+    pub state_hash: String,
+    pub state_json: Option<String>,
+    pub last_checked_at: i64,
+    pub last_checked_block: Option<i64>,
+    pub expires_at: i64,
+    pub fallback_used: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FreshLimitResult {
+    pub allowed: bool,
+    pub retry_after_seconds: Option<u64>,
 }
 
 impl Database {
@@ -249,6 +271,7 @@ impl Database {
           rate_limit_per_minute INTEGER,
           burst INTEGER,
           max_concurrent_renders_override INTEGER,
+          allow_fresh INTEGER DEFAULT 0,
           created_at INTEGER,
           revoked_at INTEGER,
           FOREIGN KEY(client_id) REFERENCES clients(id)
@@ -365,6 +388,27 @@ impl Database {
         );
         CREATE INDEX IF NOT EXISTS token_asset_refs_lookup_idx
           ON token_asset_refs(chain, collection_address, token_id, source);
+        CREATE TABLE IF NOT EXISTS token_state_cache (
+          id INTEGER PRIMARY KEY,
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          asset_id TEXT NOT NULL,
+          state_hash TEXT NOT NULL,
+          state_json TEXT,
+          last_checked_at INTEGER NOT NULL,
+          last_checked_block INTEGER,
+          expires_at INTEGER NOT NULL,
+          fallback_used INTEGER DEFAULT 0,
+          last_error TEXT,
+          UNIQUE(chain, collection_address, token_id, asset_id)
+        );
+        CREATE INDEX IF NOT EXISTS token_state_cache_lookup_idx
+          ON token_state_cache(chain, collection_address, token_id, asset_id);
+        CREATE TABLE IF NOT EXISTS fresh_requests (
+          key TEXT PRIMARY KEY,
+          last_refresh_at INTEGER NOT NULL
+        );
         INSERT OR IGNORE INTO warmup_state (id, paused) VALUES (1, 0);
         "#;
         sqlx::query(schema).execute(&self.pool).await?;
@@ -404,6 +448,13 @@ impl Database {
         )
         .execute(&self.pool)
         .await;
+        let _ = sqlx::query("ALTER TABLE client_keys ADD COLUMN allow_fresh INTEGER DEFAULT 0")
+            .execute(&self.pool)
+            .await;
+        let _ =
+            sqlx::query("ALTER TABLE token_state_cache ADD COLUMN fallback_used INTEGER DEFAULT 0")
+                .execute(&self.pool)
+                .await;
         self.migrate_usage_table().await?;
         Ok(())
     }
@@ -2165,6 +2216,170 @@ impl Database {
         Ok((total, pinned, failed))
     }
 
+    pub async fn get_token_state(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+        asset_id: &str,
+    ) -> Result<Option<TokenStateCacheEntry>> {
+        let row = sqlx::query(
+            r#"
+            SELECT chain, collection_address, token_id, asset_id, state_hash, state_json,
+                   last_checked_at, last_checked_block, expires_at, fallback_used, last_error
+            FROM token_state_cache
+            WHERE chain = ?1 AND collection_address = ?2 AND token_id = ?3 AND asset_id = ?4
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .bind(asset_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| TokenStateCacheEntry {
+            chain: row.get("chain"),
+            collection_address: row.get("collection_address"),
+            token_id: row.get("token_id"),
+            asset_id: row.get("asset_id"),
+            state_hash: row.get("state_hash"),
+            state_json: row.get("state_json"),
+            last_checked_at: row.get("last_checked_at"),
+            last_checked_block: row.get("last_checked_block"),
+            expires_at: row.get("expires_at"),
+            fallback_used: row.get::<i64, _>("fallback_used") == 1,
+            last_error: row.get("last_error"),
+        }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn upsert_token_state(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+        asset_id: &str,
+        state_hash: &str,
+        state_json: Option<&str>,
+        last_checked_block: Option<i64>,
+        expires_at: i64,
+        fallback_used: bool,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO token_state_cache (
+              chain, collection_address, token_id, asset_id, state_hash, state_json,
+              last_checked_at, last_checked_block, expires_at, fallback_used, last_error
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL)
+            ON CONFLICT(chain, collection_address, token_id, asset_id) DO UPDATE SET
+              state_hash = excluded.state_hash,
+              state_json = excluded.state_json,
+              last_checked_at = excluded.last_checked_at,
+              last_checked_block = COALESCE(excluded.last_checked_block, token_state_cache.last_checked_block),
+              expires_at = excluded.expires_at,
+              fallback_used = excluded.fallback_used,
+              last_error = NULL
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .bind(asset_id)
+        .bind(state_hash)
+        .bind(state_json)
+        .bind(now)
+        .bind(last_checked_block)
+        .bind(expires_at)
+        .bind(if fallback_used { 1 } else { 0 })
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn record_token_state_error(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+        asset_id: &str,
+        error: &str,
+        expires_at: i64,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO token_state_cache (
+              chain, collection_address, token_id, asset_id, state_hash, state_json,
+              last_checked_at, expires_at, last_error
+            )
+            VALUES (?1, ?2, ?3, ?4, '', NULL, ?5, ?6, ?7)
+            ON CONFLICT(chain, collection_address, token_id, asset_id) DO UPDATE SET
+              last_checked_at = excluded.last_checked_at,
+              expires_at = excluded.expires_at,
+              last_error = excluded.last_error
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .bind(asset_id)
+        .bind(now)
+        .bind(expires_at)
+        .bind(error)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn check_fresh_request(
+        &self,
+        key: &str,
+        cooldown_seconds: u64,
+    ) -> Result<FreshLimitResult> {
+        if cooldown_seconds == 0 {
+            return Ok(FreshLimitResult {
+                allowed: true,
+                retry_after_seconds: None,
+            });
+        }
+        let now = now_epoch();
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query("SELECT last_refresh_at FROM fresh_requests WHERE key = ?1")
+            .bind(key)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(row) = row {
+            let last_refresh_at: i64 = row.get("last_refresh_at");
+            let earliest = last_refresh_at.saturating_add(cooldown_seconds as i64);
+            if now < earliest {
+                tx.commit().await?;
+                let retry_after = (earliest - now).max(1) as u64;
+                return Ok(FreshLimitResult {
+                    allowed: false,
+                    retry_after_seconds: Some(retry_after),
+                });
+            }
+        }
+        sqlx::query(
+            r#"
+            INSERT INTO fresh_requests (key, last_refresh_at)
+            VALUES (?1, ?2)
+            ON CONFLICT(key) DO UPDATE SET last_refresh_at = excluded.last_refresh_at
+            "#,
+        )
+        .bind(key)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(FreshLimitResult {
+            allowed: true,
+            retry_after_seconds: None,
+        })
+    }
+
     pub async fn get_approval_last_block(&self, chain: &str) -> Result<Option<i64>> {
         let row = sqlx::query("SELECT last_block FROM approval_state WHERE chain = ?1")
             .bind(chain)
@@ -2257,6 +2472,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_client_key(
         &self,
         client_id: i64,
@@ -2265,15 +2481,16 @@ impl Database {
         rate_limit_per_minute: Option<i64>,
         burst: Option<i64>,
         max_concurrent_renders_override: Option<i64>,
+        allow_fresh: bool,
     ) -> Result<i64> {
         let now = now_epoch();
         let result = sqlx::query(
             r#"
             INSERT INTO client_keys (
               client_id, key_hash, key_prefix, active, rate_limit_per_minute, burst,
-              max_concurrent_renders_override, created_at
+              max_concurrent_renders_override, allow_fresh, created_at
             )
-            VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7)
+            VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, ?8)
             "#,
         )
         .bind(client_id)
@@ -2282,6 +2499,7 @@ impl Database {
         .bind(rate_limit_per_minute)
         .bind(burst)
         .bind(max_concurrent_renders_override)
+        .bind(if allow_fresh { 1 } else { 0 })
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -2292,7 +2510,7 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT id, client_id, key_prefix, active, rate_limit_per_minute, burst,
-                   max_concurrent_renders_override, created_at, revoked_at
+                   max_concurrent_renders_override, allow_fresh, created_at, revoked_at
             FROM client_keys
             WHERE client_id = ?1
             ORDER BY id ASC
@@ -2311,6 +2529,7 @@ impl Database {
                 rate_limit_per_minute: row.get("rate_limit_per_minute"),
                 burst: row.get("burst"),
                 max_concurrent_renders_override: row.get("max_concurrent_renders_override"),
+                allow_fresh: row.get::<i64, _>("allow_fresh") == 1,
                 created_at: row.get("created_at"),
                 revoked_at: row.get("revoked_at"),
             })
@@ -2337,7 +2556,7 @@ impl Database {
         let row = sqlx::query(
             r#"
             SELECT id, client_id, key_prefix, active, rate_limit_per_minute, burst,
-                   max_concurrent_renders_override, created_at, revoked_at
+                   max_concurrent_renders_override, allow_fresh, created_at, revoked_at
             FROM client_keys
             WHERE key_hash = ?1
             "#,
@@ -2353,6 +2572,7 @@ impl Database {
             rate_limit_per_minute: row.get("rate_limit_per_minute"),
             burst: row.get("burst"),
             max_concurrent_renders_override: row.get("max_concurrent_renders_override"),
+            allow_fresh: row.get::<i64, _>("allow_fresh") == 1,
             created_at: row.get("created_at"),
             revoked_at: row.get("revoked_at"),
         }))
@@ -2659,6 +2879,7 @@ fn now_epoch() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain::{ComposeResult, FixedPart, SlotPart};
     use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -2753,6 +2974,8 @@ mod tests {
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
             warmup_max_concurrent_asset_pins: 1,
+            token_state_check_ttl_seconds: 0,
+            fresh_rate_limit_seconds: 0,
             primary_asset_cache_ttl: std::time::Duration::from_secs(0),
             primary_asset_negative_ttl: std::time::Duration::from_secs(0),
             primary_asset_cache_capacity: 0,
@@ -2959,6 +3182,76 @@ mod tests {
         assert_eq!(assets_total, 2);
         assert_eq!(assets_pinned, 1);
         assert_eq!(assets_failed, 1);
+    }
+
+    #[tokio::test]
+    async fn token_state_cache_roundtrip() {
+        let dir = tempdir().unwrap();
+        let config = test_config(dir.path().join("renderer.db"));
+        let db = Database::new(&config).await.unwrap();
+
+        let compose = ComposeResult {
+            metadata_uri: "ipfs://cid/meta.json".to_string(),
+            catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+            fixed_parts: vec![FixedPart {
+                part_id: 1,
+                z: 0,
+                metadata_uri: "ipfs://cid/part.svg".to_string(),
+            }],
+            slot_parts: Vec::<SlotPart>::new(),
+        };
+        let state_json = serde_json::to_string(&compose).unwrap();
+        db.upsert_token_state(
+            "base",
+            "0xabc",
+            "1",
+            "10",
+            "hash",
+            Some(&state_json),
+            None,
+            now_epoch() + 60,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let entry = db
+            .get_token_state("base", "0xabc", "1", "10")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.state_hash, "hash");
+        assert_eq!(entry.state_json.as_deref(), Some(state_json.as_str()));
+
+        db.record_token_state_error("base", "0xabc", "1", "10", "boom", now_epoch() + 120)
+            .await
+            .unwrap();
+        let entry = db
+            .get_token_state("base", "0xabc", "1", "10")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.last_error.as_deref(), Some("boom"));
+        assert_eq!(entry.state_json.as_deref(), Some(state_json.as_str()));
+    }
+
+    #[tokio::test]
+    async fn fresh_rate_limit_blocks_until_cooldown() {
+        let dir = tempdir().unwrap();
+        let config = test_config(dir.path().join("renderer.db"));
+        let db = Database::new(&config).await.unwrap();
+
+        let first = db
+            .check_fresh_request("base:0xabc:1:10", 300)
+            .await
+            .unwrap();
+        assert!(first.allowed);
+        let second = db
+            .check_fresh_request("base:0xabc:1:10", 300)
+            .await
+            .unwrap();
+        assert!(!second.allowed);
+        assert!(second.retry_after_seconds.unwrap_or(0) > 0);
     }
 
     #[tokio::test]

@@ -61,6 +61,7 @@ pub struct RenderRequest {
     pub og_mode: bool,
     pub overlay: Option<String>,
     pub background: Option<String>,
+    pub fresh: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -569,6 +570,7 @@ pub(crate) async fn render_token_uncached(
             &request.collection,
             &request.token_id,
             &request.asset_id,
+            request.fresh,
         )
         .await?;
         cache_allowed = !fallback_used || width.is_some();
@@ -990,23 +992,77 @@ async fn load_compose_for_request(
     collection: &str,
     token_id: &str,
     asset_id: &str,
+    fresh: bool,
 ) -> Result<(ComposeResult, bool)> {
-    match state
+    let now = now_epoch();
+    let ttl = i64::try_from(state.config.token_state_check_ttl_seconds).unwrap_or(i64::MAX);
+    let expires_at = now.saturating_add(ttl.max(0));
+    let cached_entry = state
+        .db
+        .get_token_state(chain, collection, token_id, asset_id)
+        .await?;
+    let cached_compose = cached_entry
+        .as_ref()
+        .and_then(|entry| entry.state_json.as_ref())
+        .and_then(|value| serde_json::from_str::<ComposeResult>(value).ok());
+    let cached_fallback = cached_entry
+        .as_ref()
+        .map(|entry| entry.fallback_used)
+        .unwrap_or(false);
+    let cached_valid = cached_entry
+        .as_ref()
+        .map(|entry| entry.expires_at > now)
+        .unwrap_or(false);
+    if !fresh {
+        if let Some(compose) = cached_compose.clone() {
+            if cached_valid {
+                return Ok((compose, cached_fallback));
+            }
+        }
+    }
+
+    let singleflight_key = format!("{chain}:{collection}:{token_id}:{asset_id}");
+    let permit = state
+        .token_state_singleflight
+        .acquire(&singleflight_key)
+        .await;
+    if !permit.is_leader() {
+        let _ = permit.wait_result(Duration::from_secs(30)).await;
+        if let Some(entry) = state
+            .db
+            .get_token_state(chain, collection, token_id, asset_id)
+            .await?
+        {
+            if let Some(state_json) = entry.state_json.as_ref() {
+                if let Ok(compose) = serde_json::from_str::<ComposeResult>(state_json) {
+                    return Ok((compose, entry.fallback_used));
+                }
+            }
+        }
+    }
+
+    let refresh_result = state
         .chain
         .compose_equippables(chain, collection, token_id, asset_id)
-        .await
-    {
-        Ok(compose) => {
-            if !is_zero_address(&compose.catalog_address) {
-                let _ = state
-                    .db
-                    .set_collection_catalog_address(chain, collection, &compose.catalog_address)
-                    .await;
-            }
-            Ok((compose, false))
-        }
+        .await;
+    let (compose, fallback_used) = match refresh_result {
+        Ok(compose) => (compose, false),
         Err(err) => {
             if !is_non_composable_error(&err) {
+                let _ = state
+                    .db
+                    .record_token_state_error(
+                        chain,
+                        collection,
+                        token_id,
+                        asset_id,
+                        &err.to_string(),
+                        expires_at,
+                    )
+                    .await;
+                if let Some(compose) = cached_compose {
+                    return Ok((compose, cached_fallback));
+                }
                 return Err(err);
             }
             debug!(
@@ -1022,19 +1078,46 @@ async fn load_compose_for_request(
                 .get_asset_metadata(chain, collection, token_id, asset_id)
                 .await?;
             let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
-            let compose = ComposeResult {
-                metadata_uri: metadata_uri.clone(),
-                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
-                fixed_parts: vec![FixedPart {
-                    part_id,
-                    z: 0,
-                    metadata_uri,
-                }],
-                slot_parts: Vec::<SlotPart>::new(),
-            };
-            Ok((compose, true))
+            (
+                ComposeResult {
+                    metadata_uri: metadata_uri.clone(),
+                    catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                    fixed_parts: vec![FixedPart {
+                        part_id,
+                        z: 0,
+                        metadata_uri,
+                    }],
+                    slot_parts: Vec::<SlotPart>::new(),
+                },
+                true,
+            )
         }
+    };
+
+    if !is_zero_address(&compose.catalog_address) {
+        let _ = state
+            .db
+            .set_collection_catalog_address(chain, collection, &compose.catalog_address)
+            .await;
     }
+    if let Ok(state_json) = serde_json::to_string(&compose) {
+        let state_hash = sha256_hex_bytes(state_json.as_bytes());
+        let _ = state
+            .db
+            .upsert_token_state(
+                chain,
+                collection,
+                token_id,
+                asset_id,
+                &state_hash,
+                Some(&state_json),
+                None,
+                expires_at,
+                fallback_used,
+            )
+            .await;
+    }
+    Ok((compose, fallback_used))
 }
 
 fn layer_sort_key(layer: &Layer, child_layer_mode: ChildLayerMode) -> (u16, u8) {
@@ -1608,6 +1691,7 @@ async fn compute_render_cache_key_for_request(
         &request.collection,
         &request.token_id,
         &request.asset_id,
+        request.fresh,
     )
     .await?;
     if fallback_used && width.is_none() {
@@ -1920,7 +2004,7 @@ pub async fn refresh_canvas_size(
     asset_id: String,
 ) -> Result<(u32, u32)> {
     let (compose, fallback_used) =
-        load_compose_for_request(&state, &chain, &collection, &token_id, &asset_id).await?;
+        load_compose_for_request(&state, &chain, &collection, &token_id, &asset_id, false).await?;
     let collection_config = get_collection_config_cached(&state, &chain, &collection)
         .await?
         .unwrap_or(CollectionConfig {
@@ -2776,6 +2860,9 @@ fn cache_control_for_request(
     render_ttl: Duration,
     default_ttl: Duration,
 ) -> String {
+    if request.fresh {
+        return "no-store".to_string();
+    }
     if request.cache_timestamp.is_none() {
         return "no-store".to_string();
     }
@@ -3022,6 +3109,7 @@ mod tests {
             og_mode: false,
             overlay: Some("watermark".to_string()),
             background: Some("#ffffff".to_string()),
+            fresh: false,
         };
         let (_, base_key) = resolve_width(&request.width_param, request.og_mode).unwrap();
         let key = build_variant_key(&base_key, &request);
@@ -3048,6 +3136,7 @@ mod tests {
             og_mode: false,
             overlay: Some("invalid".to_string()),
             background: Some("not-a-color".to_string()),
+            fresh: false,
         };
         let (_, base_key) = resolve_width(&request.width_param, request.og_mode).unwrap();
         let key = build_variant_key(&base_key, &request);
@@ -3218,6 +3307,7 @@ mod tests {
                 og_mode: false,
                 overlay: None,
                 background: None,
+                fresh: false,
             };
 
             let render = render_token(state.clone(), request).await?;
