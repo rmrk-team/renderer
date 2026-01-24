@@ -1,11 +1,11 @@
 use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
-#[cfg(test)]
-use crate::pinning::PinnedAssetStore;
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
 use crate::chain::{ComposeResult, FixedPart, SlotPart};
 use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
+#[cfg(test)]
+use crate::pinning::PinnedAssetStore;
 use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
 use anyhow::{Context, Result, anyhow};
 use image::codecs::png::{CompressionType, FilterType as PngFilterType, PngEncoder};
@@ -536,6 +536,7 @@ pub(crate) async fn render_token_uncached(
                 watermark_overlay_uri: None,
                 warmup_strategy: "auto".to_string(),
                 cache_epoch: None,
+                catalog_address: None,
                 approved: true,
                 approved_until: None,
                 approval_source: None,
@@ -995,7 +996,15 @@ async fn load_compose_for_request(
         .compose_equippables(chain, collection, token_id, asset_id)
         .await
     {
-        Ok(compose) => Ok((compose, false)),
+        Ok(compose) => {
+            if !is_zero_address(&compose.catalog_address) {
+                let _ = state
+                    .db
+                    .set_collection_catalog_address(chain, collection, &compose.catalog_address)
+                    .await;
+            }
+            Ok((compose, false))
+        }
         Err(err) => {
             if !is_non_composable_error(&err) {
                 return Err(err);
@@ -1584,6 +1593,7 @@ async fn compute_render_cache_key_for_request(
                 watermark_overlay_uri: None,
                 warmup_strategy: "auto".to_string(),
                 cache_epoch: None,
+                catalog_address: None,
                 approved: true,
                 approved_until: None,
                 approval_source: None,
@@ -1924,6 +1934,7 @@ pub async fn refresh_canvas_size(
             watermark_overlay_uri: None,
             warmup_strategy: "auto".to_string(),
             cache_epoch: None,
+            catalog_address: None,
             approved: true,
             approved_until: None,
             approval_source: None,

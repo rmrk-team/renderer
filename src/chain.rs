@@ -98,15 +98,8 @@ abigen!(
 abigen!(
     RmrkCatalog,
     r#"[
-        {
-            "type":"function",
-            "name":"getMetadataURI",
-            "stateMutability":"view",
-            "inputs":[],
-            "outputs":[
-                {"name":"metadataURI","type":"string"}
-            ]
-        }
+        event AddedPart(uint64 indexed partId,uint8 indexed itemType,uint8 zIndex,address[] equippableAddresses,string metadataURI)
+        function getMetadataURI() view returns (string)
     ]"#
 );
 
@@ -157,6 +150,14 @@ pub struct ComposeResult {
     pub catalog_address: String,
     pub fixed_parts: Vec<FixedPart>,
     pub slot_parts: Vec<SlotPart>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogPart {
+    pub part_id: u64,
+    pub item_type: u8,
+    pub z: u8,
+    pub metadata_uri: String,
 }
 
 #[derive(Clone)]
@@ -321,6 +322,39 @@ impl ChainClient {
             })
             .await?;
         Ok(response)
+    }
+
+    pub async fn scan_catalog_parts(
+        &self,
+        chain: &str,
+        catalog_address: &str,
+        from_block: u64,
+        to_block: Option<u64>,
+    ) -> Result<Vec<CatalogPart>> {
+        let catalog = Address::from_str(catalog_address)?;
+        self.call_with_failover(chain, move |provider| {
+            let catalog = catalog;
+            async move {
+                let latest_block = provider.get_block_number().await?;
+                let to_block = to_block.unwrap_or_else(|| latest_block.as_u64());
+                let events = RmrkCatalog::new(catalog, provider)
+                    .event::<AddedPartFilter>()
+                    .from_block(from_block)
+                    .to_block(to_block)
+                    .query()
+                    .await?;
+                Ok(events
+                    .into_iter()
+                    .map(|event| CatalogPart {
+                        part_id: event.part_id,
+                        item_type: event.item_type,
+                        z: event.z_index,
+                        metadata_uri: event.metadata_uri,
+                    })
+                    .collect())
+            }
+        })
+        .await
     }
 
     pub async fn erc721_token_ids_enumerable(
@@ -668,6 +702,7 @@ mod tests {
             warmup_max_renders_per_job: 0,
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
+            warmup_max_concurrent_asset_pins: 1,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

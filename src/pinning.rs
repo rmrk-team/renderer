@@ -57,6 +57,11 @@ impl PinnedAssetStore {
         })
     }
 
+    pub fn ipfs_location_from_uri(&self, uri: &str) -> Result<PinnedAssetLocation> {
+        let (cid, path) = parse_ipfs_uri(uri)?;
+        self.ipfs_location(&cid, &path)
+    }
+
     pub async fn store_bytes(&self, location: &PinnedAssetLocation, bytes: &[u8]) -> Result<()> {
         store_file_atomic(&location.file_path, bytes).await
     }
@@ -101,6 +106,24 @@ fn normalize_ipfs_path(path: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
+pub fn parse_ipfs_uri(uri: &str) -> Result<(String, String)> {
+    let trimmed = uri.trim();
+    if !trimmed.starts_with("ipfs://") {
+        return Err(anyhow!("not an ipfs uri"));
+    }
+    let mut rest = trimmed.trim_start_matches("ipfs://");
+    if let Some(after) = rest.strip_prefix("ipfs/") {
+        rest = after;
+    }
+    if rest.is_empty() {
+        return Err(anyhow!("missing ipfs cid"));
+    }
+    let mut parts = rest.splitn(2, '/');
+    let cid = parts.next().unwrap_or_default();
+    let path = parts.next().unwrap_or_default();
+    Ok((cid.to_string(), path.to_string()))
+}
+
 fn is_valid_cid(cid: &str) -> bool {
     if cid.is_empty() {
         return false;
@@ -131,4 +154,30 @@ async fn store_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         return Err(err.into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ipfs_uri_variants() {
+        let (cid, path) = parse_ipfs_uri("ipfs://bafybeihash/file.svg").unwrap();
+        assert_eq!(cid, "bafybeihash");
+        assert_eq!(path, "file.svg");
+
+        let (cid, path) = parse_ipfs_uri("ipfs://ipfs/QmHash/dir/file.svg").unwrap();
+        assert_eq!(cid, "QmHash");
+        assert_eq!(path, "dir/file.svg");
+
+        let (cid, path) = parse_ipfs_uri("ipfs://QmRoot").unwrap();
+        assert_eq!(cid, "QmRoot");
+        assert_eq!(path, "");
+    }
+
+    #[test]
+    fn parse_ipfs_uri_rejects_non_ipfs() {
+        assert!(parse_ipfs_uri("https://example.com/file.svg").is_err());
+        assert!(parse_ipfs_uri("ipfs://").is_err());
+    }
 }

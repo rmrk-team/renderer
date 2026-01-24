@@ -25,6 +25,7 @@ pub struct CollectionConfig {
     pub watermark_overlay_uri: Option<String>,
     pub warmup_strategy: String,
     pub cache_epoch: Option<i64>,
+    pub catalog_address: Option<String>,
     pub approved: bool,
     pub approved_until: Option<i64>,
     pub approval_source: Option<String>,
@@ -116,6 +117,19 @@ pub struct PinnedAssetCounts {
     pub total: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogWarmupItem {
+    pub id: i64,
+    pub job_id: i64,
+    pub chain: String,
+    pub collection_address: String,
+    pub part_id: String,
+    pub metadata_uri: String,
+    pub status: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+}
+
 impl Database {
     pub async fn new(config: &Config) -> Result<Self> {
         if let Some(parent) = config.db_path.parent() {
@@ -155,6 +169,7 @@ impl Database {
           watermark_overlay_uri TEXT,
           warmup_strategy TEXT DEFAULT 'auto',
           cache_epoch INTEGER,
+          catalog_address TEXT,
           approved INTEGER DEFAULT 0,
           approved_until INTEGER,
           approval_source TEXT,
@@ -261,6 +276,44 @@ impl Database {
         );
         CREATE INDEX IF NOT EXISTS pinned_assets_cid_idx ON pinned_assets(cid);
         CREATE INDEX IF NOT EXISTS pinned_assets_path_idx ON pinned_assets(path);
+        CREATE TABLE IF NOT EXISTS catalog_warmup_jobs (
+          id INTEGER PRIMARY KEY,
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          catalog_address TEXT NOT NULL,
+          status TEXT NOT NULL,
+          last_error TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(chain, collection_address)
+        );
+        CREATE TABLE IF NOT EXISTS catalog_warmup_items (
+          id INTEGER PRIMARY KEY,
+          job_id INTEGER NOT NULL,
+          part_id TEXT NOT NULL,
+          metadata_uri TEXT NOT NULL,
+          status TEXT NOT NULL,
+          attempts INTEGER DEFAULT 0,
+          last_error TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(job_id, metadata_uri),
+          FOREIGN KEY(job_id) REFERENCES catalog_warmup_jobs(id)
+        );
+        CREATE INDEX IF NOT EXISTS catalog_warmup_items_status_idx ON catalog_warmup_items(job_id, status);
+        CREATE TABLE IF NOT EXISTS collection_asset_refs (
+          id INTEGER PRIMARY KEY,
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          asset_key TEXT NOT NULL,
+          source TEXT NOT NULL,
+          part_id TEXT,
+          created_at INTEGER,
+          updated_at INTEGER,
+          UNIQUE(chain, collection_address, asset_key, source, part_id)
+        );
+        CREATE INDEX IF NOT EXISTS collection_asset_refs_lookup_idx
+          ON collection_asset_refs(chain, collection_address, source);
         INSERT OR IGNORE INTO warmup_state (id, paused) VALUES (1, 0);
         "#;
         sqlx::query(schema).execute(&self.pool).await?;
@@ -286,6 +339,9 @@ impl Database {
         .execute(&self.pool)
         .await;
         let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN cache_epoch INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN catalog_address TEXT")
             .execute(&self.pool)
             .await;
         let _ =
@@ -388,7 +444,7 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT id, chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, approved,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
                    approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result, created_at, updated_at
             FROM collection_config
@@ -413,6 +469,7 @@ impl Database {
             watermark_overlay_uri: Option<String>,
             warmup_strategy: String,
             cache_epoch: Option<i64>,
+            catalog_address: Option<String>,
             approved: bool,
             approved_until: Option<i64>,
             approval_source: Option<String>,
@@ -457,6 +514,7 @@ impl Database {
                 watermark_overlay_uri: row.get("watermark_overlay_uri"),
                 warmup_strategy: row.get::<String, _>("warmup_strategy"),
                 cache_epoch: row.get("cache_epoch"),
+                catalog_address: row.get("catalog_address"),
                 approved: row.get::<i64, _>("approved") == 1,
                 approved_until: row.get("approved_until"),
                 approval_source: row.get("approval_source"),
@@ -562,6 +620,9 @@ impl Database {
                     (Some(a), None) => Some(a),
                     _ => None,
                 };
+                if merged.catalog_address.is_none() {
+                    merged.catalog_address = row.catalog_address.clone();
+                }
                 if merged.warmup_strategy == "auto" && row.warmup_strategy != "auto" {
                     merged.warmup_strategy = row.warmup_strategy.clone();
                 }
@@ -591,11 +652,11 @@ impl Database {
                 r#"
                 INSERT INTO collection_config (
                   chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                  og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, approved,
+                  og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
                   approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                   last_approval_check_at, last_approval_check_result, created_at, updated_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
                 "#,
             )
             .bind(&chain)
@@ -608,6 +669,7 @@ impl Database {
             .bind(&merged.watermark_overlay_uri)
             .bind(&merged.warmup_strategy)
             .bind(merged.cache_epoch)
+            .bind(&merged.catalog_address)
             .bind(if merged.approved { 1 } else { 0 })
             .bind(merged.approved_until)
             .bind(&merged.approval_source)
@@ -787,7 +849,7 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, approved,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
                    approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result
             FROM collection_config
@@ -809,6 +871,7 @@ impl Database {
                 watermark_overlay_uri: row.get("watermark_overlay_uri"),
                 warmup_strategy: row.get::<String, _>("warmup_strategy"),
                 cache_epoch: row.get("cache_epoch"),
+                catalog_address: row.get("catalog_address"),
                 approved: row.get::<i64, _>("approved") == 1,
                 approved_until: row.get("approved_until"),
                 approval_source: row.get("approval_source"),
@@ -831,7 +894,7 @@ impl Database {
         let row = sqlx::query(
             r#"
             SELECT chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, approved,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
                    approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result
             FROM collection_config
@@ -853,6 +916,7 @@ impl Database {
             watermark_overlay_uri: row.get("watermark_overlay_uri"),
             warmup_strategy: row.get::<String, _>("warmup_strategy"),
             cache_epoch: row.get("cache_epoch"),
+            catalog_address: row.get("catalog_address"),
             approved: row.get::<i64, _>("approved") == 1,
             approved_until: row.get("approved_until"),
             approval_source: row.get("approval_source"),
@@ -905,6 +969,53 @@ impl Database {
         .bind(chain)
         .bind(collection_address)
         .bind(epoch)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_collection_catalog_address(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query(
+            r#"
+            SELECT catalog_address
+            FROM collection_config
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.and_then(|row| row.get::<Option<String>, _>("catalog_address")))
+    }
+
+    pub async fn set_collection_catalog_address(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        catalog_address: &str,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO collection_config (
+              chain, collection_address, catalog_address, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              catalog_address = excluded.catalog_address,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(catalog_address)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -1328,6 +1439,345 @@ impl Database {
         Ok(row.get::<i64, _>("paused") == 1)
     }
 
+    pub async fn upsert_catalog_warmup_job(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        catalog_address: &str,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<i64> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO catalog_warmup_jobs (
+              chain, collection_address, catalog_address, status, last_error, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              catalog_address = excluded.catalog_address,
+              status = excluded.status,
+              last_error = excluded.last_error,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(catalog_address)
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        let row = sqlx::query(
+            r#"
+            SELECT id
+            FROM catalog_warmup_jobs
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get("id"))
+    }
+
+    pub async fn get_catalog_warmup_job(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<Option<(i64, String, String, Option<String>)>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, catalog_address, status, last_error
+            FROM catalog_warmup_jobs
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| {
+            (
+                row.get("id"),
+                row.get("catalog_address"),
+                row.get("status"),
+                row.get("last_error"),
+            )
+        }))
+    }
+
+    pub async fn clear_catalog_warmup_items(&self, job_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM catalog_warmup_items WHERE job_id = ?1")
+            .bind(job_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn insert_catalog_warmup_items(
+        &self,
+        job_id: i64,
+        items: &[(String, String)],
+    ) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let now = now_epoch();
+        let mut tx = self.pool.begin().await?;
+        for (part_id, metadata_uri) in items {
+            sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO catalog_warmup_items (
+                  job_id, part_id, metadata_uri, status, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, 'queued', ?4, ?5)
+                "#,
+            )
+            .bind(job_id)
+            .bind(part_id)
+            .bind(metadata_uri)
+            .bind(now)
+            .bind(now)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_next_catalog_warmup_item(&self) -> Result<Option<CatalogWarmupItem>> {
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            SELECT i.id, i.job_id, j.chain, j.collection_address, i.part_id, i.metadata_uri,
+                   i.status, i.attempts, i.last_error
+            FROM catalog_warmup_items i
+            JOIN catalog_warmup_jobs j ON i.job_id = j.id
+            WHERE i.status = 'queued'
+            ORDER BY i.id ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let row = match row {
+            Some(row) => row,
+            None => {
+                tx.commit().await?;
+                return Ok(None);
+            }
+        };
+        let id: i64 = row.get("id");
+        let attempts: i64 = row.get("attempts");
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE catalog_warmup_items
+            SET status = 'running', attempts = ?1, updated_at = ?2
+            WHERE id = ?3
+            "#,
+        )
+        .bind(attempts + 1)
+        .bind(now)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Some(CatalogWarmupItem {
+            id,
+            job_id: row.get("job_id"),
+            chain: row.get("chain"),
+            collection_address: row.get("collection_address"),
+            part_id: row.get("part_id"),
+            metadata_uri: row.get("metadata_uri"),
+            status: "running".to_string(),
+            attempts: attempts + 1,
+            last_error: row.get("last_error"),
+        }))
+    }
+
+    pub async fn update_catalog_warmup_item_status(
+        &self,
+        id: i64,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE catalog_warmup_items
+            SET status = ?1, last_error = ?2, updated_at = ?3
+            WHERE id = ?4
+            "#,
+        )
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn catalog_warmup_item_counts(
+        &self,
+        job_id: i64,
+    ) -> Result<(i64, i64, i64, i64, i64)> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) AS queued,
+              SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) AS running,
+              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
+              COUNT(1) AS total
+            FROM catalog_warmup_items
+            WHERE job_id = ?1
+            "#,
+        )
+        .bind(job_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.get::<Option<i64>, _>("queued").unwrap_or(0),
+            row.get::<Option<i64>, _>("running").unwrap_or(0),
+            row.get::<Option<i64>, _>("done").unwrap_or(0),
+            row.get::<Option<i64>, _>("failed").unwrap_or(0),
+            row.get::<Option<i64>, _>("total").unwrap_or(0),
+        ))
+    }
+
+    pub async fn set_catalog_warmup_job_status(
+        &self,
+        job_id: i64,
+        status: &str,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            UPDATE catalog_warmup_jobs
+            SET status = ?1, last_error = ?2, updated_at = ?3
+            WHERE id = ?4
+            "#,
+        )
+        .bind(status)
+        .bind(last_error)
+        .bind(now)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn upsert_collection_asset_ref(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        asset_key: &str,
+        source: &str,
+        part_id: Option<&str>,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO collection_asset_refs (
+              chain, collection_address, asset_key, source, part_id, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(asset_key)
+        .bind(source)
+        .bind(part_id)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn clear_collection_asset_refs(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        source: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM collection_asset_refs
+            WHERE chain = ?1 AND collection_address = ?2 AND source = ?3
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(source)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn catalog_asset_counts(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<(i64, i64, i64)> {
+        let total_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT asset_key) AS total
+            FROM collection_asset_refs
+            WHERE chain = ?1 AND collection_address = ?2 AND source = 'catalog_asset'
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let total = total_row.get::<Option<i64>, _>("total").unwrap_or(0);
+
+        let pinned_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT refs.asset_key) AS count
+            FROM collection_asset_refs refs
+            JOIN pinned_assets pinned ON refs.asset_key = pinned.asset_key
+            WHERE refs.chain = ?1
+              AND refs.collection_address = ?2
+              AND refs.source = 'catalog_asset'
+              AND pinned.status = 'pinned'
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let pinned = pinned_row.get::<Option<i64>, _>("count").unwrap_or(0);
+
+        let failed_row = sqlx::query(
+            r#"
+            SELECT COUNT(DISTINCT refs.asset_key) AS count
+            FROM collection_asset_refs refs
+            JOIN pinned_assets pinned ON refs.asset_key = pinned.asset_key
+            WHERE refs.chain = ?1
+              AND refs.collection_address = ?2
+              AND refs.source = 'catalog_asset'
+              AND pinned.status = 'failed'
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_one(&self.pool)
+        .await?;
+        let failed = failed_row.get::<Option<i64>, _>("count").unwrap_or(0);
+
+        Ok((total, pinned, failed))
+    }
+
     pub async fn get_approval_last_block(&self, chain: &str) -> Result<Option<i64>> {
         let row = sqlx::query("SELECT last_block FROM approval_state WHERE chain = ?1")
             .bind(chain)
@@ -1720,6 +2170,41 @@ impl Database {
         Ok(())
     }
 
+    pub async fn record_pinned_asset_failure(
+        &self,
+        asset_key: &str,
+        cid: &str,
+        path: &str,
+        error: &str,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO pinned_assets (
+              asset_key, cid, path, status, attempts, last_error, first_seen_at, last_attempt_at
+            )
+            VALUES (?1, ?2, ?3, 'failed', 1, ?4, ?5, ?6)
+            ON CONFLICT(asset_key) DO UPDATE SET
+              cid = excluded.cid,
+              path = excluded.path,
+              status = 'failed',
+              attempts = pinned_assets.attempts + 1,
+              last_error = excluded.last_error,
+              first_seen_at = COALESCE(pinned_assets.first_seen_at, excluded.first_seen_at),
+              last_attempt_at = excluded.last_attempt_at
+            "#,
+        )
+        .bind(asset_key)
+        .bind(cid)
+        .bind(path)
+        .bind(error)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn pinned_asset_counts(&self) -> Result<PinnedAssetCounts> {
         let row = sqlx::query(
             r#"
@@ -1880,6 +2365,7 @@ mod tests {
             warmup_max_renders_per_job: 0,
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
+            warmup_max_concurrent_asset_pins: 1,
             primary_asset_cache_ttl: std::time::Duration::from_secs(0),
             primary_asset_negative_ttl: std::time::Duration::from_secs(0),
             primary_asset_cache_capacity: 0,
@@ -1939,6 +2425,87 @@ mod tests {
         assert_eq!(next.token_id, "1");
         assert_eq!(next.widths.as_deref(), Some("medium,large"));
         assert!(next.include_og);
+    }
+
+    #[tokio::test]
+    async fn catalog_warmup_roundtrip() {
+        let dir = tempdir().unwrap();
+        let config = test_config(dir.path().join("renderer.db"));
+        let db = Database::new(&config).await.unwrap();
+
+        let job_id = db
+            .upsert_catalog_warmup_job("base", "0xabc", "0xdef", "queued", None)
+            .await
+            .unwrap();
+        db.insert_catalog_warmup_items(
+            job_id,
+            &[
+                ("1".to_string(), "ipfs://cid/part1.json".to_string()),
+                ("2".to_string(), "ipfs://cid/part2.json".to_string()),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let (queued, running, done, failed, total) =
+            db.catalog_warmup_item_counts(job_id).await.unwrap();
+        assert_eq!(queued, 2);
+        assert_eq!(running, 0);
+        assert_eq!(done, 0);
+        assert_eq!(failed, 0);
+        assert_eq!(total, 2);
+
+        let first = db.fetch_next_catalog_warmup_item().await.unwrap().unwrap();
+        assert_eq!(first.part_id, "1");
+        assert_eq!(first.attempts, 1);
+        db.update_catalog_warmup_item_status(first.id, "done", None)
+            .await
+            .unwrap();
+
+        let second = db.fetch_next_catalog_warmup_item().await.unwrap().unwrap();
+        assert_eq!(second.part_id, "2");
+        db.update_catalog_warmup_item_status(second.id, "failed", Some("boom"))
+            .await
+            .unwrap();
+
+        let (queued, running, done, failed, total) =
+            db.catalog_warmup_item_counts(job_id).await.unwrap();
+        assert_eq!(queued, 0);
+        assert_eq!(running, 0);
+        assert_eq!(done, 1);
+        assert_eq!(failed, 1);
+        assert_eq!(total, 2);
+
+        db.upsert_collection_asset_ref(
+            "base",
+            "0xabc",
+            "ipfs://cid/file1.svg",
+            "catalog_asset",
+            Some("1"),
+        )
+        .await
+        .unwrap();
+        db.upsert_collection_asset_ref(
+            "base",
+            "0xabc",
+            "ipfs://cid/file2.svg",
+            "catalog_asset",
+            Some("2"),
+        )
+        .await
+        .unwrap();
+        db.upsert_pinned_asset("ipfs://cid/file1.svg", "cid", "file1.svg", None, 12)
+            .await
+            .unwrap();
+        db.record_pinned_asset_failure("ipfs://cid/file2.svg", "cid", "file2.svg", "failure")
+            .await
+            .unwrap();
+
+        let (assets_total, assets_pinned, assets_failed) =
+            db.catalog_asset_counts("base", "0xabc").await.unwrap();
+        assert_eq!(assets_total, 2);
+        assert_eq!(assets_pinned, 1);
+        assert_eq!(assets_failed, 1);
     }
 
     #[tokio::test]

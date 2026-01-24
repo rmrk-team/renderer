@@ -46,12 +46,8 @@ async fn serve_ipfs(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "read failed").into_response(),
     };
     let mut headers = HeaderMap::new();
-    let content_type = content_type_from_path(&location.path)
-        .unwrap_or("application/octet-stream");
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type),
-    );
+    let content_type = content_type_from_path(&location.path).unwrap_or("application/octet-stream");
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     if let Ok(metadata) = file.metadata().await {
         if let Ok(value) = HeaderValue::from_str(&metadata.len().to_string()) {
             headers.insert(header::CONTENT_LENGTH, value);

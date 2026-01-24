@@ -1,13 +1,8 @@
 use crate::canonical;
+use crate::catalog_warmup::{CatalogWarmupRequest, enqueue_catalog_warmup};
 use crate::config::{AdminCollectionInput, Config};
 use crate::db::{
-    Client,
-    ClientKey,
-    CollectionConfig,
-    IpRule,
-    PinnedAssetCounts,
-    RpcEndpoint,
-    UsageRow,
+    Client, ClientKey, CollectionConfig, IpRule, PinnedAssetCounts, RpcEndpoint, UsageRow,
     WarmupJob,
 };
 use crate::http::client_ip;
@@ -60,6 +55,8 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             post(update_cache_epoch),
         )
         .route("/api/warmup", get(warmup_stats).post(start_warmup))
+        .route("/api/warmup/catalog", post(start_catalog_warmup))
+        .route("/api/warmup/status", get(catalog_warmup_status))
         .route("/api/warmup/jobs", get(list_warmup_jobs))
         .route("/api/warmup/jobs/{id}/cancel", post(cancel_warmup_job))
         .route("/api/warmup/pause", post(pause_warmup))
@@ -352,7 +349,89 @@ async fn resume_warmup(
 ) -> Result<Json<serde_json::Value>, AdminError> {
     state.db.set_warmup_paused(false).await?;
     state.warmup_notify.notify_one();
+    state.catalog_warmup_notify.notify_one();
     Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+#[derive(Debug, Serialize)]
+struct CatalogWarmupStatus {
+    job_id: Option<i64>,
+    status: String,
+    last_error: Option<String>,
+    catalog_address: Option<String>,
+    parts_total: i64,
+    parts_queued: i64,
+    parts_running: i64,
+    parts_done: i64,
+    parts_failed: i64,
+    assets_total: i64,
+    assets_pinned: i64,
+    assets_failed: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CatalogWarmupStatusQuery {
+    chain: String,
+    collection: String,
+}
+
+async fn start_catalog_warmup(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CatalogWarmupRequest>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) =
+        canonicalize_chain_collection(&state, &payload.chain, &payload.collection)?;
+    let request = CatalogWarmupRequest {
+        chain,
+        collection,
+        catalog_address: payload.catalog_address,
+        token_id: payload.token_id,
+        asset_id: payload.asset_id,
+        from_block: payload.from_block,
+        to_block: payload.to_block,
+        force: payload.force,
+    };
+    let result = enqueue_catalog_warmup(state.clone(), request).await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "job_id": result.job_id,
+        "parts_total": result.parts_total
+    })))
+}
+
+async fn catalog_warmup_status(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<CatalogWarmupStatusQuery>,
+) -> Result<Json<CatalogWarmupStatus>, AdminError> {
+    let (chain, collection) =
+        canonicalize_chain_collection(&state, &query.chain, &query.collection)?;
+    let job = state.db.get_catalog_warmup_job(&chain, &collection).await?;
+    let (job_id, catalog_address, status, last_error) = match job {
+        Some((job_id, catalog_address, status, last_error)) => {
+            (Some(job_id), Some(catalog_address), status, last_error)
+        }
+        None => (None, None, "idle".to_string(), None),
+    };
+    let (parts_queued, parts_running, parts_done, parts_failed, parts_total) = match job_id {
+        Some(job_id) => state.db.catalog_warmup_item_counts(job_id).await?,
+        None => (0, 0, 0, 0, 0),
+    };
+    let (assets_total, assets_pinned, assets_failed) =
+        state.db.catalog_asset_counts(&chain, &collection).await?;
+    Ok(Json(CatalogWarmupStatus {
+        job_id,
+        status,
+        last_error,
+        catalog_address,
+        parts_total,
+        parts_queued,
+        parts_running,
+        parts_done,
+        parts_failed,
+        assets_total,
+        assets_pinned,
+        assets_failed,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1025,6 +1104,55 @@ const ADMIN_HTML: &str = r#"<!doctype html>
     </fieldset>
 
     <fieldset>
+      <legend>Catalog Warmup</legend>
+      <div class="small">Pins catalog part metadata and part assets.</div>
+      <div class="row">
+        <div>
+          <label>Chain</label>
+          <input id="catalogWarmChain" placeholder="base" />
+        </div>
+        <div>
+          <label>Collection</label>
+          <input id="catalogWarmCollection" placeholder="0x..." />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Catalog address (optional)</label>
+          <input id="catalogWarmAddress" placeholder="0x..." />
+        </div>
+        <div>
+          <label>Token ID (fallback)</label>
+          <input id="catalogWarmToken" placeholder="1" />
+        </div>
+        <div>
+          <label>Asset ID (fallback)</label>
+          <input id="catalogWarmAsset" placeholder="100" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>From block</label>
+          <input id="catalogWarmFromBlock" placeholder="0" />
+        </div>
+        <div>
+          <label>To block</label>
+          <input id="catalogWarmToBlock" placeholder="latest" />
+        </div>
+        <div>
+          <label>Force</label>
+          <select id="catalogWarmForce">
+            <option value="false">false</option>
+            <option value="true">true</option>
+          </select>
+        </div>
+      </div>
+      <button id="startCatalogWarmupBtn">Warm Catalog</button>
+      <button id="loadCatalogWarmupBtn">Refresh Catalog Status</button>
+      <div class="small" id="catalogWarmupStatus"></div>
+    </fieldset>
+
+    <fieldset>
       <legend>Warmup Jobs</legend>
       <button id="loadWarmupJobsBtn">Load Jobs</button>
       <table>
@@ -1314,6 +1442,7 @@ mod tests {
             warmup_max_renders_per_job: 0,
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
+            warmup_max_concurrent_asset_pins: 1,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

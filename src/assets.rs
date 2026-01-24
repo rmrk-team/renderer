@@ -9,8 +9,8 @@ use reqwest::{StatusCode, header};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
-use std::net::{IpAddr, SocketAddr};
 use std::io::ErrorKind;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -201,6 +201,10 @@ impl AssetResolver {
             ipfs_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
         })
+    }
+
+    pub fn pinned_store(&self) -> Option<Arc<PinnedAssetStore>> {
+        self.pin_store.clone()
     }
 
     pub async fn resolve_metadata(

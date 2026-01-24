@@ -148,10 +148,42 @@ async function startWarmup() {
   document.getElementById('warmupStatus').textContent = `Queued ${result.jobs} jobs`;
 }
 
+async function startCatalogWarmup() {
+  const payload = {
+    chain: document.getElementById('catalogWarmChain').value.trim(),
+    collection: document.getElementById('catalogWarmCollection').value.trim(),
+    catalog_address: document.getElementById('catalogWarmAddress').value.trim() || null,
+    token_id: document.getElementById('catalogWarmToken').value.trim() || null,
+    asset_id: document.getElementById('catalogWarmAsset').value.trim() || null,
+    from_block: document.getElementById('catalogWarmFromBlock').value
+      ? parseInt(document.getElementById('catalogWarmFromBlock').value, 10)
+      : null,
+    to_block: document.getElementById('catalogWarmToBlock').value
+      ? parseInt(document.getElementById('catalogWarmToBlock').value, 10)
+      : null,
+    force: document.getElementById('catalogWarmForce').value === 'true',
+  };
+  const result = await apiFetch('/admin/api/warmup/catalog', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  document.getElementById('catalogWarmupStatus').textContent =
+    `Job ${result.job_id}: ${result.parts_total} parts queued`;
+}
+
 async function loadWarmupStats() {
   const result = await apiFetch('/admin/api/warmup');
   document.getElementById('warmupStatus').textContent =
     `queued=${result.queued}, running=${result.running}, done=${result.done}, failed=${result.failed}, paused=${result.paused}`;
+}
+
+async function loadCatalogWarmupStatus() {
+  const chain = document.getElementById('catalogWarmChain').value.trim();
+  const collection = document.getElementById('catalogWarmCollection').value.trim();
+  if (!chain || !collection) return;
+  const result = await apiFetch(`/admin/api/warmup/status?chain=${encodeURIComponent(chain)}&collection=${encodeURIComponent(collection)}`);
+  document.getElementById('catalogWarmupStatus').textContent =
+    `status=${result.status}, parts=${result.parts_done}/${result.parts_total}, assets=${result.assets_pinned}/${result.assets_total}, failed=${result.assets_failed}`;
 }
 
 async function loadWarmupJobs() {
@@ -462,9 +494,11 @@ bindClick('saveCollectionBtn', saveCollection);
 bindClick('updateCacheEpochBtn', updateCacheEpoch);
 bindClick('refreshCanvasBtn', refreshCanvas);
 bindClick('startWarmupBtn', startWarmup);
+bindClick('startCatalogWarmupBtn', startCatalogWarmup);
 bindClick('pauseWarmupBtn', pauseWarmup);
 bindClick('resumeWarmupBtn', resumeWarmup);
 bindClick('loadWarmupStatsBtn', loadWarmupStats);
+bindClick('loadCatalogWarmupBtn', loadCatalogWarmupStatus);
 bindClick('loadWarmupJobsBtn', loadWarmupJobs);
 bindClick('loadCacheStatsBtn', loadCacheStats);
 bindClick('purgeCollectionBtn', purgeCollection);

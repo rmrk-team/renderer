@@ -5,6 +5,7 @@ mod approvals;
 mod assets;
 mod cache;
 mod canonical;
+mod catalog_warmup;
 mod chain;
 mod config;
 mod db;
@@ -143,9 +144,11 @@ async fn main() -> anyhow::Result<()> {
                 let store = pinned_store.clone();
                 tokio::spawn(async move {
                     info!(address = %local_addr, "local ipfs gateway listening");
-                    if let Err(err) =
-                        axum::serve(local_listener, local_ipfs::router(store).into_make_service())
-                            .await
+                    if let Err(err) = axum::serve(
+                        local_listener,
+                        local_ipfs::router(store).into_make_service(),
+                    )
+                    .await
                     {
                         warn!(error = ?err, "local ipfs gateway failed");
                     }
@@ -236,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         warmup::spawn_worker(warmup_state).await;
     });
+    catalog_warmup::spawn_workers(state.clone()).await;
 
     approvals::spawn_approval_watchers(state.clone()).await;
     approvals::spawn_approval_sync(state.clone()).await;
@@ -361,6 +365,7 @@ mod tests {
             warmup_max_renders_per_job: 0,
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
+            warmup_max_concurrent_asset_pins: 1,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

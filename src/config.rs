@@ -98,6 +98,7 @@ pub struct Config {
     pub warmup_max_renders_per_job: usize,
     pub warmup_job_timeout_seconds: u64,
     pub warmup_max_block_span: u64,
+    pub warmup_max_concurrent_asset_pins: usize,
     pub primary_asset_cache_ttl: Duration,
     pub primary_asset_negative_ttl: Duration,
     pub primary_asset_cache_capacity: usize,
@@ -202,9 +203,7 @@ impl Config {
             env::var("LOCAL_IPFS_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
         let local_ipfs_port = parse_u16("LOCAL_IPFS_PORT", 18180);
         if local_ipfs_enabled && !pinning_enabled {
-            return Err(anyhow!(
-                "LOCAL_IPFS_ENABLED requires PINNING_ENABLED=true"
-            ));
+            return Err(anyhow!("LOCAL_IPFS_ENABLED requires PINNING_ENABLED=true"));
         }
         if local_ipfs_enabled && !is_loopback_bind(&local_ipfs_bind) {
             return Err(anyhow!(
@@ -268,7 +267,10 @@ impl Config {
         });
         if local_ipfs_enabled {
             let local_gateway = format_local_gateway_url(&local_ipfs_bind, local_ipfs_port);
-            if !ipfs_gateways.iter().any(|gateway| gateway == &local_gateway) {
+            if !ipfs_gateways
+                .iter()
+                .any(|gateway| gateway == &local_gateway)
+            {
                 ipfs_gateways.insert(0, local_gateway);
             }
         }
@@ -348,6 +350,7 @@ impl Config {
         let warmup_max_renders_per_job = parse_usize("WARMUP_MAX_RENDERS_PER_JOB", 6);
         let warmup_job_timeout_seconds = parse_u64("WARMUP_JOB_TIMEOUT_SECONDS", 600);
         let warmup_max_block_span = parse_u64("WARMUP_MAX_BLOCK_SPAN", 0);
+        let warmup_max_concurrent_asset_pins = parse_usize("WARMUP_MAX_CONCURRENT_ASSET_PINS", 4);
         let primary_asset_cache_ttl =
             Duration::from_secs(parse_u64("PRIMARY_ASSET_CACHE_TTL_SECONDS", 60));
         let primary_asset_negative_ttl =
@@ -465,6 +468,7 @@ impl Config {
             warmup_max_renders_per_job,
             warmup_job_timeout_seconds,
             warmup_max_block_span,
+            warmup_max_concurrent_asset_pins,
             primary_asset_cache_ttl,
             primary_asset_negative_ttl,
             primary_asset_cache_capacity,
