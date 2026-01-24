@@ -244,11 +244,17 @@ impl AssetResolver {
         };
         if let Some((art_uri, source)) = select_render_uri(&json, prefer_thumb) {
             let mut art_uri = art_uri.trim().to_string();
+            if let Some(resolved) = resolve_relative_art_uri(&art_uri, metadata_uri) {
+                art_uri = resolved;
+            }
+            if let Some(normalized) = normalize_arweave_uri(&art_uri) {
+                art_uri = normalized;
+            }
             if let Some(normalized) = normalize_ipfs_uri(&art_uri) {
                 art_uri = normalized;
             }
             if art_uri.is_empty() || !is_supported_asset_uri(&art_uri) {
-                debug!(
+                warn!(
                     metadata_uri = %metadata_uri,
                     art_uri = %art_uri,
                     field = %source,
@@ -558,8 +564,11 @@ impl AssetResolver {
     }
 
     fn resolve_uri(&self, uri: &str) -> Result<ResolvedUri> {
-        let uri = uri.trim();
-        if let Some(ipfs_uri) = normalize_ipfs_uri(uri) {
+        let mut uri = uri.trim().to_string();
+        if let Some(arweave_uri) = normalize_arweave_uri(&uri) {
+            uri = arweave_uri;
+        }
+        if let Some(ipfs_uri) = normalize_ipfs_uri(&uri) {
             let (cid, path) = parse_ipfs_uri(&ipfs_uri)?;
             let gateway = self
                 .config
@@ -578,7 +587,7 @@ impl AssetResolver {
                 path,
             });
         }
-        let parsed = Url::parse(uri)
+        let parsed = Url::parse(&uri)
             .or_else(|_| Url::parse(&uri.replace(' ', "%20")))
             .map_err(|_| AssetFetchError::InvalidUri)
             .with_context(|| format!("invalid asset uri: {uri}"))?;
@@ -1018,13 +1027,37 @@ fn normalize_ipfs_uri(uri: &str) -> Option<String> {
     }
     let lower = trimmed.to_ascii_lowercase();
     if lower.starts_with("ipfs://") {
-        return Some(format!("ipfs://{}", &trimmed[7..]));
+        let remainder = &trimmed[7..];
+        if let Some((cid, _)) = remainder.split_once('/') {
+            if !is_valid_cid(cid) {
+                return None;
+            }
+        } else if !is_valid_cid(remainder) {
+            return None;
+        }
+        return Some(format!("ipfs://{remainder}"));
     }
     if lower.starts_with("ipfs/") {
-        return Some(format!("ipfs://{}", &trimmed[5..]));
+        let remainder = &trimmed[5..];
+        if let Some((cid, _)) = remainder.split_once('/') {
+            if !is_valid_cid(cid) {
+                return None;
+            }
+        } else if !is_valid_cid(remainder) {
+            return None;
+        }
+        return Some(format!("ipfs://{remainder}"));
     }
     if lower.starts_with("/ipfs/") {
-        return Some(format!("ipfs://{}", &trimmed[6..]));
+        let remainder = &trimmed[6..];
+        if let Some((cid, _)) = remainder.split_once('/') {
+            if !is_valid_cid(cid) {
+                return None;
+            }
+        } else if !is_valid_cid(remainder) {
+            return None;
+        }
+        return Some(format!("ipfs://{remainder}"));
     }
     if is_valid_cid(trimmed) {
         return Some(format!("ipfs://{trimmed}"));
@@ -1033,6 +1066,21 @@ fn normalize_ipfs_uri(uri: &str) -> Option<String> {
         if is_valid_cid(cid) {
             return Some(format!("ipfs://{cid}/{rest}"));
         }
+    }
+    None
+}
+
+fn normalize_arweave_uri(uri: &str) -> Option<String> {
+    let trimmed = uri.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("ar://") {
+        return Some(format!("https://arweave.net/{}", &trimmed[5..]));
+    }
+    if lower.starts_with("arweave://") {
+        return Some(format!("https://arweave.net/{}", &trimmed[10..]));
     }
     None
 }
@@ -1114,6 +1162,9 @@ fn is_supported_asset_uri(uri: &str) -> bool {
         return false;
     }
     if trimmed.to_ascii_lowercase().starts_with("data:") {
+        return true;
+    }
+    if normalize_arweave_uri(trimmed).is_some() {
         return true;
     }
     if normalize_ipfs_uri(trimmed).is_some() {
@@ -1351,6 +1402,42 @@ fn select_render_uri(
     None
 }
 
+fn resolve_relative_art_uri(art_uri: &str, metadata_uri: &str) -> Option<String> {
+    let trimmed = art_uri.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("data:")
+        || lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || normalize_ipfs_uri(trimmed).is_some()
+        || normalize_arweave_uri(trimmed).is_some()
+    {
+        return None;
+    }
+    if let Some(ipfs_uri) = normalize_ipfs_uri(metadata_uri) {
+        if let Ok((cid, path)) = parse_ipfs_uri(&ipfs_uri) {
+            let base_dir = path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+            let suffix = trimmed.trim_start_matches('/');
+            let joined = if base_dir.is_empty() {
+                format!("/{suffix}")
+            } else {
+                format!("{base_dir}/{suffix}")
+            };
+            return Some(format!("ipfs://{cid}{joined}"));
+        }
+    }
+    if let Ok(base) = Url::parse(metadata_uri) {
+        if matches!(base.scheme(), "http" | "https") {
+            if let Ok(joined) = base.join(trimmed) {
+                return Some(joined.to_string());
+            }
+        }
+    }
+    None
+}
+
 fn looks_like_asset_bytes(bytes: &[u8]) -> bool {
     let sample = std::str::from_utf8(bytes).unwrap_or("");
     if sample.contains("<svg") || sample.contains("<?xml") {
@@ -1400,6 +1487,27 @@ mod tests {
     fn normalize_ipfs_uri_accepts_cid_path() {
         let normalized = normalize_ipfs_uri("bafy123/metadata.json").unwrap();
         assert_eq!(normalized, "ipfs://bafy123/metadata.json");
+    }
+
+    #[test]
+    fn normalize_arweave_uri_to_https() {
+        let normalized = normalize_arweave_uri("ar://tx123/path.png").unwrap();
+        assert_eq!(normalized, "https://arweave.net/tx123/path.png");
+    }
+
+    #[test]
+    fn resolve_relative_art_uri_with_http_base() {
+        let resolved =
+            resolve_relative_art_uri("image.png", "https://example.com/meta/metadata.json")
+                .unwrap();
+        assert_eq!(resolved, "https://example.com/meta/image.png");
+    }
+
+    #[test]
+    fn resolve_relative_art_uri_with_ipfs_base() {
+        let resolved =
+            resolve_relative_art_uri("image.png", "ipfs://bafy123/metadata/metadata.json").unwrap();
+        assert_eq!(resolved, "ipfs://bafy123/metadata/image.png");
     }
 
     #[test]

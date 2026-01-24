@@ -808,6 +808,7 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - `?fresh=1` forces a state refresh and returns `Cache-Control: no-store`. If rate-limited, expect 429 with `Retry-After`.
 - Oversized raster assets are fetched with a higher byte cap and resized to `MAX_RASTER_RESIZE_DIM` during pinning/asset fetch.
 - Token warmup skips invalid/empty asset URIs (logged) so jobs can complete.
+- Relative asset URIs are resolved against the metadata URI; `ar://` is normalized to `https://arweave.net/`.
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.
