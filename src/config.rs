@@ -16,6 +16,11 @@ pub struct Config {
     pub admin_password: String,
     pub db_path: PathBuf,
     pub cache_dir: PathBuf,
+    pub pinning_enabled: bool,
+    pub pinned_dir: PathBuf,
+    pub local_ipfs_enabled: bool,
+    pub local_ipfs_bind: String,
+    pub local_ipfs_port: u16,
     pub cache_max_size_bytes: u64,
     pub render_cache_min_ttl: Duration,
     pub asset_cache_min_ttl: Duration,
@@ -188,6 +193,24 @@ impl Config {
         let cache_dir = PathBuf::from(
             env::var("CACHE_DIR").unwrap_or_else(|_| "/var/cache/renderer".to_string()),
         );
+        let pinning_enabled = parse_bool("PINNING_ENABLED", true);
+        let pinned_dir = PathBuf::from(
+            env::var("PINNED_DIR").unwrap_or_else(|_| "/var/lib/renderer/pinned".to_string()),
+        );
+        let local_ipfs_enabled = parse_bool("LOCAL_IPFS_ENABLED", pinning_enabled);
+        let local_ipfs_bind =
+            env::var("LOCAL_IPFS_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let local_ipfs_port = parse_u16("LOCAL_IPFS_PORT", 18180);
+        if local_ipfs_enabled && !pinning_enabled {
+            return Err(anyhow!(
+                "LOCAL_IPFS_ENABLED requires PINNING_ENABLED=true"
+            ));
+        }
+        if local_ipfs_enabled && !is_loopback_bind(&local_ipfs_bind) {
+            return Err(anyhow!(
+                "LOCAL_IPFS_BIND must be a loopback address when LOCAL_IPFS_ENABLED=true"
+            ));
+        }
 
         let cache_max_size_gb = parse_u64("CACHE_MAX_SIZE_GB", 50);
         let cache_max_size_bytes = cache_max_size_gb.saturating_mul(1024 * 1024 * 1024);
@@ -236,13 +259,19 @@ impl Config {
             .map(|value| value.trim().to_ascii_lowercase())
             .filter(|value| !value.is_empty());
 
-        let ipfs_gateways: Vec<String> = parse_json_env("IPFS_GATEWAYS").unwrap_or_else(|| {
+        let mut ipfs_gateways: Vec<String> = parse_json_env("IPFS_GATEWAYS").unwrap_or_else(|| {
             vec![
                 "https://rmrk.myfilebase.com/ipfs/".to_string(),
                 "https://cloudflare-ipfs.com/ipfs/".to_string(),
                 "https://ipfs.io/ipfs/".to_string(),
             ]
         });
+        if local_ipfs_enabled {
+            let local_gateway = format_local_gateway_url(&local_ipfs_bind, local_ipfs_port);
+            if !ipfs_gateways.iter().any(|gateway| gateway == &local_gateway) {
+                ipfs_gateways.insert(0, local_gateway);
+            }
+        }
         let ipfs_timeout_seconds = parse_u64("IPFS_TIMEOUT_SECONDS", 30);
         let max_metadata_json_bytes = parse_usize("MAX_METADATA_JSON_BYTES", 524_288);
         let max_svg_bytes = parse_usize("MAX_SVG_BYTES", 2_097_152);
@@ -354,6 +383,11 @@ impl Config {
             admin_password,
             db_path,
             cache_dir,
+            pinning_enabled,
+            pinned_dir,
+            local_ipfs_enabled,
+            local_ipfs_bind,
+            local_ipfs_port,
             cache_max_size_bytes,
             render_cache_min_ttl,
             asset_cache_min_ttl,
@@ -555,6 +589,27 @@ fn parse_default_cache_timestamp() -> Result<Option<String>> {
         ));
     }
     Ok(Some(trimmed.to_string()))
+}
+
+fn is_loopback_bind(bind: &str) -> bool {
+    let trimmed = bind.trim();
+    if trimmed.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match trimmed.parse::<IpAddr>() {
+        Ok(addr) => addr.is_loopback(),
+        Err(_) => false,
+    }
+}
+
+fn format_local_gateway_url(bind: &str, port: u16) -> String {
+    let trimmed = bind.trim();
+    let host = if trimmed.contains(':') && !trimmed.starts_with('[') && !trimmed.ends_with(']') {
+        format!("[{trimmed}]")
+    } else {
+        trimmed.to_string()
+    };
+    format!("http://{host}:{port}/ipfs/")
 }
 
 fn parse_child_layer_mode(key: &str, default: ChildLayerMode) -> Result<ChildLayerMode> {

@@ -108,6 +108,14 @@ pub struct UsageBatchRow {
     pub cache_misses: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinnedAssetCounts {
+    pub pinned: i64,
+    pub missing: i64,
+    pub failed: i64,
+    pub total: i64,
+}
+
 impl Database {
     pub async fn new(config: &Config) -> Result<Self> {
         if let Some(parent) = config.db_path.parent() {
@@ -237,6 +245,22 @@ impl Database {
           key TEXT PRIMARY KEY,
           value TEXT
         );
+        CREATE TABLE IF NOT EXISTS pinned_assets (
+          id INTEGER PRIMARY KEY,
+          asset_key TEXT NOT NULL UNIQUE,
+          cid TEXT NOT NULL,
+          path TEXT NOT NULL,
+          content_type TEXT,
+          size_bytes INTEGER,
+          status TEXT NOT NULL,
+          attempts INTEGER DEFAULT 0,
+          last_error TEXT,
+          first_seen_at INTEGER,
+          pinned_at INTEGER,
+          last_attempt_at INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS pinned_assets_cid_idx ON pinned_assets(cid);
+        CREATE INDEX IF NOT EXISTS pinned_assets_path_idx ON pinned_assets(path);
         INSERT OR IGNORE INTO warmup_state (id, paused) VALUES (1, 0);
         "#;
         sqlx::query(schema).execute(&self.pool).await?;
@@ -1654,6 +1678,69 @@ impl Database {
         Ok(())
     }
 
+    pub async fn upsert_pinned_asset(
+        &self,
+        asset_key: &str,
+        cid: &str,
+        path: &str,
+        content_type: Option<&str>,
+        size_bytes: i64,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO pinned_assets (
+              asset_key, cid, path, content_type, size_bytes, status, attempts,
+              last_error, first_seen_at, pinned_at, last_attempt_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 'pinned', 1, NULL, ?6, ?7, ?8)
+            ON CONFLICT(asset_key) DO UPDATE SET
+              cid = excluded.cid,
+              path = excluded.path,
+              content_type = COALESCE(excluded.content_type, pinned_assets.content_type),
+              size_bytes = COALESCE(excluded.size_bytes, pinned_assets.size_bytes),
+              status = excluded.status,
+              attempts = pinned_assets.attempts + 1,
+              last_error = NULL,
+              first_seen_at = COALESCE(pinned_assets.first_seen_at, excluded.first_seen_at),
+              pinned_at = COALESCE(pinned_assets.pinned_at, excluded.pinned_at),
+              last_attempt_at = excluded.last_attempt_at
+            "#,
+        )
+        .bind(asset_key)
+        .bind(cid)
+        .bind(path)
+        .bind(content_type)
+        .bind(size_bytes)
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn pinned_asset_counts(&self) -> Result<PinnedAssetCounts> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              COALESCE(SUM(CASE WHEN status = 'pinned' THEN 1 ELSE 0 END), 0) as pinned,
+              COALESCE(SUM(CASE WHEN status = 'missing' THEN 1 ELSE 0 END), 0) as missing,
+              COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
+              COUNT(*) as total
+            FROM pinned_assets
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(PinnedAssetCounts {
+            pinned: row.get::<i64, _>("pinned"),
+            missing: row.get::<i64, _>("missing"),
+            failed: row.get::<i64, _>("failed"),
+            total: row.get::<i64, _>("total"),
+        })
+    }
+
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let row = sqlx::query("SELECT value FROM renderer_settings WHERE key = ?1")
             .bind(key)
@@ -1711,6 +1798,11 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path: path,
             cache_dir: PathBuf::from("cache"),
+            pinning_enabled: false,
+            pinned_dir: PathBuf::from("pinned"),
+            local_ipfs_enabled: false,
+            local_ipfs_bind: "127.0.0.1".to_string(),
+            local_ipfs_port: 18180,
             cache_max_size_bytes: 0,
             render_cache_min_ttl: std::time::Duration::from_secs(0),
             asset_cache_min_ttl: std::time::Duration::from_secs(0),

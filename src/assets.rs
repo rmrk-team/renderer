@@ -1,5 +1,7 @@
 use crate::cache::CacheManager;
 use crate::config::Config;
+use crate::db::Database;
+use crate::pinning::{PinnedAssetStore, content_type_from_path};
 use anyhow::{Context, Result, anyhow};
 use bytes::{Bytes, BytesMut};
 use mime::Mime;
@@ -8,6 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,6 +26,8 @@ pub struct AssetResolver {
     client_cache: ClientCache,
     cache: CacheManager,
     config: Arc<Config>,
+    db: Database,
+    pin_store: Option<Arc<PinnedAssetStore>>,
     ipfs_semaphore: Arc<Semaphore>,
     nonrenderable_meta_cache: Arc<Mutex<NonRenderableMetaCache>>,
 }
@@ -98,6 +103,12 @@ enum FetchKind {
 }
 
 #[derive(Debug, Clone)]
+struct FetchedBytes {
+    bytes: Bytes,
+    content_type: Option<Mime>,
+}
+
+#[derive(Debug, Clone)]
 struct ResolvedHttpUrl {
     parsed: Url,
     host: String,
@@ -166,6 +177,8 @@ impl AssetResolver {
     pub fn new(
         config: Arc<Config>,
         cache: CacheManager,
+        db: Database,
+        pin_store: Option<Arc<PinnedAssetStore>>,
         ipfs_semaphore: Arc<Semaphore>,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
@@ -183,6 +196,8 @@ impl AssetResolver {
             client_cache,
             cache,
             config,
+            db,
+            pin_store,
             ipfs_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
         })
@@ -243,6 +258,9 @@ impl AssetResolver {
 
     pub async fn fetch_asset(&self, uri: &str) -> Result<ResolvedAsset> {
         let resolved = self.resolve_uri(uri)?;
+        if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
+            return Ok(ResolvedAsset { bytes });
+        }
         let cache_key = resolved.cache_key.clone();
         let prefix = &cache_key[0..2];
         let cache_path = self.cache.asset_raw_dir.join(prefix).join(cache_key);
@@ -251,19 +269,30 @@ impl AssetResolver {
             .load_cached_file(&cache_path, self.cache.asset_ttl)
             .await?
         {
-            return Ok(ResolvedAsset {
-                bytes: Bytes::from(bytes),
-            });
+            let bytes = Bytes::from(bytes);
+            if resolved.is_ipfs {
+                self.pin_ipfs_bytes(&resolved, &bytes, None).await;
+            }
+            return Ok(ResolvedAsset { bytes });
         }
-        let bytes = self
+        let fetched = self
             .fetch_bytes_with_retry(&resolved, FetchKind::Asset)
             .await?;
-        self.cache.store_file(&cache_path, &bytes).await?;
-        Ok(ResolvedAsset { bytes })
+        self.cache.store_file(&cache_path, &fetched.bytes).await?;
+        if resolved.is_ipfs {
+            self.pin_ipfs_bytes(&resolved, &fetched.bytes, fetched.content_type.as_ref())
+                .await;
+        }
+        Ok(ResolvedAsset {
+            bytes: fetched.bytes,
+        })
     }
 
     pub async fn fetch_metadata_json(&self, metadata_uri: &str) -> Result<Bytes> {
         let resolved = self.resolve_uri(metadata_uri)?;
+        if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
+            return Ok(bytes);
+        }
         let prefix = &resolved.cache_key[0..2];
         let cache_path = self
             .cache
@@ -275,16 +304,27 @@ impl AssetResolver {
             .load_cached_file(&cache_path, self.cache.asset_ttl)
             .await?
         {
-            return Ok(Bytes::from(bytes));
+            let bytes = Bytes::from(bytes);
+            if resolved.is_ipfs {
+                self.pin_ipfs_bytes(&resolved, &bytes, None).await;
+            }
+            return Ok(bytes);
         }
-        let bytes = self
+        let fetched = self
             .fetch_bytes_with_retry(&resolved, FetchKind::Metadata)
             .await?;
-        if bytes.len() > self.config.max_metadata_json_bytes {
-            return Err(anyhow!("metadata json too large ({} bytes)", bytes.len()));
+        if fetched.bytes.len() > self.config.max_metadata_json_bytes {
+            return Err(anyhow!(
+                "metadata json too large ({} bytes)",
+                fetched.bytes.len()
+            ));
         }
-        self.cache.store_file(&cache_path, &bytes).await?;
-        Ok(bytes)
+        self.cache.store_file(&cache_path, &fetched.bytes).await?;
+        if resolved.is_ipfs {
+            self.pin_ipfs_bytes(&resolved, &fetched.bytes, fetched.content_type.as_ref())
+                .await;
+        }
+        Ok(fetched.bytes)
     }
 
     pub async fn fetch_raster_cache(
@@ -359,6 +399,84 @@ impl AssetResolver {
         Ok(Bytes::from(bytes))
     }
 
+    fn pin_store(&self) -> Option<&PinnedAssetStore> {
+        self.pin_store.as_deref().filter(|store| store.enabled())
+    }
+
+    async fn load_pinned_ipfs(&self, resolved: &ResolvedUri) -> Option<Bytes> {
+        if !resolved.is_ipfs {
+            return None;
+        }
+        let store = self.pin_store()?;
+        let location = match store.ipfs_location(&resolved.cid, &resolved.path) {
+            Ok(location) => location,
+            Err(err) => {
+                warn!(error = ?err, cid = %resolved.cid, path = %resolved.path, "invalid pinned ipfs path");
+                return None;
+            }
+        };
+        match tokio::fs::read(&location.file_path).await {
+            Ok(bytes) => Some(Bytes::from(bytes)),
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => {
+                warn!(
+                    error = ?err,
+                    path = %location.file_path.display(),
+                    "pinned asset read failed"
+                );
+                None
+            }
+        }
+    }
+
+    async fn pin_ipfs_bytes(
+        &self,
+        resolved: &ResolvedUri,
+        bytes: &Bytes,
+        content_type: Option<&Mime>,
+    ) {
+        if !resolved.is_ipfs {
+            return;
+        }
+        let Some(store) = self.pin_store() else {
+            return;
+        };
+        let location = match store.ipfs_location(&resolved.cid, &resolved.path) {
+            Ok(location) => location,
+            Err(err) => {
+                warn!(error = ?err, cid = %resolved.cid, path = %resolved.path, "invalid pinned ipfs path");
+                return;
+            }
+        };
+        let exists = tokio::fs::metadata(&location.file_path).await.is_ok();
+        if !exists {
+            if let Err(err) = store.store_bytes(&location, bytes).await {
+                warn!(
+                    error = ?err,
+                    path = %location.file_path.display(),
+                    "pinned asset write failed"
+                );
+                return;
+            }
+        }
+        let content_type = content_type
+            .map(|mime| mime.essence_str().to_string())
+            .or_else(|| content_type_from_path(&location.path).map(|value| value.to_string()));
+        if let Err(err) = self
+            .db
+            .upsert_pinned_asset(
+                &location.asset_key,
+                &location.cid,
+                &location.path,
+                content_type.as_deref(),
+                bytes.len() as i64,
+            )
+            .await
+        {
+            warn!(error = ?err, asset_key = %location.asset_key, "pinned asset db update failed");
+        }
+    }
+
     fn resolve_uri(&self, uri: &str) -> Result<ResolvedUri> {
         let uri = uri.trim();
         if uri.starts_with("ipfs://") {
@@ -394,11 +512,33 @@ impl AssetResolver {
         })
     }
 
+    fn is_local_ipfs_url(&self, url: &Url) -> bool {
+        if !self.config.local_ipfs_enabled {
+            return false;
+        }
+        let port = url
+            .port_or_known_default()
+            .unwrap_or_else(|| if url.scheme() == "https" { 443 } else { 80 });
+        if port != self.config.local_ipfs_port {
+            return false;
+        }
+        let host = url
+            .host_str()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let bind = self.config.local_ipfs_bind.trim().to_ascii_lowercase();
+        if host == bind {
+            return true;
+        }
+        host == "localhost" && (bind == "127.0.0.1" || bind == "::1" || bind == "localhost")
+    }
+
     async fn fetch_bytes_with_retry(
         &self,
         resolved: &ResolvedUri,
         kind: FetchKind,
-    ) -> Result<Bytes> {
+    ) -> Result<FetchedBytes> {
         if !resolved.is_ipfs {
             return self.fetch_http_bytes(&resolved.url, kind).await;
         }
@@ -407,7 +547,7 @@ impl AssetResolver {
         for (index, gateway) in gateways.iter().enumerate() {
             let url = format!("{}{}{}", gateway, resolved.cid, resolved.path);
             match self.fetch_http_bytes(&url, kind).await {
-                Ok(bytes) => return Ok(bytes),
+                Ok(fetched) => return Ok(fetched),
                 Err(err) => {
                     last_err = Some(err);
                     warn!(
@@ -421,7 +561,7 @@ impl AssetResolver {
         Err(last_err.unwrap_or_else(|| anyhow!("ipfs fetch failed")))
     }
 
-    async fn fetch_http_bytes(&self, url: &str, kind: FetchKind) -> Result<Bytes> {
+    async fn fetch_http_bytes(&self, url: &str, kind: FetchKind) -> Result<FetchedBytes> {
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
         let mut response = self.send_pinned_request(&resolved).await?;
@@ -456,7 +596,10 @@ impl AssetResolver {
             buffer.extend_from_slice(&chunk);
         }
         debug!(url = %url, size = total, "fetched asset");
-        Ok(buffer.freeze())
+        Ok(FetchedBytes {
+            bytes: buffer.freeze(),
+            content_type,
+        })
     }
 
     async fn validate_http_url(
@@ -471,7 +614,8 @@ impl AssetResolver {
         if scheme == "http" && !self.config.allow_http {
             return Err(AssetFetchError::Blocked);
         }
-        let (addrs, is_ip_literal) = self.resolve_public_host(&parsed).await?;
+        let allow_private = self.config.allow_private_networks || self.is_local_ipfs_url(&parsed);
+        let (addrs, is_ip_literal) = self.resolve_public_host(&parsed, allow_private).await?;
         let host = parsed
             .host_str()
             .ok_or(AssetFetchError::InvalidUri)?
@@ -487,13 +631,14 @@ impl AssetResolver {
     async fn resolve_public_host(
         &self,
         url: &Url,
+        allow_private: bool,
     ) -> std::result::Result<(Vec<SocketAddr>, bool), AssetFetchError> {
         let host_raw = url.host_str().ok_or(AssetFetchError::InvalidUri)?;
         let host = host_raw.trim_end_matches('.');
         let port = url
             .port_or_known_default()
             .unwrap_or_else(|| if url.scheme() == "https" { 443 } else { 80 });
-        if !self.config.allow_private_networks
+        if !allow_private
             && (host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost"))
         {
             return Err(AssetFetchError::Blocked);
@@ -501,13 +646,13 @@ impl AssetResolver {
         if let Some(host) = url.host() {
             match host {
                 Host::Ipv4(addr) => {
-                    if !self.config.allow_private_networks && is_private_ip(IpAddr::V4(addr)) {
+                    if !allow_private && is_private_ip(IpAddr::V4(addr)) {
                         return Err(AssetFetchError::Blocked);
                     }
                     return Ok((vec![SocketAddr::new(IpAddr::V4(addr), port)], true));
                 }
                 Host::Ipv6(addr) => {
-                    if !self.config.allow_private_networks && is_private_ip(IpAddr::V6(addr)) {
+                    if !allow_private && is_private_ip(IpAddr::V6(addr)) {
                         return Err(AssetFetchError::Blocked);
                     }
                     return Ok((vec![SocketAddr::new(IpAddr::V6(addr), port)], true));
@@ -521,7 +666,7 @@ impl AssetResolver {
                 url: url.as_str().to_string(),
             })?
             .collect();
-        if !self.config.allow_private_networks {
+        if !allow_private {
             addrs.retain(|addr| !is_private_ip(addr.ip()));
         }
         if addrs.is_empty() {

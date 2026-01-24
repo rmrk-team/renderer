@@ -1,6 +1,15 @@
 use crate::canonical;
 use crate::config::{AdminCollectionInput, Config};
-use crate::db::{Client, ClientKey, CollectionConfig, IpRule, RpcEndpoint, UsageRow, WarmupJob};
+use crate::db::{
+    Client,
+    ClientKey,
+    CollectionConfig,
+    IpRule,
+    PinnedAssetCounts,
+    RpcEndpoint,
+    UsageRow,
+    WarmupJob,
+};
 use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::refresh_canvas_size;
@@ -56,6 +65,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/warmup/pause", post(pause_warmup))
         .route("/api/warmup/resume", post(resume_warmup))
         .route("/api/cache", get(cache_stats))
+        .route("/api/pinned", get(pinned_stats))
         .route("/api/cache/purge", post(purge_cache))
         .route("/api/rpc/{chain}", get(list_rpc).put(replace_rpc))
         .route("/api/rpc/{chain}/health", get(rpc_health))
@@ -384,6 +394,13 @@ async fn cache_stats(
         "asset_bytes": asset_bytes,
         "total_bytes": render_bytes + asset_bytes
     })))
+}
+
+async fn pinned_stats(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<PinnedAssetCounts>, AdminError> {
+    let stats = state.db.pinned_asset_counts().await?;
+    Ok(Json(stats))
 }
 
 async fn list_rpc(
@@ -1215,6 +1232,11 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path: PathBuf::from("renderer.db"),
             cache_dir: PathBuf::from("cache"),
+            pinning_enabled: false,
+            pinned_dir: PathBuf::from("pinned"),
+            local_ipfs_enabled: false,
+            local_ipfs_bind: "127.0.0.1".to_string(),
+            local_ipfs_port: 18180,
             cache_max_size_bytes: 0,
             render_cache_min_ttl: Duration::from_secs(0),
             asset_cache_min_ttl: Duration::from_secs(0),

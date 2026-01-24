@@ -11,6 +11,8 @@ mod db;
 mod failure_log;
 mod http;
 mod landing;
+mod local_ipfs;
+mod pinning;
 mod rate_limit;
 mod render;
 mod render_queue;
@@ -24,6 +26,7 @@ use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::Database;
 use crate::failure_log::FailureLog;
+use crate::pinning::PinnedAssetStore;
 use crate::state::AppState;
 use axum::Router;
 use axum::body::HttpBody;
@@ -132,10 +135,33 @@ async fn main() -> anyhow::Result<()> {
     http::init_placeholder_cache(&config);
     let db = Database::new(&config).await?;
     let cache = CacheManager::new(&config)?;
+    let pinned_store = Arc::new(PinnedAssetStore::new(&config)?);
+    if config.local_ipfs_enabled && config.pinning_enabled {
+        let local_addr = format!("{}:{}", config.local_ipfs_bind, config.local_ipfs_port);
+        match TcpListener::bind(&local_addr).await {
+            Ok(local_listener) => {
+                let store = pinned_store.clone();
+                tokio::spawn(async move {
+                    info!(address = %local_addr, "local ipfs gateway listening");
+                    if let Err(err) =
+                        axum::serve(local_listener, local_ipfs::router(store).into_make_service())
+                            .await
+                    {
+                        warn!(error = ?err, "local ipfs gateway failed");
+                    }
+                });
+            }
+            Err(err) => {
+                warn!(error = ?err, address = %local_addr, "local ipfs bind failed");
+            }
+        }
+    }
     let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
     let assets = AssetResolver::new(
         Arc::new(config.clone()),
         cache.clone(),
+        db.clone(),
+        Some(pinned_store.clone()),
         ipfs_semaphore.clone(),
     )?;
     let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
@@ -253,6 +279,11 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path,
             cache_dir,
+            pinning_enabled: false,
+            pinned_dir: PathBuf::from("pinned"),
+            local_ipfs_enabled: false,
+            local_ipfs_bind: "127.0.0.1".to_string(),
+            local_ipfs_port: 18180,
             cache_max_size_bytes: 0,
             render_cache_min_ttl: Duration::from_secs(0),
             asset_cache_min_ttl: Duration::from_secs(0),
@@ -367,9 +398,16 @@ mod tests {
         );
         let db = Database::new(&config).await.unwrap();
         let cache = CacheManager::new(&config).unwrap();
+        let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
-        let assets =
-            AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
+        let assets = AssetResolver::new(
+            Arc::new(config.clone()),
+            cache.clone(),
+            db.clone(),
+            Some(pinned_store),
+            ipfs_semaphore,
+        )
+        .unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
             config, db, cache, assets, chain, None, None, None,
@@ -390,9 +428,16 @@ mod tests {
         );
         let db = Database::new(&config).await.unwrap();
         let cache = CacheManager::new(&config).unwrap();
+        let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
-        let assets =
-            AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore).unwrap();
+        let assets = AssetResolver::new(
+            Arc::new(config.clone()),
+            cache.clone(),
+            db.clone(),
+            Some(pinned_store),
+            ipfs_semaphore,
+        )
+        .unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
             config, db, cache, assets, chain, None, None, None,

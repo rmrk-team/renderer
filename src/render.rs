@@ -1,4 +1,6 @@
 use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
+#[cfg(test)]
+use crate::pinning::PinnedAssetStore;
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
 use crate::chain::{ComposeResult, FixedPart, SlotPart};
@@ -3169,9 +3171,16 @@ mod tests {
         let config = Config::from_env().context("config")?;
         let db = Database::new(&config).await.context("db")?;
         let cache = CacheManager::new(&config).context("cache")?;
+        let pinned_store = Arc::new(PinnedAssetStore::new(&config).context("pinned store")?);
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
-        let assets = AssetResolver::new(Arc::new(config.clone()), cache.clone(), ipfs_semaphore)
-            .context("assets")?;
+        let assets = AssetResolver::new(
+            Arc::new(config.clone()),
+            cache.clone(),
+            db.clone(),
+            Some(pinned_store),
+            ipfs_semaphore,
+        )
+        .context("assets")?;
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
         let state = Arc::new(AppState::new(
             config, db, cache, assets, chain, None, None, None,
