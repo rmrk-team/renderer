@@ -3397,6 +3397,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "thiserror 2.0.17",
+ "time",
  "tiny-skia",
  "tokio",
  "tokio-util",

@@ -138,10 +138,10 @@ pub enum AssetFetchError {
     Blocked,
     #[error("asset too large")]
     TooLarge,
-    #[error("asset fetch failed: {status}")]
-    UpstreamStatus { status: StatusCode },
-    #[error("asset fetch failed")]
-    Upstream,
+    #[error("asset fetch failed from {url}: {status}")]
+    UpstreamStatus { status: StatusCode, url: String },
+    #[error("asset fetch failed from {url}")]
+    Upstream { url: String },
 }
 
 #[derive(Debug, Deserialize)]
@@ -428,6 +428,7 @@ impl AssetResolver {
         if response.status() != StatusCode::OK {
             return Err(AssetFetchError::UpstreamStatus {
                 status: response.status(),
+                url: resolved.parsed.as_str().to_string(),
             }
             .into());
         }
@@ -516,7 +517,9 @@ impl AssetResolver {
         }
         let mut addrs: Vec<SocketAddr> = lookup_host((host, port))
             .await
-            .map_err(|_| AssetFetchError::Upstream)?
+            .map_err(|_| AssetFetchError::Upstream {
+                url: url.as_str().to_string(),
+            })?
             .collect();
         if !self.config.allow_private_networks {
             addrs.retain(|addr| !is_private_ip(addr.ip()));
@@ -537,7 +540,9 @@ impl AssetResolver {
                 .get(resolved.parsed.clone())
                 .send()
                 .await
-                .map_err(|_| AssetFetchError::Upstream);
+                .map_err(|_| AssetFetchError::Upstream {
+                    url: resolved.parsed.as_str().to_string(),
+                });
         }
         let mut last_err = None;
         let scheme = resolved.parsed.scheme().to_string();
@@ -564,8 +569,12 @@ impl AssetResolver {
             }
         }
         Err(last_err
-            .map(|_| AssetFetchError::Upstream)
-            .unwrap_or(AssetFetchError::Upstream))
+            .map(|_| AssetFetchError::Upstream {
+                url: resolved.parsed.as_str().to_string(),
+            })
+            .unwrap_or(AssetFetchError::Upstream {
+                url: resolved.parsed.as_str().to_string(),
+            }))
     }
 
     fn client_with_resolve(
@@ -579,7 +588,9 @@ impl AssetResolver {
             .user_agent("rmrk-renderer/1.2")
             .resolve(host, addr)
             .build()
-            .map_err(|_| AssetFetchError::Upstream)
+            .map_err(|_| AssetFetchError::Upstream {
+                url: format!("{host}@{addr}"),
+            })
     }
 
     fn max_asset_bytes(&self, url: &Url, content_type: Option<&Mime>) -> usize {

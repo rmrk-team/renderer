@@ -461,7 +461,11 @@ impl ChainClient {
                 Ok(provider) => provider,
                 Err(err) => {
                     self.record_endpoint_failure(&endpoint.url);
-                    last_err = Some(anyhow!(err));
+                    last_err = Some(anyhow!(
+                        "rpc endpoint {} init failed: {}",
+                        endpoint.url,
+                        err
+                    ));
                     continue;
                 }
             };
@@ -472,7 +476,7 @@ impl ChainClient {
                 }
                 Err(err) => {
                     self.record_endpoint_failure(&endpoint.url);
-                    last_err = Some(err);
+                    last_err = Some(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
                 }
             }
         }

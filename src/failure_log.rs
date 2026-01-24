@@ -2,6 +2,8 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -18,6 +20,7 @@ pub struct FailureLog {
 
 #[derive(Serialize)]
 pub struct FailureLogEntry {
+    pub timestamp: String,
     pub timestamp_ms: u64,
     pub method: String,
     pub path: String,
@@ -38,11 +41,15 @@ impl FailureLogEntry {
         identity: Option<String>,
         reason: Option<String>,
     ) -> Self {
+        let timestamp = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string());
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or(0);
         Self {
+            timestamp,
             timestamp_ms,
             method,
             path,

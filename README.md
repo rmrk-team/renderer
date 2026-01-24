@@ -641,7 +641,7 @@ sudo systemctl enable --now renderer
 sudo systemctl status renderer
 ```
 
-If you update `/opt/renderer/.env` or swap the binary, restart the service:
+If you update `/opt/renderer/.env` or swap the binary, restart the service (don't forget to +x chmod a new binary):
 
 ```sh
 sudo systemctl restart renderer

@@ -1779,7 +1779,7 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
                     .with_log_detail(detail)
             }
-            AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream => {
+            AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream { .. } => {
                 ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed").with_log_detail(detail)
             }
         };
