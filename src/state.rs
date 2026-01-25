@@ -1,7 +1,7 @@
 use crate::assets::AssetResolver;
 use crate::cache::{CacheManager, RenderCacheLimiter, RenderSingleflight};
 use crate::chain::ChainClient;
-use crate::config::Config;
+use crate::config::{Config, RenderPolicyOverride};
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
 use crate::failure_log::FailureLog;
 use crate::rate_limit::{KeyRateLimiter, RateLimiter};
@@ -43,6 +43,7 @@ pub struct AppState {
     pub ip_rules: IpRuleCache,
     pub require_approval_cache: RequireApprovalCache,
     pub collection_config_cache: CollectionConfigCache,
+    pub collection_render_override_cache: CollectionRenderOverrideCache,
     pub collection_epoch_cache: CollectionEpochCache,
     pub theme_source_cache: ThemeSourceCache,
     pub catalog_metadata_cache: CatalogMetadataCache,
@@ -99,6 +100,10 @@ impl AppState {
             COLLECTION_CONFIG_CACHE_TTL,
             COLLECTION_CONFIG_CACHE_CAPACITY,
         );
+        let collection_render_override_cache = CollectionRenderOverrideCache::new(
+            COLLECTION_RENDER_OVERRIDE_CACHE_TTL,
+            COLLECTION_RENDER_OVERRIDE_CACHE_CAPACITY,
+        );
         let collection_epoch_cache =
             CollectionEpochCache::new(COLLECTION_EPOCH_CACHE_TTL, COLLECTION_EPOCH_CACHE_CAPACITY);
         let theme_source_cache =
@@ -133,6 +138,7 @@ impl AppState {
             ip_rules,
             require_approval_cache,
             collection_config_cache,
+            collection_render_override_cache,
             collection_epoch_cache,
             theme_source_cache,
             catalog_metadata_cache,
@@ -160,6 +166,7 @@ impl AppState {
     pub async fn invalidate_collection_cache(&self, chain: &str, collection: &str) {
         let key = collection_cache_key(chain, collection);
         self.collection_config_cache.invalidate(&key).await;
+        self.collection_render_override_cache.invalidate(&key).await;
         self.collection_epoch_cache.invalidate(&key).await;
     }
 }
@@ -167,6 +174,8 @@ impl AppState {
 const REQUIRE_APPROVAL_CACHE_TTL: Duration = Duration::from_secs(10);
 const COLLECTION_CONFIG_CACHE_TTL: Duration = Duration::from_secs(60);
 const COLLECTION_CONFIG_CACHE_CAPACITY: usize = 2048;
+const COLLECTION_RENDER_OVERRIDE_CACHE_TTL: Duration = Duration::from_secs(60);
+const COLLECTION_RENDER_OVERRIDE_CACHE_CAPACITY: usize = 2048;
 const COLLECTION_EPOCH_CACHE_TTL: Duration = Duration::from_secs(30);
 const COLLECTION_EPOCH_CACHE_CAPACITY: usize = 2048;
 const THEME_SOURCE_CACHE_TTL: Duration = Duration::from_secs(600);
@@ -251,6 +260,13 @@ pub struct CollectionConfigCache {
 }
 
 #[derive(Clone)]
+pub struct CollectionRenderOverrideCache {
+    ttl: Duration,
+    capacity: usize,
+    inner: Arc<Mutex<CollectionRenderOverrideCacheInner>>,
+}
+
+#[derive(Clone)]
 pub struct ThemeSourceCache {
     ttl: Duration,
     capacity: usize,
@@ -308,6 +324,16 @@ struct CollectionConfigCacheInner {
 
 struct CachedCollectionConfig {
     value: Option<CollectionConfig>,
+    expires_at: Instant,
+}
+
+struct CollectionRenderOverrideCacheInner {
+    map: HashMap<String, CachedCollectionRenderOverride>,
+    order: VecDeque<String>,
+}
+
+struct CachedCollectionRenderOverride {
+    value: Option<RenderPolicyOverride>,
     expires_at: Instant,
 }
 
@@ -639,6 +665,67 @@ impl CollectionConfigCache {
         inner.map.insert(
             key.clone(),
             CachedCollectionConfig {
+                value,
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+        while inner.order.len() > self.capacity {
+            if let Some(oldest) = inner.order.pop_front() {
+                inner.map.remove(&oldest);
+            }
+        }
+    }
+
+    pub async fn invalidate(&self, key: &str) {
+        let mut inner = self.inner.lock().await;
+        inner.map.remove(key);
+        inner.order.retain(|item| item != key);
+    }
+}
+
+impl CollectionRenderOverrideCache {
+    pub fn new(ttl: Duration, capacity: usize) -> Self {
+        Self {
+            ttl,
+            capacity,
+            inner: Arc::new(Mutex::new(CollectionRenderOverrideCacheInner {
+                map: HashMap::new(),
+                order: VecDeque::new(),
+            })),
+        }
+    }
+
+    pub async fn get(&self, key: &str) -> Option<Option<RenderPolicyOverride>> {
+        if self.capacity == 0 || self.ttl.is_zero() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut inner = self.inner.lock().await;
+        if let Some(entry) = inner.map.get(key) {
+            if entry.expires_at <= now {
+                inner.map.remove(key);
+                inner.order.retain(|item| item != key);
+                return None;
+            }
+            let value = entry.value.clone();
+            touch_key(&mut inner.order, key);
+            return Some(value);
+        }
+        None
+    }
+
+    pub async fn insert(&self, key: String, value: Option<RenderPolicyOverride>) {
+        if self.capacity == 0 || self.ttl.is_zero() {
+            return;
+        }
+        let mut inner = self.inner.lock().await;
+        if inner.map.contains_key(&key) {
+            inner.order.retain(|item| item != &key);
+        }
+        inner.order.push_back(key.clone());
+        inner.map.insert(
+            key.clone(),
+            CachedCollectionRenderOverride {
                 value,
                 expires_at: Instant::now() + self.ttl,
             },

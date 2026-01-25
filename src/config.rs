@@ -689,7 +689,7 @@ fn parse_collection_render_overrides(key: &str) -> Result<HashMap<String, Render
     Ok(parsed)
 }
 
-fn parse_child_layer_mode_value(key: &str, raw: &str) -> Result<ChildLayerMode> {
+pub(crate) fn parse_child_layer_mode_value(key: &str, raw: &str) -> Result<ChildLayerMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "above_slot" | "above" => Ok(ChildLayerMode::AboveSlot),
         "below_slot" | "below" => Ok(ChildLayerMode::BelowSlot),
@@ -699,13 +699,31 @@ fn parse_child_layer_mode_value(key: &str, raw: &str) -> Result<ChildLayerMode> 
     }
 }
 
-fn parse_raster_mismatch_value(key: &str, raw: &str) -> Result<RasterMismatchPolicy> {
+pub(crate) fn parse_raster_mismatch_value(key: &str, raw: &str) -> Result<RasterMismatchPolicy> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "error" => Ok(RasterMismatchPolicy::Error),
         "scale_to_canvas" | "scale" => Ok(RasterMismatchPolicy::ScaleToCanvas),
         "center_no_scale" | "center" => Ok(RasterMismatchPolicy::CenterNoScale),
         "top_left_no_scale" | "top_left" => Ok(RasterMismatchPolicy::TopLeftNoScale),
         _ => Err(anyhow!("invalid {key} raster mismatch value")),
+    }
+}
+
+pub(crate) fn child_layer_mode_to_str(value: ChildLayerMode) -> &'static str {
+    match value {
+        ChildLayerMode::AboveSlot => "above_slot",
+        ChildLayerMode::BelowSlot => "below_slot",
+        ChildLayerMode::SameZAfter => "same_z_after",
+        ChildLayerMode::SameZBefore => "same_z_before",
+    }
+}
+
+pub(crate) fn raster_mismatch_policy_to_str(value: RasterMismatchPolicy) -> &'static str {
+    match value {
+        RasterMismatchPolicy::Error => "error",
+        RasterMismatchPolicy::ScaleToCanvas => "scale_to_canvas",
+        RasterMismatchPolicy::CenterNoScale => "center_no_scale",
+        RasterMismatchPolicy::TopLeftNoScale => "top_left_no_scale",
     }
 }
 

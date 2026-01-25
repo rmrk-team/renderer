@@ -2,7 +2,9 @@ use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
 use crate::chain::{ComposeResult, FixedPart, SlotPart};
-use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
+#[cfg(test)]
+use crate::config::Config;
+use crate::config::{ChildLayerMode, RasterMismatchPolicy, RenderPolicy, RenderPolicyOverride};
 use crate::db::CollectionConfig;
 #[cfg(test)]
 use crate::pinning::PinnedAssetStore;
@@ -15,6 +17,7 @@ use mime::Mime;
 use serde::Deserialize;
 use sha2::Digest;
 use std::borrow::Cow;
+use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -172,6 +175,14 @@ struct RenderCacheSelection {
     key: RenderCacheKey,
     variant_key: String,
     fingerprint: String,
+}
+
+#[derive(Debug, Clone)]
+struct DebugRenderContext {
+    chain: String,
+    collection: String,
+    token_id: String,
+    asset_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -519,6 +530,65 @@ fn now_epoch() -> i64 {
         .unwrap_or(0)
 }
 
+fn env_list(key: &str) -> Option<Vec<String>> {
+    let raw = env::var(key).ok()?;
+    let values: Vec<String> = raw
+        .split(',')
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn debug_render_context(request: &RenderRequest) -> Option<DebugRenderContext> {
+    let tokens = env_list("DEBUG_RENDER_TOKENS")?;
+    if !tokens
+        .iter()
+        .any(|token| token == &request.token_id.to_ascii_lowercase())
+    {
+        return None;
+    }
+    if let Some(collections) = env_list("DEBUG_RENDER_COLLECTIONS") {
+        let collection = request.collection.to_ascii_lowercase();
+        if !collections.iter().any(|value| value == &collection) {
+            return None;
+        }
+    }
+    Some(DebugRenderContext {
+        chain: request.chain.clone(),
+        collection: request.collection.clone(),
+        token_id: request.token_id.clone(),
+        asset_id: request.asset_id.clone(),
+    })
+}
+
+fn log_debug_layers(
+    context: &DebugRenderContext,
+    layers: &[Layer],
+    child_layer_mode: ChildLayerMode,
+) {
+    for (idx, layer) in layers.iter().enumerate() {
+        let sort_key = layer_sort_key(layer, child_layer_mode);
+        warn!(
+            chain = %context.chain,
+            collection = %context.collection,
+            token_id = %context.token_id,
+            asset_id = %context.asset_id,
+            layer_index = idx,
+            z = layer.z,
+            required = layer.required,
+            kind = ?layer.kind,
+            sort_key = ?sort_key,
+            metadata_uri = %layer.metadata_uri,
+            "debug layer"
+        );
+    }
+}
+
 struct SlowRenderGuard<'a> {
     started: Instant,
     request: &'a RenderRequest,
@@ -560,6 +630,7 @@ pub(crate) async fn render_token_uncached(
     variant_key: &str,
 ) -> Result<RenderResponse> {
     let _slow_guard = SlowRenderGuard::new(request, width);
+    let debug_context = debug_render_context(request);
     let collection_config =
         get_collection_config_cached(state, &request.chain, &request.collection)
             .await?
@@ -610,6 +681,19 @@ pub(crate) async fn render_token_uncached(
             request.fresh,
         )
         .await?;
+        if let Some(context) = debug_context.as_ref() {
+            warn!(
+                chain = %context.chain,
+                collection = %context.collection,
+                token_id = %context.token_id,
+                asset_id = %context.asset_id,
+                metadata_uri = %compose.metadata_uri,
+                catalog_address = %compose.catalog_address,
+                fixed_parts = ?compose.fixed_parts,
+                slot_parts = ?compose.slot_parts,
+                "debug compose"
+            );
+        }
         cache_allowed = !fallback_used || width.is_some();
         let prefer_thumb = fallback_used && width.is_some();
         let allow_thumb_fallback = fallback_used;
@@ -640,7 +724,7 @@ pub(crate) async fn render_token_uncached(
             "compose parts detail"
         );
         let render_policy =
-            render_policy_for_collection(&state.config, &request.chain, &request.collection);
+            render_policy_for_collection(state, &request.chain, &request.collection).await?;
         debug!(
             child_layer_mode = ?render_policy.child_layer_mode,
             raster_mismatch_fixed = ?render_policy.raster_mismatch_fixed,
@@ -675,6 +759,9 @@ pub(crate) async fn render_token_uncached(
             layers.push(overlay);
         }
         layers.sort_by_key(|layer| layer_sort_key(layer, render_policy.child_layer_mode));
+        if let Some(context) = debug_context.as_ref() {
+            log_debug_layers(context, &layers, render_policy.child_layer_mode);
+        }
         let required_layers = layers.iter().filter(|layer| layer.required).count();
         debug!(
             layers = layers.len(),
@@ -782,11 +869,14 @@ pub(crate) async fn render_token_uncached(
                 let raster_child = render_policy.raster_mismatch_child;
                 let theme_replace = theme_replace.clone();
                 let theme_source_cache = theme_source_cache.clone();
+                let debug_context = debug_context.clone();
                 join_set.spawn(async move {
                     let _permit = permit;
                     let result = load_layer(
                         &assets,
                         &layer,
+                        debug_context,
+                        idx,
                         canvas_width,
                         canvas_height,
                         max_svg_bytes,
@@ -1200,12 +1290,22 @@ fn overlay_layer(config: &CollectionConfig, request: &RenderRequest) -> Option<L
     None
 }
 
-fn render_policy_for_collection(config: &Config, chain: &str, collection: &str) -> RenderPolicy {
+async fn render_policy_for_collection(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+) -> Result<RenderPolicy> {
     let key = format!("{}:{}", chain, collection).to_ascii_lowercase();
-    match config.collection_render_overrides.get(&key) {
-        Some(override_entry) => config.render_policy.apply_override(override_entry),
-        None => config.render_policy,
+    let mut policy = state.config.render_policy;
+    if let Some(override_entry) = state.config.collection_render_overrides.get(&key) {
+        policy = policy.apply_override(override_entry);
     }
+    if let Some(db_override) =
+        get_collection_render_override_cached(state, chain, collection).await?
+    {
+        policy = policy.apply_override(&db_override);
+    }
+    Ok(policy)
 }
 
 async fn load_theme_replace_map(
@@ -1701,7 +1801,7 @@ async fn compute_render_cache_key_for_request(
     }
     let (width, _) = resolve_width(&request.width_param, request.og_mode)?;
     let render_policy =
-        render_policy_for_collection(&state.config, &request.chain, &request.collection);
+        render_policy_for_collection(state, &request.chain, &request.collection).await?;
     let collection_config =
         get_collection_config_cached(state, &request.chain, &request.collection)
             .await?
@@ -2120,6 +2220,8 @@ fn derive_canvas_from_asset(
 async fn load_layer(
     assets: &AssetResolver,
     layer: &Layer,
+    debug_context: Option<DebugRenderContext>,
+    layer_index: usize,
     canvas_width: u32,
     canvas_height: u32,
     max_svg_bytes: usize,
@@ -2133,6 +2235,20 @@ async fn load_layer(
     prefer_thumb: bool,
     allow_thumb_fallback: bool,
 ) -> Result<Option<LayerImage>> {
+    if let Some(context) = debug_context.as_ref() {
+        warn!(
+            chain = %context.chain,
+            collection = %context.collection,
+            token_id = %context.token_id,
+            asset_id = %context.asset_id,
+            layer_index,
+            z = layer.z,
+            required = layer.required,
+            kind = ?layer.kind,
+            metadata_uri = %layer.metadata_uri,
+            "debug layer start"
+        );
+    }
     debug!(
         metadata_uri = %layer.metadata_uri,
         required = layer.required,
@@ -2170,6 +2286,20 @@ async fn load_layer(
         .await
     {
         Ok(Some(mut resolved)) => {
+            if let Some(context) = debug_context.as_ref() {
+                warn!(
+                    chain = %context.chain,
+                    collection = %context.collection,
+                    token_id = %context.token_id,
+                    asset_id = %context.asset_id,
+                    layer_index,
+                    kind = ?layer.kind,
+                    metadata_uri = %layer.metadata_uri,
+                    art_uri = %resolved.art_uri,
+                    field = %resolved.source,
+                    "debug layer resolved"
+                );
+            }
             debug!(
                 metadata_uri = %layer.metadata_uri,
                 art_uri = %resolved.art_uri,
@@ -2226,6 +2356,19 @@ async fn load_layer(
             assets.fetch_asset(&layer.metadata_uri).await?
         }
     };
+    if let Some(context) = debug_context.as_ref() {
+        warn!(
+            chain = %context.chain,
+            collection = %context.collection,
+            token_id = %context.token_id,
+            asset_id = %context.asset_id,
+            layer_index,
+            kind = ?layer.kind,
+            metadata_uri = %layer.metadata_uri,
+            bytes = asset.bytes.len(),
+            "debug layer fetched"
+        );
+    }
     debug!(
         metadata_uri = %layer.metadata_uri,
         bytes = asset.bytes.len(),
@@ -3096,6 +3239,26 @@ async fn get_collection_config_cached(
     let fetched = state.db.get_collection_config(chain, collection).await?;
     state
         .collection_config_cache
+        .insert(key, fetched.clone())
+        .await;
+    Ok(fetched)
+}
+
+async fn get_collection_render_override_cached(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+) -> Result<Option<RenderPolicyOverride>> {
+    let key = collection_cache_key(chain, collection);
+    if let Some(cached) = state.collection_render_override_cache.get(&key).await {
+        return Ok(cached);
+    }
+    let fetched = state
+        .db
+        .get_collection_render_override(chain, collection)
+        .await?;
+    state
+        .collection_render_override_cache
         .insert(key, fetched.clone())
         .await;
     Ok(fetched)

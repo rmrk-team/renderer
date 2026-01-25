@@ -71,6 +71,21 @@ HTTP safety caps:
 - `RASTER_MISMATCH_FIXED`: `error`, `scale_to_canvas`, `center_no_scale`, or `top_left_no_scale`.
 - `RASTER_MISMATCH_CHILD`: same values as `RASTER_MISMATCH_FIXED`, applied to equipped child layers.
 - `COLLECTION_RENDER_OVERRIDES`: JSON map `"chain:collection" => { child_layer_mode, raster_mismatch_fixed, raster_mismatch_child }`.
+- Admin UI can also manage per-collection overrides (Admin → “Render Policy Overrides”). DB overrides take precedence over env defaults.
+
+Child layer mode meaning (renderer-specific):
+
+- Slot parts in RMRK have a `z`. Child assets mounted in a slot can be layered *relative* to that `z`.
+- `above_slot`: child z = slot z + 1.
+- `below_slot`: child z = slot z - 1.
+- `same_z_after`: child z = slot z, composited after the slot part.
+- `same_z_before`: child z = slot z, composited before the slot part.
+
+Example (Base ME avatars `0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d`):
+
+- The skin is a fixed part at z=1, while the background is a slot child at z=0.
+- With `above_slot` the background child shifts to z=1 and gets composited after the skin, hiding it.
+- Setting `same_z_after` keeps the background child at z=0 so the skin (z=1) stays visible.
 
 Access control:
 
