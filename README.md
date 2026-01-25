@@ -6,7 +6,7 @@ SVG-first rendering, deterministic caching, and a minimal admin panel and API.
 ## Features
 
 - Canonical render endpoints with cache-busting via `cache=` query param
-- SVG + PNG/JPG asset support (SVG rasterized with `resvg`)
+- SVG + PNG/JPG/WebP asset support (SVG rasterized with `resvg`)
 - Deterministic canvas size derived from first fixed part
 - Partial renders are **not cached**
 - IPFS gateway rotation + asset caching
@@ -506,7 +506,7 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Renderer-Cache-Hit: true|false` (cached renders and HEAD probes)
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
-- `X-Renderer-Nonconforming-Layers: <count>` (when PNG/JPG sizes mismatch)
+- `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
 - `Cache-Control: public, max-age=...` when cacheable
 - `ETag` for conditional GET on cached renders
 
@@ -823,10 +823,11 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 
 - Canvas size is derived from the first fixed part’s art. If SVG sizing is invalid,
   defaults are used and the collection should be reviewed.
-- PNG/JPG layers that do not match the canonical canvas size are treated as nonconforming.
+- Raster layers that do not match the canonical canvas size are treated as nonconforming.
 - Non-composable primary assets fall back to a single-layer render using asset metadata.
 - Original-size fallback renders are not cached; resized/OG variants are.
-- If a static asset exceeds size limits and has `thumbnailUri`, the thumbnail is used.
+- If a raster asset exceeds size limits, the renderer attempts a resize; if it still fails and
+  `thumbnailUri` exists, the thumbnail is used.
 - Usage identity keys for non-API requests include the client IP (ensure `TRUSTED_PROXY_CIDRS` is set when proxying).
 - Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable).
 - `?fresh=1` forces a state refresh and returns `Cache-Control: no-store`. If rate-limited, expect 429 with `Retry-After`.

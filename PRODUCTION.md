@@ -43,6 +43,7 @@ shipping a public instance.
 
 - Monitor cache disk usage; set `CACHE_MAX_SIZE_GB` conservatively.
 - Use fast local disk if possible; cached renders are read frequently.
+- If `PINNING_ENABLED=true`, plan and monitor `PINNED_DIR` growth (pinned assets are never evicted).
 
 ## Suggested deployment profiles
 
