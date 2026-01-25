@@ -524,21 +524,27 @@ impl Database {
         &self,
         rpc_endpoints: &std::collections::HashMap<String, Vec<String>>,
     ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
         for (chain, urls) in rpc_endpoints {
+            sqlx::query("DELETE FROM rpc_endpoints WHERE lower(chain) = lower(?1)")
+                .bind(chain)
+                .execute(&mut *tx)
+                .await?;
             for (priority, url) in urls.iter().enumerate() {
                 sqlx::query(
                     r#"
-                    INSERT OR IGNORE INTO rpc_endpoints (chain, url, priority, enabled)
+                    INSERT INTO rpc_endpoints (chain, url, priority, enabled)
                     VALUES (?1, ?2, ?3, 1)
                     "#,
                 )
                 .bind(chain)
                 .bind(url)
                 .bind(priority as i64)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
             }
         }
+        tx.commit().await?;
         Ok(())
     }
 

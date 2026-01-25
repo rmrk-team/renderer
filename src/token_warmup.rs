@@ -13,6 +13,8 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
+const TOP_ASSET_REVERT: &str = "0x3456866f";
+const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 
 #[derive(Debug, Deserialize)]
 pub struct TokenWarmupRequest {
@@ -149,17 +151,45 @@ async fn run_worker(state: Arc<AppState>) {
 
 async fn run_item(state: Arc<AppState>, item: &TokenWarmupItem) -> Result<()> {
     let asset_id = match item.asset_id.as_deref() {
-        Some(value) => value.to_string(),
+        Some(value) => Some(value.to_string()),
         None => {
             let _permit = state.rpc_semaphore.acquire().await?;
-            state
+            match state
                 .chain
                 .get_top_asset_id(&item.chain, &item.collection_address, &item.token_id)
-                .await?
-                .to_string()
+                .await
+            {
+                Ok(asset_id) => Some(asset_id.to_string()),
+                Err(err) => {
+                    if is_top_asset_missing_error(&err) {
+                        None
+                    } else {
+                        return Err(err);
+                    }
+                }
+            }
         }
     };
-    let compose = load_compose(&state, item, &asset_id).await?;
+    let compose = if let Some(asset_id) = asset_id {
+        match load_compose(&state, item, &asset_id).await {
+            Ok(compose) => compose,
+            Err(err) => {
+                if is_contract_revert_error(&err) {
+                    if let Some(compose) = compose_from_token_uri(&state, item).await? {
+                        compose
+                    } else {
+                        return Ok(());
+                    }
+                } else {
+                    return Err(err);
+                }
+            }
+        }
+    } else if let Some(compose) = compose_from_token_uri(&state, item).await? {
+        compose
+    } else {
+        return Ok(());
+    };
     let metadata_uris = collect_metadata_uris(&compose);
     let mut art_uris = HashSet::new();
     for metadata_uri in metadata_uris {
@@ -201,6 +231,59 @@ async fn run_item(state: Arc<AppState>, item: &TokenWarmupItem) -> Result<()> {
         "token warmup completed"
     );
     Ok(())
+}
+
+async fn compose_from_token_uri(
+    state: &AppState,
+    item: &TokenWarmupItem,
+) -> Result<Option<ComposeResult>> {
+    match state
+        .chain
+        .get_token_uri(&item.chain, &item.collection_address, &item.token_id)
+        .await
+    {
+        Ok(token_uri) => {
+            let token_uri = token_uri.trim();
+            if token_uri.is_empty() {
+                warn!(
+                    chain = %item.chain,
+                    collection = %item.collection_address,
+                    token_id = %item.token_id,
+                    "token URI empty; skipping"
+                );
+                return Ok(None);
+            }
+            Ok(Some(ComposeResult {
+                metadata_uri: token_uri.to_string(),
+                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                fixed_parts: vec![FixedPart {
+                    part_id: 0,
+                    z: 0,
+                    metadata_uri: token_uri.to_string(),
+                }],
+                slot_parts: Vec::new(),
+            }))
+        }
+        Err(err) => {
+            if is_contract_revert_error(&err) {
+                warn!(
+                    chain = %item.chain,
+                    collection = %item.collection_address,
+                    token_id = %item.token_id,
+                    "token URI reverted; skipping"
+                );
+                return Ok(None);
+            }
+            warn!(
+                chain = %item.chain,
+                collection = %item.collection_address,
+                token_id = %item.token_id,
+                error = ?err,
+                "token URI fallback failed"
+            );
+            Err(err)
+        }
+    }
 }
 
 async fn load_compose(
@@ -447,6 +530,23 @@ fn resolve_tokens(state: &AppState, request: &TokenWarmupRequest) -> Result<Vec<
 fn is_non_composable_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
-        message.contains(NON_COMPOSABLE_ASSET_REVERT) || message.contains("RMRKNotComposableAsset")
+        message.contains(NON_COMPOSABLE_ASSET_REVERT)
+            || message.contains(COMPOSE_EQUIP_REVERT)
+            || message.contains("RMRKNotComposableAsset")
+            || message.contains("execution reverted")
     })
+}
+
+fn is_top_asset_missing_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains(TOP_ASSET_REVERT)
+            || message.contains("Contract call reverted")
+            || message.contains("execution reverted")
+    })
+}
+
+fn is_contract_revert_error(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("Contract call reverted") || message.contains("execution reverted")
 }

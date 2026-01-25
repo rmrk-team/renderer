@@ -39,6 +39,7 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
 ];
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
+const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 
 #[cfg(test)]
 static SVG_STRING_RESOLVER_CALLED: AtomicBool = AtomicBool::new(false);
@@ -972,7 +973,10 @@ fn build_layers(compose: &ComposeResult, child_layer_mode: ChildLayerMode) -> Ve
 fn is_non_composable_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
-        message.contains(NON_COMPOSABLE_ASSET_REVERT) || message.contains("RMRKNotComposableAsset")
+        message.contains(NON_COMPOSABLE_ASSET_REVERT)
+            || message.contains(COMPOSE_EQUIP_REVERT)
+            || message.contains("RMRKNotComposableAsset")
+            || message.contains("execution reverted")
     })
 }
 

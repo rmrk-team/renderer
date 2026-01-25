@@ -8,6 +8,7 @@ use std::future::Future;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tracing::warn;
 use url::Url;
 
 abigen!(
@@ -123,6 +124,13 @@ abigen!(
     r#"[
         function totalSupply() view returns (uint256)
         function tokenByIndex(uint256) view returns (uint256)
+    ]"#
+);
+
+abigen!(
+    ERC721Metadata,
+    r#"[
+        function tokenURI(uint256) view returns (string)
     ]"#
 );
 
@@ -262,35 +270,46 @@ impl ChainClient {
         let collection = Address::from_str(collection)?;
         let token_id = U256::from_dec_str(token_id)?;
         let response = self
-            .call_with_failover(chain, move |provider| {
-                let contract = RmrkEquipRenderUtils::new(render_utils_address, provider);
-                let collection = collection;
-                let token_id = token_id;
-                async move {
-                    contract
-                        .get_asset_id_with_top_priority(collection, token_id)
-                        .call()
-                        .await
-                        .map_err(|err| err.into())
-                }
-            })
+            .call_with_failover_if(
+                chain,
+                move |provider| {
+                    let contract = RmrkEquipRenderUtils::new(render_utils_address, provider);
+                    let collection = collection;
+                    let token_id = token_id;
+                    async move {
+                        contract
+                            .get_asset_id_with_top_priority(collection, token_id)
+                            .call()
+                            .await
+                            .map_err(|err| err.into())
+                    }
+                },
+                |err| !is_non_retryable_top_asset_error(err),
+            )
             .await;
         match response {
             Ok(response) => Ok(response.0),
             Err(primary_err) => {
                 let fallback = self
-                    .call_with_failover(chain, move |provider| {
-                        let contract = RmrkEquipRenderUtils::new(render_utils_address, provider);
-                        let collection = collection;
-                        let token_id = token_id;
-                        async move {
-                            contract
-                                .get_top_asset_and_equippable_data_for_token(collection, token_id)
-                                .call()
-                                .await
-                                .map_err(|err| err.into())
-                        }
-                    })
+                    .call_with_failover_if(
+                        chain,
+                        move |provider| {
+                            let contract =
+                                RmrkEquipRenderUtils::new(render_utils_address, provider);
+                            let collection = collection;
+                            let token_id = token_id;
+                            async move {
+                                contract
+                                    .get_top_asset_and_equippable_data_for_token(
+                                        collection, token_id,
+                                    )
+                                    .call()
+                                    .await
+                                    .map_err(|err| err.into())
+                            }
+                        },
+                        |err| !is_non_retryable_top_asset_error(err),
+                    )
                     .await;
                 match fallback {
                     Ok(response) => Ok(response.0),
@@ -316,6 +335,29 @@ impl ChainClient {
                 async move {
                     contract
                         .get_asset_metadata(token_id, asset_id)
+                        .call()
+                        .await
+                        .map_err(|err| err.into())
+                }
+            })
+            .await?;
+        Ok(response)
+    }
+
+    pub async fn get_token_uri(
+        &self,
+        chain: &str,
+        collection: &str,
+        token_id: &str,
+    ) -> Result<String> {
+        let collection = Address::from_str(collection)?;
+        let token_id = U256::from_dec_str(token_id)?;
+        let response = self
+            .call_with_failover(chain, move |provider| {
+                let contract = ERC721Metadata::new(collection, provider);
+                async move {
+                    contract
+                        .token_uri(token_id)
                         .call()
                         .await
                         .map_err(|err| err.into())
@@ -491,6 +533,21 @@ impl ChainClient {
         F: Fn(Arc<Provider<Http>>) -> Fut,
         Fut: Future<Output = Result<T>>,
     {
+        self.call_with_failover_if(chain, f, |err| !is_contract_revert_error(err))
+            .await
+    }
+
+    async fn call_with_failover_if<T, F, Fut, C>(
+        &self,
+        chain: &str,
+        f: F,
+        should_retry: C,
+    ) -> Result<T>
+    where
+        F: Fn(Arc<Provider<Http>>) -> Fut,
+        Fut: Future<Output = Result<T>>,
+        C: Fn(&anyhow::Error) -> bool,
+    {
         let endpoints = self.endpoints_for_chain(chain).await?;
         let now = Instant::now();
         let mut available = Vec::new();
@@ -531,6 +588,10 @@ impl ChainClient {
                     return Ok(result);
                 }
                 Err(err) => {
+                    warn!(endpoint = %endpoint.url, error = ?err, "rpc endpoint call failed");
+                    if !should_retry(&err) {
+                        return Err(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
+                    }
                     self.record_endpoint_failure(&endpoint.url);
                     last_err = Some(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
                 }
@@ -612,6 +673,19 @@ impl ChainClient {
             .insert(key, provider.clone());
         Ok(provider)
     }
+}
+
+fn is_non_retryable_top_asset_error(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("Contract call reverted")
+        || message.contains("execution reverted")
+        || message.contains("0x3456866f")
+        || message.contains("0x7a062578")
+}
+
+fn is_contract_revert_error(err: &anyhow::Error) -> bool {
+    let message = err.to_string();
+    message.contains("Contract call reverted") || message.contains("execution reverted")
 }
 
 #[cfg(test)]
