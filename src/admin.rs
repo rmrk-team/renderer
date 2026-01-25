@@ -1,12 +1,9 @@
 use crate::canonical;
 use crate::catalog_warmup::{CatalogWarmupRequest, enqueue_catalog_warmup};
-use crate::config::{
-    AdminCollectionInput, Config, child_layer_mode_to_str, parse_child_layer_mode_value,
-    parse_raster_mismatch_value, raster_mismatch_policy_to_str,
-};
+use crate::config::{AdminCollectionInput, Config};
 use crate::db::{
-    Client, ClientKey, CollectionConfig, CollectionRenderOverride, HashReplacement, IpRule,
-    PinnedAssetCounts, RpcEndpoint, UsageRow, WarmupJob,
+    Client, ClientKey, CollectionConfig, HashReplacement, IpRule, PinnedAssetCounts, RpcEndpoint,
+    UsageRow, WarmupJob,
 };
 use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
@@ -79,14 +76,6 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route(
             "/api/hash-replacements/{cid}",
             delete(delete_hash_replacement),
-        )
-        .route(
-            "/api/render-overrides",
-            get(list_render_overrides).put(upsert_render_override),
-        )
-        .route(
-            "/api/render-overrides/{chain}/{collection}",
-            delete(delete_render_override),
         )
         .route("/api/rpc/{chain}", get(list_rpc).put(replace_rpc))
         .route("/api/rpc/{chain}/health", get(rpc_health))
@@ -681,89 +670,6 @@ async fn delete_hash_replacement(
     })))
 }
 
-#[derive(Debug, Deserialize)]
-struct RenderOverridePayload {
-    chain: String,
-    collection: String,
-    child_layer_mode: Option<String>,
-    raster_mismatch_fixed: Option<String>,
-    raster_mismatch_child: Option<String>,
-}
-
-async fn list_render_overrides(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<CollectionRenderOverride>>, AdminError> {
-    let overrides = state.db.list_collection_render_overrides().await?;
-    Ok(Json(overrides))
-}
-
-async fn upsert_render_override(
-    State(state): State<Arc<AppState>>,
-    Json(payload): Json<RenderOverridePayload>,
-) -> Result<Json<serde_json::Value>, AdminError> {
-    let (chain, collection) =
-        canonicalize_chain_collection(&state, &payload.chain, &payload.collection)?;
-    let child_layer_mode = normalize_override_field(payload.child_layer_mode)
-        .map(|raw| parse_child_layer_mode_value("render_overrides", &raw))
-        .transpose()
-        .map_err(|err| AdminError::bad_request(&err.to_string()))?
-        .map(|value| child_layer_mode_to_str(value).to_string());
-    let raster_mismatch_fixed = normalize_override_field(payload.raster_mismatch_fixed)
-        .map(|raw| parse_raster_mismatch_value("render_overrides", &raw))
-        .transpose()
-        .map_err(|err| AdminError::bad_request(&err.to_string()))?
-        .map(|value| raster_mismatch_policy_to_str(value).to_string());
-    let raster_mismatch_child = normalize_override_field(payload.raster_mismatch_child)
-        .map(|raw| parse_raster_mismatch_value("render_overrides", &raw))
-        .transpose()
-        .map_err(|err| AdminError::bad_request(&err.to_string()))?
-        .map(|value| raster_mismatch_policy_to_str(value).to_string());
-
-    let removed = if child_layer_mode.is_none()
-        && raster_mismatch_fixed.is_none()
-        && raster_mismatch_child.is_none()
-    {
-        state
-            .db
-            .delete_collection_render_override(&chain, &collection)
-            .await?
-            .is_some()
-    } else {
-        state
-            .db
-            .upsert_collection_render_override(
-                &chain,
-                &collection,
-                child_layer_mode.as_deref(),
-                raster_mismatch_fixed.as_deref(),
-                raster_mismatch_child.as_deref(),
-            )
-            .await?;
-        false
-    };
-    state.invalidate_collection_cache(&chain, &collection).await;
-    Ok(Json(serde_json::json!({
-        "status": "ok",
-        "removed": removed
-    })))
-}
-
-async fn delete_render_override(
-    State(state): State<Arc<AppState>>,
-    Path((chain, collection)): Path<(String, String)>,
-) -> Result<Json<serde_json::Value>, AdminError> {
-    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-    let removed = state
-        .db
-        .delete_collection_render_override(&chain, &collection)
-        .await?;
-    state.invalidate_collection_cache(&chain, &collection).await;
-    Ok(Json(serde_json::json!({
-        "status": "ok",
-        "removed": removed.is_some()
-    })))
-}
-
 async fn list_rpc(
     State(state): State<Arc<AppState>>,
     Path(chain): Path<String>,
@@ -1136,17 +1042,6 @@ fn canonicalize_chain(state: &AppState, chain: &str) -> Result<String, AdminErro
         .map_err(|err| AdminError::bad_request(&err.to_string()))
 }
 
-fn normalize_override_field(value: Option<String>) -> Option<String> {
-    value.and_then(|raw| {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("default") {
-            None
-        } else {
-            Some(trimmed.to_ascii_lowercase())
-        }
-    })
-}
-
 fn normalize_hash_replacement_cid(input: &str) -> Result<String, AdminError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -1289,69 +1184,6 @@ const ADMIN_HTML: &str = r#"<!doctype html>
           </tr>
         </thead>
         <tbody id="collectionsTable"></tbody>
-      </table>
-    </fieldset>
-
-    <fieldset>
-      <legend>Render Policy Overrides</legend>
-      <div class="small">Overrides tweak layer ordering or raster mismatch handling for specific collections.</div>
-      <div class="row">
-        <div>
-          <label>Chain</label>
-          <input id="renderOverrideChain" placeholder="base" />
-        </div>
-        <div>
-          <label>Collection</label>
-          <input id="renderOverrideCollection" placeholder="0x..." />
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label>Child layer mode</label>
-          <select id="renderOverrideChildMode">
-            <option value="">Use default</option>
-            <option value="above_slot">above_slot</option>
-            <option value="below_slot">below_slot</option>
-            <option value="same_z_after">same_z_after</option>
-            <option value="same_z_before">same_z_before</option>
-          </select>
-        </div>
-        <div>
-          <label>Raster mismatch (fixed)</label>
-          <select id="renderOverrideRasterFixed">
-            <option value="">Use default</option>
-            <option value="error">error</option>
-            <option value="scale_to_canvas">scale_to_canvas</option>
-            <option value="center_no_scale">center_no_scale</option>
-            <option value="top_left_no_scale">top_left_no_scale</option>
-          </select>
-        </div>
-        <div>
-          <label>Raster mismatch (child)</label>
-          <select id="renderOverrideRasterChild">
-            <option value="">Use default</option>
-            <option value="error">error</option>
-            <option value="scale_to_canvas">scale_to_canvas</option>
-            <option value="center_no_scale">center_no_scale</option>
-            <option value="top_left_no_scale">top_left_no_scale</option>
-          </select>
-        </div>
-      </div>
-      <button id="saveRenderOverrideBtn">Save Override</button>
-      <button id="loadRenderOverridesBtn">Refresh Overrides</button>
-      <div class="small" id="renderOverrideStatus"></div>
-      <table>
-        <thead>
-          <tr>
-            <th>Chain</th>
-            <th>Collection</th>
-            <th>Child layer mode</th>
-            <th>Raster mismatch (fixed)</th>
-            <th>Raster mismatch (child)</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="renderOverrideTable"></tbody>
       </table>
     </fieldset>
 
@@ -1813,7 +1645,7 @@ const ADMIN_HTML: &str = r#"<!doctype html>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
+    use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::Duration;
@@ -1919,7 +1751,6 @@ mod tests {
             outbound_client_cache_capacity: 0,
             openapi_public: true,
             render_policy: RenderPolicy {
-                child_layer_mode: ChildLayerMode::AboveSlot,
                 raster_mismatch_fixed: RasterMismatchPolicy::TopLeftNoScale,
                 raster_mismatch_child: RasterMismatchPolicy::TopLeftNoScale,
             },

@@ -16,6 +16,7 @@ spec-docs/
 dist/
 
 cache/
+cache-test*
 pinned/
 pinned-test/
 pinned-test*/

@@ -117,14 +117,6 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChildLayerMode {
-    AboveSlot,
-    BelowSlot,
-    SameZAfter,
-    SameZBefore,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RasterMismatchPolicy {
     Error,
     ScaleToCanvas,
@@ -134,14 +126,12 @@ pub enum RasterMismatchPolicy {
 
 #[derive(Debug, Clone, Copy)]
 pub struct RenderPolicy {
-    pub child_layer_mode: ChildLayerMode,
     pub raster_mismatch_fixed: RasterMismatchPolicy,
     pub raster_mismatch_child: RasterMismatchPolicy,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct RenderPolicyOverride {
-    pub child_layer_mode: Option<ChildLayerMode>,
     pub raster_mismatch_fixed: Option<RasterMismatchPolicy>,
     pub raster_mismatch_child: Option<RasterMismatchPolicy>,
 }
@@ -149,9 +139,6 @@ pub struct RenderPolicyOverride {
 impl RenderPolicy {
     pub fn apply_override(&self, override_entry: &RenderPolicyOverride) -> RenderPolicy {
         RenderPolicy {
-            child_layer_mode: override_entry
-                .child_layer_mode
-                .unwrap_or(self.child_layer_mode),
             raster_mismatch_fixed: override_entry
                 .raster_mismatch_fixed
                 .unwrap_or(self.raster_mismatch_fixed),
@@ -164,7 +151,6 @@ impl RenderPolicy {
 
 #[derive(Debug, Deserialize)]
 struct RenderPolicyOverrideRaw {
-    child_layer_mode: Option<String>,
     raster_mismatch_fixed: Option<String>,
     raster_mismatch_child: Option<String>,
 }
@@ -375,10 +361,6 @@ impl Config {
         let landing_public = parse_bool("LANDING_PUBLIC", false) && landing.is_some();
         let status_public = parse_bool("STATUS_PUBLIC", landing_public);
         let render_policy = RenderPolicy {
-            child_layer_mode: parse_child_layer_mode(
-                "CHILD_LAYER_MODE",
-                ChildLayerMode::AboveSlot,
-            )?,
             raster_mismatch_fixed: parse_raster_mismatch_policy(
                 "RASTER_MISMATCH_FIXED",
                 RasterMismatchPolicy::TopLeftNoScale,
@@ -631,20 +613,6 @@ fn format_local_gateway_url(bind: &str, port: u16) -> String {
     format!("http://{host}:{port}/ipfs/")
 }
 
-fn parse_child_layer_mode(key: &str, default: ChildLayerMode) -> Result<ChildLayerMode> {
-    let value = env::var(key)
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase());
-    match value.as_deref() {
-        None => Ok(default),
-        Some("above_slot") | Some("above") => Ok(ChildLayerMode::AboveSlot),
-        Some("below_slot") | Some("below") => Ok(ChildLayerMode::BelowSlot),
-        Some("same_z_after") | Some("same_after") => Ok(ChildLayerMode::SameZAfter),
-        Some("same_z_before") | Some("same_before") => Ok(ChildLayerMode::SameZBefore),
-        Some(_) => Err(anyhow!("invalid {key} value")),
-    }
-}
-
 fn parse_raster_mismatch_policy(
     key: &str,
     default: RasterMismatchPolicy,
@@ -668,13 +636,6 @@ fn parse_collection_render_overrides(key: &str) -> Result<HashMap<String, Render
     for (collection_key, value) in raw {
         let normalized = collection_key.trim().to_ascii_lowercase();
         let override_entry = RenderPolicyOverride {
-            child_layer_mode: match value.child_layer_mode.as_deref() {
-                None => None,
-                Some(_) => Some(parse_child_layer_mode_value(
-                    key,
-                    value.child_layer_mode.as_deref().unwrap(),
-                )?),
-            },
             raster_mismatch_fixed: match value.raster_mismatch_fixed.as_deref() {
                 None => None,
                 Some(raw_value) => Some(parse_raster_mismatch_value(key, raw_value)?),
@@ -689,16 +650,6 @@ fn parse_collection_render_overrides(key: &str) -> Result<HashMap<String, Render
     Ok(parsed)
 }
 
-pub(crate) fn parse_child_layer_mode_value(key: &str, raw: &str) -> Result<ChildLayerMode> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "above_slot" | "above" => Ok(ChildLayerMode::AboveSlot),
-        "below_slot" | "below" => Ok(ChildLayerMode::BelowSlot),
-        "same_z_after" | "same_after" => Ok(ChildLayerMode::SameZAfter),
-        "same_z_before" | "same_before" => Ok(ChildLayerMode::SameZBefore),
-        _ => Err(anyhow!("invalid {key} child_layer_mode value")),
-    }
-}
-
 pub(crate) fn parse_raster_mismatch_value(key: &str, raw: &str) -> Result<RasterMismatchPolicy> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "error" => Ok(RasterMismatchPolicy::Error),
@@ -706,24 +657,6 @@ pub(crate) fn parse_raster_mismatch_value(key: &str, raw: &str) -> Result<Raster
         "center_no_scale" | "center" => Ok(RasterMismatchPolicy::CenterNoScale),
         "top_left_no_scale" | "top_left" => Ok(RasterMismatchPolicy::TopLeftNoScale),
         _ => Err(anyhow!("invalid {key} raster mismatch value")),
-    }
-}
-
-pub(crate) fn child_layer_mode_to_str(value: ChildLayerMode) -> &'static str {
-    match value {
-        ChildLayerMode::AboveSlot => "above_slot",
-        ChildLayerMode::BelowSlot => "below_slot",
-        ChildLayerMode::SameZAfter => "same_z_after",
-        ChildLayerMode::SameZBefore => "same_z_before",
-    }
-}
-
-pub(crate) fn raster_mismatch_policy_to_str(value: RasterMismatchPolicy) -> &'static str {
-    match value {
-        RasterMismatchPolicy::Error => "error",
-        RasterMismatchPolicy::ScaleToCanvas => "scale_to_canvas",
-        RasterMismatchPolicy::CenterNoScale => "center_no_scale",
-        RasterMismatchPolicy::TopLeftNoScale => "top_left_no_scale",
     }
 }
 

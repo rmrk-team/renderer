@@ -1,8 +1,5 @@
 use crate::canonical;
-use crate::config::{
-    AdminCollectionInput, Config, RenderPolicyOverride, parse_child_layer_mode_value,
-    parse_raster_mismatch_value,
-};
+use crate::config::{AdminCollectionInput, Config};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -151,17 +148,6 @@ pub struct HashReplacement {
     pub cid: String,
     pub content_type: String,
     pub file_path: String,
-    pub created_at: i64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CollectionRenderOverride {
-    pub chain: String,
-    pub collection_address: String,
-    pub child_layer_mode: Option<String>,
-    pub raster_mismatch_fixed: Option<String>,
-    pub raster_mismatch_child: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -340,16 +326,6 @@ impl Database {
           file_path TEXT NOT NULL,
           created_at INTEGER,
           updated_at INTEGER
-        );
-        CREATE TABLE IF NOT EXISTS collection_render_overrides (
-          chain TEXT NOT NULL,
-          collection_address TEXT NOT NULL,
-          child_layer_mode TEXT,
-          raster_mismatch_fixed TEXT,
-          raster_mismatch_child TEXT,
-          created_at INTEGER,
-          updated_at INTEGER,
-          PRIMARY KEY(chain, collection_address)
         );
         CREATE TABLE IF NOT EXISTS catalog_warmup_jobs (
           id INTEGER PRIMARY KEY,
@@ -2977,164 +2953,6 @@ impl Database {
         Ok(existing)
     }
 
-    pub async fn list_collection_render_overrides(&self) -> Result<Vec<CollectionRenderOverride>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT
-              chain,
-              collection_address,
-              child_layer_mode,
-              raster_mismatch_fixed,
-              raster_mismatch_child,
-              created_at,
-              updated_at
-            FROM collection_render_overrides
-            ORDER BY chain ASC, collection_address ASC
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|row| CollectionRenderOverride {
-                chain: row.get::<String, _>("chain"),
-                collection_address: row.get::<String, _>("collection_address"),
-                child_layer_mode: row.get::<Option<String>, _>("child_layer_mode"),
-                raster_mismatch_fixed: row.get::<Option<String>, _>("raster_mismatch_fixed"),
-                raster_mismatch_child: row.get::<Option<String>, _>("raster_mismatch_child"),
-                created_at: row.get::<i64, _>("created_at"),
-                updated_at: row.get::<i64, _>("updated_at"),
-            })
-            .collect())
-    }
-
-    pub async fn get_collection_render_override_row(
-        &self,
-        chain: &str,
-        collection: &str,
-    ) -> Result<Option<CollectionRenderOverride>> {
-        let row = sqlx::query(
-            r#"
-            SELECT
-              chain,
-              collection_address,
-              child_layer_mode,
-              raster_mismatch_fixed,
-              raster_mismatch_child,
-              created_at,
-              updated_at
-            FROM collection_render_overrides
-            WHERE lower(chain) = lower(?1) AND lower(collection_address) = lower(?2)
-            "#,
-        )
-        .bind(chain)
-        .bind(collection)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|row| CollectionRenderOverride {
-            chain: row.get::<String, _>("chain"),
-            collection_address: row.get::<String, _>("collection_address"),
-            child_layer_mode: row.get::<Option<String>, _>("child_layer_mode"),
-            raster_mismatch_fixed: row.get::<Option<String>, _>("raster_mismatch_fixed"),
-            raster_mismatch_child: row.get::<Option<String>, _>("raster_mismatch_child"),
-            created_at: row.get::<i64, _>("created_at"),
-            updated_at: row.get::<i64, _>("updated_at"),
-        }))
-    }
-
-    pub async fn get_collection_render_override(
-        &self,
-        chain: &str,
-        collection: &str,
-    ) -> Result<Option<RenderPolicyOverride>> {
-        let row = self
-            .get_collection_render_override_row(chain, collection)
-            .await?;
-        let Some(row) = row else {
-            return Ok(None);
-        };
-        let child_layer_mode = match row.child_layer_mode.as_deref() {
-            None => None,
-            Some(raw) => Some(parse_child_layer_mode_value("render_overrides", raw)?),
-        };
-        let raster_mismatch_fixed = match row.raster_mismatch_fixed.as_deref() {
-            None => None,
-            Some(raw) => Some(parse_raster_mismatch_value("render_overrides", raw)?),
-        };
-        let raster_mismatch_child = match row.raster_mismatch_child.as_deref() {
-            None => None,
-            Some(raw) => Some(parse_raster_mismatch_value("render_overrides", raw)?),
-        };
-        Ok(Some(RenderPolicyOverride {
-            child_layer_mode,
-            raster_mismatch_fixed,
-            raster_mismatch_child,
-        }))
-    }
-
-    pub async fn upsert_collection_render_override(
-        &self,
-        chain: &str,
-        collection: &str,
-        child_layer_mode: Option<&str>,
-        raster_mismatch_fixed: Option<&str>,
-        raster_mismatch_child: Option<&str>,
-    ) -> Result<()> {
-        let now = now_epoch();
-        let chain = chain.to_ascii_lowercase();
-        let collection = collection.to_ascii_lowercase();
-        sqlx::query(
-            r#"
-            INSERT INTO collection_render_overrides (
-              chain,
-              collection_address,
-              child_layer_mode,
-              raster_mismatch_fixed,
-              raster_mismatch_child,
-              created_at,
-              updated_at
-            )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(chain, collection_address) DO UPDATE SET
-              child_layer_mode = excluded.child_layer_mode,
-              raster_mismatch_fixed = excluded.raster_mismatch_fixed,
-              raster_mismatch_child = excluded.raster_mismatch_child,
-              updated_at = excluded.updated_at
-            "#,
-        )
-        .bind(chain)
-        .bind(collection)
-        .bind(child_layer_mode)
-        .bind(raster_mismatch_fixed)
-        .bind(raster_mismatch_child)
-        .bind(now)
-        .bind(now)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn delete_collection_render_override(
-        &self,
-        chain: &str,
-        collection: &str,
-    ) -> Result<Option<CollectionRenderOverride>> {
-        let existing = self
-            .get_collection_render_override_row(chain, collection)
-            .await?;
-        if existing.is_none() {
-            return Ok(None);
-        }
-        sqlx::query(
-            "DELETE FROM collection_render_overrides WHERE lower(chain) = lower(?1) AND lower(collection_address) = lower(?2)",
-        )
-        .bind(chain)
-        .bind(collection)
-        .execute(&self.pool)
-        .await?;
-        Ok(existing)
-    }
-
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let row = sqlx::query("SELECT value FROM renderer_settings WHERE key = ?1")
             .bind(key)
@@ -3182,7 +3000,7 @@ fn now_epoch() -> i64 {
 mod tests {
     use super::*;
     use crate::chain::{ComposeResult, FixedPart, SlotPart};
-    use crate::config::{ChildLayerMode, Config, RasterMismatchPolicy, RenderPolicy};
+    use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -3287,7 +3105,6 @@ mod tests {
             outbound_client_cache_capacity: 0,
             openapi_public: true,
             render_policy: RenderPolicy {
-                child_layer_mode: ChildLayerMode::AboveSlot,
                 raster_mismatch_fixed: RasterMismatchPolicy::TopLeftNoScale,
                 raster_mismatch_child: RasterMismatchPolicy::TopLeftNoScale,
             },
@@ -3565,62 +3382,6 @@ mod tests {
         assert_eq!(removed.cid, "QmTestCid");
         assert!(
             db.get_hash_replacement("QmTestCid")
-                .await
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn collection_render_overrides_roundtrip() {
-        let dir = tempdir().unwrap();
-        let config = test_config(dir.path().join("renderer.db"));
-        let db = Database::new(&config).await.unwrap();
-
-        db.upsert_collection_render_override(
-            "base",
-            "0xabc",
-            Some("same_z_after"),
-            Some("scale_to_canvas"),
-            None,
-        )
-        .await
-        .unwrap();
-
-        let list = db.list_collection_render_overrides().await.unwrap();
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].chain, "base");
-        assert_eq!(list[0].collection_address, "0xabc");
-        assert_eq!(list[0].child_layer_mode.as_deref(), Some("same_z_after"));
-        assert_eq!(
-            list[0].raster_mismatch_fixed.as_deref(),
-            Some("scale_to_canvas")
-        );
-        assert_eq!(list[0].raster_mismatch_child, None);
-
-        let parsed = db
-            .get_collection_render_override("base", "0xabc")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            parsed.child_layer_mode,
-            Some(crate::config::ChildLayerMode::SameZAfter)
-        );
-        assert_eq!(
-            parsed.raster_mismatch_fixed,
-            Some(crate::config::RasterMismatchPolicy::ScaleToCanvas)
-        );
-        assert_eq!(parsed.raster_mismatch_child, None);
-
-        let removed = db
-            .delete_collection_render_override("base", "0xabc")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(removed.collection_address, "0xabc");
-        assert!(
-            db.get_collection_render_override_row("base", "0xabc")
                 .await
                 .unwrap()
                 .is_none()

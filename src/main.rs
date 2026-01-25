@@ -262,9 +262,7 @@ async fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        AccessMode, ChildLayerMode, LandingConfig, RasterMismatchPolicy, RenderPolicy,
-    };
+    use crate::config::{AccessMode, LandingConfig, RasterMismatchPolicy, RenderPolicy};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use std::collections::HashMap;
@@ -379,7 +377,6 @@ mod tests {
             outbound_client_cache_capacity: 0,
             openapi_public: true,
             render_policy: RenderPolicy {
-                child_layer_mode: ChildLayerMode::AboveSlot,
                 raster_mismatch_fixed: RasterMismatchPolicy::TopLeftNoScale,
                 raster_mismatch_child: RasterMismatchPolicy::TopLeftNoScale,
             },

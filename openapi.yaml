@@ -538,6 +538,34 @@ paths:
       responses:
         "200":
           description: OK
+  /admin/api/hash-replacements:
+    get:
+      summary: List hash replacements
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+    post:
+      summary: Upload hash replacement
+      security:
+        - adminAuth: []
+      responses:
+        "200":
+          description: OK
+  /admin/api/hash-replacements/{cid}:
+    delete:
+      summary: Delete hash replacement
+      security:
+        - adminAuth: []
+      parameters:
+        - in: path
+          name: cid
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
   /admin/api/rpc/{chain}:
     get:
       summary: List RPC endpoints

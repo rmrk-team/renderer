@@ -2,9 +2,7 @@ use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
 use crate::chain::{ComposeResult, FixedPart, SlotPart};
-#[cfg(test)]
-use crate::config::Config;
-use crate::config::{ChildLayerMode, RasterMismatchPolicy, RenderPolicy, RenderPolicyOverride};
+use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
 #[cfg(test)]
 use crate::pinning::PinnedAssetStore;
@@ -566,13 +564,9 @@ fn debug_render_context(request: &RenderRequest) -> Option<DebugRenderContext> {
     })
 }
 
-fn log_debug_layers(
-    context: &DebugRenderContext,
-    layers: &[Layer],
-    child_layer_mode: ChildLayerMode,
-) {
+fn log_debug_layers(context: &DebugRenderContext, layers: &[Layer]) {
     for (idx, layer) in layers.iter().enumerate() {
-        let sort_key = layer_sort_key(layer, child_layer_mode);
+        let sort_key = layer_sort_key(layer);
         warn!(
             chain = %context.chain,
             collection = %context.collection,
@@ -724,9 +718,8 @@ pub(crate) async fn render_token_uncached(
             "compose parts detail"
         );
         let render_policy =
-            render_policy_for_collection(state, &request.chain, &request.collection).await?;
+            render_policy_for_collection(&state.config, &request.chain, &request.collection);
         debug!(
-            child_layer_mode = ?render_policy.child_layer_mode,
             raster_mismatch_fixed = ?render_policy.raster_mismatch_fixed,
             raster_mismatch_child = ?render_policy.raster_mismatch_child,
             "render policy"
@@ -754,13 +747,13 @@ pub(crate) async fn render_token_uncached(
             .iter()
             .filter(|part| !part.child_asset_metadata.trim().is_empty())
             .count();
-        let mut layers = build_layers(&compose, render_policy.child_layer_mode);
+        let mut layers = build_layers(&compose);
         if let Some(overlay) = overlay_layer(&collection_config, request) {
             layers.push(overlay);
         }
-        layers.sort_by_key(|layer| layer_sort_key(layer, render_policy.child_layer_mode));
+        layers.sort_by_key(layer_sort_key);
         if let Some(context) = debug_context.as_ref() {
-            log_debug_layers(context, &layers, render_policy.child_layer_mode);
+            log_debug_layers(context, &layers);
         }
         let required_layers = layers.iter().filter(|layer| layer.required).count();
         debug!(
@@ -1060,7 +1053,7 @@ pub(crate) async fn render_token_uncached(
     })
 }
 
-fn build_layers(compose: &ComposeResult, child_layer_mode: ChildLayerMode) -> Vec<Layer> {
+fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
     let mut layers = Vec::new();
     for part in &compose.fixed_parts {
         layers.push(Layer {
@@ -1080,13 +1073,8 @@ fn build_layers(compose: &ComposeResult, child_layer_mode: ChildLayerMode) -> Ve
             });
         }
         if !part.child_asset_metadata.trim().is_empty() {
-            let child_z = match child_layer_mode {
-                ChildLayerMode::AboveSlot => part.z.saturating_add(1),
-                ChildLayerMode::BelowSlot => part.z.saturating_sub(1),
-                ChildLayerMode::SameZAfter | ChildLayerMode::SameZBefore => part.z,
-            };
             layers.push(Layer {
-                z: child_z,
+                z: part.z,
                 required: false,
                 kind: LayerKind::SlotChild,
                 metadata_uri: part.child_asset_metadata.clone(),
@@ -1250,19 +1238,11 @@ async fn load_compose_for_request(
     Ok((compose, fallback_used))
 }
 
-fn layer_sort_key(layer: &Layer, child_layer_mode: ChildLayerMode) -> (u16, u8) {
+fn layer_sort_key(layer: &Layer) -> (u16, u8) {
     let order = match layer.kind {
         LayerKind::Fixed => 0,
-        LayerKind::SlotPart => match child_layer_mode {
-            ChildLayerMode::SameZBefore => 2,
-            ChildLayerMode::SameZAfter => 1,
-            _ => 1,
-        },
-        LayerKind::SlotChild => match child_layer_mode {
-            ChildLayerMode::SameZBefore => 1,
-            ChildLayerMode::SameZAfter => 2,
-            _ => 2,
-        },
+        LayerKind::SlotPart => 1,
+        LayerKind::SlotChild => 2,
         LayerKind::Overlay => 3,
     };
     (layer.z as u16, order)
@@ -1290,22 +1270,12 @@ fn overlay_layer(config: &CollectionConfig, request: &RenderRequest) -> Option<L
     None
 }
 
-async fn render_policy_for_collection(
-    state: &AppState,
-    chain: &str,
-    collection: &str,
-) -> Result<RenderPolicy> {
+fn render_policy_for_collection(config: &Config, chain: &str, collection: &str) -> RenderPolicy {
     let key = format!("{}:{}", chain, collection).to_ascii_lowercase();
-    let mut policy = state.config.render_policy;
-    if let Some(override_entry) = state.config.collection_render_overrides.get(&key) {
-        policy = policy.apply_override(override_entry);
+    match config.collection_render_overrides.get(&key) {
+        Some(override_entry) => config.render_policy.apply_override(override_entry),
+        None => config.render_policy,
     }
-    if let Some(db_override) =
-        get_collection_render_override_cached(state, chain, collection).await?
-    {
-        policy = policy.apply_override(&db_override);
-    }
-    Ok(policy)
 }
 
 async fn load_theme_replace_map(
@@ -1801,7 +1771,7 @@ async fn compute_render_cache_key_for_request(
     }
     let (width, _) = resolve_width(&request.width_param, request.og_mode)?;
     let render_policy =
-        render_policy_for_collection(state, &request.chain, &request.collection).await?;
+        render_policy_for_collection(&state.config, &request.chain, &request.collection);
     let collection_config =
         get_collection_config_cached(state, &request.chain, &request.collection)
             .await?
@@ -1853,14 +1823,14 @@ async fn compute_render_cache_key_for_request(
     if canvas_pixels > state.config.max_canvas_pixels {
         return Err(RenderLimitError::CanvasTooLarge.into());
     }
-    let mut layers = build_layers(&compose, render_policy.child_layer_mode);
+    let mut layers = build_layers(&compose);
     if layers.len() > state.config.max_layers_per_render {
         return Err(RenderLimitError::TooManyLayers.into());
     }
     if let Some(overlay) = overlay_layer(&collection_config, request) {
         layers.push(overlay);
     }
-    layers.sort_by_key(|layer| layer_sort_key(layer, render_policy.child_layer_mode));
+    layers.sort_by_key(layer_sort_key);
     let selection = compute_render_cache_key_for_layers(
         state,
         request,
@@ -1917,8 +1887,7 @@ async fn compute_render_fingerprint(
         }
     }
     let mut fingerprint_input = format!(
-        "policy:{:?}:{:?}:{:?};canvas:{}x{};",
-        render_policy.child_layer_mode,
+        "policy:{:?}:{:?};canvas:{}x{};",
         render_policy.raster_mismatch_fixed,
         render_policy.raster_mismatch_child,
         canvas_width,
@@ -3239,26 +3208,6 @@ async fn get_collection_config_cached(
     let fetched = state.db.get_collection_config(chain, collection).await?;
     state
         .collection_config_cache
-        .insert(key, fetched.clone())
-        .await;
-    Ok(fetched)
-}
-
-async fn get_collection_render_override_cached(
-    state: &AppState,
-    chain: &str,
-    collection: &str,
-) -> Result<Option<RenderPolicyOverride>> {
-    let key = collection_cache_key(chain, collection);
-    if let Some(cached) = state.collection_render_override_cache.get(&key).await {
-        return Ok(cached);
-    }
-    let fetched = state
-        .db
-        .get_collection_render_override(chain, collection)
-        .await?;
-    state
-        .collection_render_override_cache
         .insert(key, fetched.clone())
         .await;
     Ok(fetched)

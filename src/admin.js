@@ -362,60 +362,6 @@ async function deleteHashReplacement(cid) {
   await loadHashReplacements();
 }
 
-async function loadRenderOverrides() {
-  const data = await apiFetch('/admin/api/render-overrides');
-  const table = document.getElementById('renderOverrideTable');
-  table.innerHTML = '';
-  data.forEach(item => {
-    const row = document.createElement('tr');
-    const chainCell = document.createElement('td');
-    chainCell.textContent = item.chain;
-    const collectionCell = document.createElement('td');
-    collectionCell.textContent = item.collection_address;
-    const childCell = document.createElement('td');
-    childCell.textContent = item.child_layer_mode ?? '-';
-    const fixedCell = document.createElement('td');
-    fixedCell.textContent = item.raster_mismatch_fixed ?? '-';
-    const childRasterCell = document.createElement('td');
-    childRasterCell.textContent = item.raster_mismatch_child ?? '-';
-    const actionsCell = document.createElement('td');
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => deleteRenderOverride(item.chain, item.collection_address));
-    actionsCell.appendChild(deleteBtn);
-
-    row.appendChild(chainCell);
-    row.appendChild(collectionCell);
-    row.appendChild(childCell);
-    row.appendChild(fixedCell);
-    row.appendChild(childRasterCell);
-    row.appendChild(actionsCell);
-    table.appendChild(row);
-  });
-}
-
-async function saveRenderOverride() {
-  const payload = {
-    chain: document.getElementById('renderOverrideChain').value.trim(),
-    collection: document.getElementById('renderOverrideCollection').value.trim(),
-    child_layer_mode: document.getElementById('renderOverrideChildMode').value || null,
-    raster_mismatch_fixed: document.getElementById('renderOverrideRasterFixed').value || null,
-    raster_mismatch_child: document.getElementById('renderOverrideRasterChild').value || null
-  };
-  const result = await apiFetch('/admin/api/render-overrides', {
-    method: 'PUT',
-    body: JSON.stringify(payload)
-  });
-  document.getElementById('renderOverrideStatus').textContent =
-    result.removed ? 'Override cleared' : 'Override saved';
-  await loadRenderOverrides();
-}
-
-async function deleteRenderOverride(chain, collection) {
-  await apiFetch(`/admin/api/render-overrides/${encodeURIComponent(chain)}/${encodeURIComponent(collection)}`, { method: 'DELETE' });
-  await loadRenderOverrides();
-}
-
 async function loadRpc() {
   const chain = document.getElementById('rpcChain').value.trim();
   const data = await apiFetch(`/admin/api/rpc/${chain}`);
@@ -668,8 +614,6 @@ bindClick('purgeRendersBtn', purgeRenders);
 bindClick('purgeAllBtn', purgeAll);
 bindClick('loadHashReplacementsBtn', loadHashReplacements);
 bindClick('uploadHashReplacementBtn', uploadHashReplacement);
-bindClick('loadRenderOverridesBtn', loadRenderOverrides);
-bindClick('saveRenderOverrideBtn', saveRenderOverride);
 bindClick('loadRpcBtn', loadRpc);
 bindClick('loadRpcHealthBtn', loadRpcHealth);
 bindClick('saveRpcBtn', saveRpc);
@@ -689,7 +633,6 @@ bindClick('loadUsageBtn', loadUsage);
     await loadWarmupJobs();
     await loadCacheStats();
     await loadHashReplacements();
-    await loadRenderOverrides();
     await loadClients();
   } catch (err) {
     authStatus.textContent = 'Authentication required';
