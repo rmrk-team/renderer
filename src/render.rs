@@ -19,7 +19,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{self, JoinSet};
@@ -40,6 +40,7 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
+const SLOW_RENDER_WARN_SECS: u64 = 10;
 
 #[cfg(test)]
 static SVG_STRING_RESOLVER_CALLED: AtomicBool = AtomicBool::new(false);
@@ -518,12 +519,47 @@ fn now_epoch() -> i64 {
         .unwrap_or(0)
 }
 
+struct SlowRenderGuard<'a> {
+    started: Instant,
+    request: &'a RenderRequest,
+    width: Option<u32>,
+}
+
+impl<'a> SlowRenderGuard<'a> {
+    fn new(request: &'a RenderRequest, width: Option<u32>) -> Self {
+        Self {
+            started: Instant::now(),
+            request,
+            width,
+        }
+    }
+}
+
+impl Drop for SlowRenderGuard<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.started.elapsed();
+        if elapsed > Duration::from_secs(SLOW_RENDER_WARN_SECS) {
+            warn!(
+                chain = %self.request.chain,
+                collection = %self.request.collection,
+                token_id = %self.request.token_id,
+                asset_id = %self.request.asset_id,
+                width = ?self.width,
+                format = ?self.request.format,
+                elapsed_ms = elapsed.as_millis(),
+                "slow render"
+            );
+        }
+    }
+}
+
 pub(crate) async fn render_token_uncached(
     state: &AppState,
     request: &RenderRequest,
     width: Option<u32>,
     variant_key: &str,
 ) -> Result<RenderResponse> {
+    let _slow_guard = SlowRenderGuard::new(request, width);
     let collection_config =
         get_collection_config_cached(state, &request.chain, &request.collection)
             .await?

@@ -101,6 +101,7 @@ impl NonRenderableMetaCache {
 
 const NONRENDERABLE_META_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 const NONRENDERABLE_META_CACHE_CAPACITY: usize = 10_000;
+const SLOW_FETCH_WARN_SECS: u64 = 10;
 
 #[derive(Debug, Clone, Copy)]
 enum FetchKind {
@@ -112,6 +113,39 @@ enum FetchKind {
 struct FetchedBytes {
     bytes: Bytes,
     content_type: Option<Mime>,
+}
+
+struct FetchTimer<'a> {
+    started: Instant,
+    url: &'a str,
+    kind: Option<FetchKind>,
+    max_bytes: Option<usize>,
+}
+
+impl<'a> FetchTimer<'a> {
+    fn new(url: &'a str, kind: Option<FetchKind>) -> Self {
+        Self {
+            started: Instant::now(),
+            url,
+            kind,
+            max_bytes: None,
+        }
+    }
+}
+
+impl Drop for FetchTimer<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.started.elapsed();
+        if elapsed > Duration::from_secs(SLOW_FETCH_WARN_SECS) {
+            warn!(
+                url = %self.url,
+                kind = ?self.kind,
+                max_bytes = ?self.max_bytes,
+                elapsed_ms = elapsed.as_millis(),
+                "slow asset fetch"
+            );
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +348,11 @@ impl AssetResolver {
             return Ok(ResolvedAsset { bytes });
         }
         let resolved = self.resolve_uri(uri)?;
+        if resolved.is_ipfs {
+            if let Some(bytes) = self.load_hash_replacement(&resolved.cid).await? {
+                return Ok(ResolvedAsset { bytes });
+            }
+        }
         if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
             return Ok(ResolvedAsset { bytes });
         }
@@ -376,6 +415,11 @@ impl AssetResolver {
             return Ok(bytes);
         }
         let resolved = self.resolve_uri(uri)?;
+        if resolved.is_ipfs {
+            if let Some(bytes) = self.load_hash_replacement(&resolved.cid).await? {
+                return Ok(bytes);
+            }
+        }
         if let Some(bytes) = self.load_pinned_ipfs(&resolved).await {
             return Ok(bytes);
         }
@@ -487,6 +531,17 @@ impl AssetResolver {
 
     fn pin_store(&self) -> Option<&PinnedAssetStore> {
         self.pin_store.as_deref().filter(|store| store.enabled())
+    }
+
+    async fn load_hash_replacement(&self, cid: &str) -> Result<Option<Bytes>> {
+        let replacement = self.db.get_hash_replacement(cid).await?;
+        let Some(replacement) = replacement else {
+            return Ok(None);
+        };
+        let bytes = tokio::fs::read(&replacement.file_path)
+            .await
+            .with_context(|| format!("read hash replacement {}", replacement.file_path))?;
+        Ok(Some(Bytes::from(bytes)))
     }
 
     async fn load_pinned_ipfs(&self, resolved: &ResolvedUri) -> Option<Bytes> {
@@ -677,6 +732,7 @@ impl AssetResolver {
     }
 
     async fn fetch_http_bytes(&self, url: &str, kind: FetchKind) -> Result<FetchedBytes> {
+        let mut timer = FetchTimer::new(url, Some(kind));
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
         let mut response = self.send_pinned_request(&resolved).await?;
@@ -696,6 +752,7 @@ impl AssetResolver {
             FetchKind::Metadata => self.config.max_metadata_json_bytes,
             FetchKind::Asset => self.max_asset_bytes(&resolved.parsed, content_type.as_ref()),
         };
+        timer.max_bytes = Some(max_bytes);
         if let Some(length) = response.content_length() {
             if length > max_bytes as u64 {
                 return Err(AssetFetchError::TooLarge.into());
@@ -722,6 +779,8 @@ impl AssetResolver {
         url: &str,
         max_bytes: usize,
     ) -> Result<FetchedBytes> {
+        let mut timer = FetchTimer::new(url, None);
+        timer.max_bytes = Some(max_bytes);
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
         let mut response = self.send_pinned_request(&resolved).await?;

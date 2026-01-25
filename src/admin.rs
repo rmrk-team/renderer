@@ -2,8 +2,8 @@ use crate::canonical;
 use crate::catalog_warmup::{CatalogWarmupRequest, enqueue_catalog_warmup};
 use crate::config::{AdminCollectionInput, Config};
 use crate::db::{
-    Client, ClientKey, CollectionConfig, IpRule, PinnedAssetCounts, RpcEndpoint, UsageRow,
-    WarmupJob,
+    Client, ClientKey, CollectionConfig, HashReplacement, IpRule, PinnedAssetCounts, RpcEndpoint,
+    UsageRow, WarmupJob,
 };
 use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
@@ -11,8 +11,9 @@ use crate::render::refresh_canvas_size;
 use crate::state::AppState;
 use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
 use crate::warmup::{WarmupRequest, enqueue_warmup};
+use anyhow::{Context, anyhow};
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{Html, IntoResponse, Response};
@@ -27,6 +28,7 @@ use sha2::Sha256;
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 use tower_http::limit::RequestBodyLimitLayer;
+use tracing::warn;
 
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     let max_body = if state.config.max_admin_body_bytes == 0 {
@@ -67,6 +69,14 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/cache", get(cache_stats))
         .route("/api/pinned", get(pinned_stats))
         .route("/api/cache/purge", post(purge_cache))
+        .route(
+            "/api/hash-replacements",
+            get(list_hash_replacements).post(upload_hash_replacement),
+        )
+        .route(
+            "/api/hash-replacements/{cid}",
+            delete(delete_hash_replacement),
+        )
         .route("/api/rpc/{chain}", get(list_rpc).put(replace_rpc))
         .route("/api/rpc/{chain}/health", get(rpc_health))
         .route("/api/clients", get(list_clients).post(create_client))
@@ -588,6 +598,78 @@ async fn pinned_stats(
     Ok(Json(stats))
 }
 
+async fn list_hash_replacements(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<HashReplacement>>, AdminError> {
+    let replacements = state.db.list_hash_replacements().await?;
+    Ok(Json(replacements))
+}
+
+async fn upload_hash_replacement(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let mut cid_input: Option<String> = None;
+    let mut content_type: Option<String> = None;
+    let mut bytes: Option<bytes::Bytes> = None;
+    while let Some(field) = multipart.next_field().await.map_err(|err| anyhow!(err))? {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "cid" {
+            cid_input = Some(field.text().await.map_err(|err| anyhow!(err))?);
+        } else if name == "file" {
+            content_type = field.content_type().map(|value| value.to_string());
+            bytes = Some(field.bytes().await.map_err(|err| anyhow!(err))?);
+        }
+    }
+    let cid_raw = cid_input.ok_or_else(|| anyhow!("missing cid"))?;
+    let cid = normalize_hash_replacement_cid(&cid_raw)?;
+    let bytes = bytes.ok_or_else(|| anyhow!("missing file"))?;
+    if bytes.is_empty() {
+        return Err(anyhow!("empty replacement file").into());
+    }
+    let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_string());
+    let replacement_dir = state.config.pinned_dir.join("hash-replacements");
+    tokio::fs::create_dir_all(&replacement_dir)
+        .await
+        .context("create hash replacement dir")?;
+    let file_path = replacement_dir.join(&cid);
+    tokio::fs::write(&file_path, &bytes)
+        .await
+        .context("write hash replacement file")?;
+    let file_path = file_path.to_string_lossy().to_string();
+    state
+        .db
+        .upsert_hash_replacement(&cid, &content_type, &file_path)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "cid": cid,
+        "content_type": content_type,
+        "file_path": file_path
+    })))
+}
+
+async fn delete_hash_replacement(
+    State(state): State<Arc<AppState>>,
+    Path(cid): Path<String>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let cid = normalize_hash_replacement_cid(&cid)?;
+    let removed = state.db.delete_hash_replacement(&cid).await?;
+    if let Some(replacement) = removed.as_ref() {
+        if let Err(err) = tokio::fs::remove_file(&replacement.file_path).await {
+            warn!(
+                error = ?err,
+                path = %replacement.file_path,
+                "failed to remove hash replacement file"
+            );
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": removed.is_some()
+    })))
+}
+
 async fn list_rpc(
     State(state): State<Arc<AppState>>,
     Path(chain): Path<String>,
@@ -958,6 +1040,28 @@ fn canonicalize_chain_collection(
 fn canonicalize_chain(state: &AppState, chain: &str) -> Result<String, AdminError> {
     canonical::canonicalize_chain(chain, &state.config)
         .map_err(|err| AdminError::bad_request(&err.to_string()))
+}
+
+fn normalize_hash_replacement_cid(input: &str) -> Result<String, AdminError> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AdminError::bad_request("cid is required"));
+    }
+    let mut value = trimmed;
+    if let Some(stripped) = value.strip_prefix("ipfs://") {
+        value = stripped;
+    }
+    if let Some(stripped) = value.strip_prefix("ipfs/") {
+        value = stripped;
+    }
+    if let Some(stripped) = value.strip_prefix("/ipfs/") {
+        value = stripped;
+    }
+    let cid = value.split('/').next().unwrap_or_default().trim();
+    if cid.is_empty() || !cid.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err(AdminError::bad_request("invalid ipfs cid"));
+    }
+    Ok(cid.to_string())
 }
 
 fn generate_api_key() -> String {
@@ -1344,6 +1448,35 @@ const ADMIN_HTML: &str = r#"<!doctype html>
       <button id="purgeCollectionBtn">Purge Collection Renders</button>
       <button id="purgeRendersBtn">Purge All Renders</button>
       <button id="purgeAllBtn">Purge All (including assets)</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Hash Replacements</legend>
+      <div class="small">Upload a static image to serve in place of a missing IPFS CID.</div>
+      <div class="row">
+        <div>
+          <label>CID</label>
+          <input id="hashReplacementCid" placeholder="Qm..." />
+        </div>
+        <div>
+          <label>File</label>
+          <input id="hashReplacementFile" type="file" accept="image/*" />
+        </div>
+      </div>
+      <button id="uploadHashReplacementBtn">Upload Replacement</button>
+      <button id="loadHashReplacementsBtn">Refresh</button>
+      <div class="small" id="hashReplacementStatus"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>CID</th>
+            <th>Content type</th>
+            <th>File path</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="hashReplacementTable"></tbody>
+      </table>
     </fieldset>
 
     <fieldset>

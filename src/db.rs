@@ -145,6 +145,15 @@ pub struct TokenWarmupItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashReplacement {
+    pub cid: String,
+    pub content_type: String,
+    pub file_path: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenStateCacheEntry {
     pub chain: String,
     pub collection_address: String,
@@ -312,6 +321,13 @@ impl Database {
         );
         CREATE INDEX IF NOT EXISTS pinned_assets_cid_idx ON pinned_assets(cid);
         CREATE INDEX IF NOT EXISTS pinned_assets_path_idx ON pinned_assets(path);
+        CREATE TABLE IF NOT EXISTS hash_replacements (
+          cid TEXT PRIMARY KEY,
+          content_type TEXT NOT NULL,
+          file_path TEXT NOT NULL,
+          created_at INTEGER,
+          updated_at INTEGER
+        );
         CREATE TABLE IF NOT EXISTS catalog_warmup_jobs (
           id INTEGER PRIMARY KEY,
           chain TEXT NOT NULL,
@@ -2857,6 +2873,87 @@ impl Database {
         })
     }
 
+    pub async fn list_hash_replacements(&self) -> Result<Vec<HashReplacement>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT cid, content_type, file_path, created_at, updated_at
+            FROM hash_replacements
+            ORDER BY cid ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| HashReplacement {
+                cid: row.get::<String, _>("cid"),
+                content_type: row.get::<String, _>("content_type"),
+                file_path: row.get::<String, _>("file_path"),
+                created_at: row.get::<i64, _>("created_at"),
+                updated_at: row.get::<i64, _>("updated_at"),
+            })
+            .collect())
+    }
+
+    pub async fn get_hash_replacement(&self, cid: &str) -> Result<Option<HashReplacement>> {
+        let row = sqlx::query(
+            r#"
+            SELECT cid, content_type, file_path, created_at, updated_at
+            FROM hash_replacements
+            WHERE cid = ?1
+            "#,
+        )
+        .bind(cid)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| HashReplacement {
+            cid: row.get::<String, _>("cid"),
+            content_type: row.get::<String, _>("content_type"),
+            file_path: row.get::<String, _>("file_path"),
+            created_at: row.get::<i64, _>("created_at"),
+            updated_at: row.get::<i64, _>("updated_at"),
+        }))
+    }
+
+    pub async fn upsert_hash_replacement(
+        &self,
+        cid: &str,
+        content_type: &str,
+        file_path: &str,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO hash_replacements (cid, content_type, file_path, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(cid) DO UPDATE SET
+              content_type = excluded.content_type,
+              file_path = excluded.file_path,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(cid)
+        .bind(content_type)
+        .bind(file_path)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_hash_replacement(&self, cid: &str) -> Result<Option<HashReplacement>> {
+        let existing = self.get_hash_replacement(cid).await?;
+        if existing.is_none() {
+            return Ok(None);
+        }
+        sqlx::query("DELETE FROM hash_replacements WHERE cid = ?1")
+            .bind(cid)
+            .execute(&self.pool)
+            .await?;
+        Ok(existing)
+    }
+
     pub async fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let row = sqlx::query("SELECT value FROM renderer_settings WHERE key = ?1")
             .bind(key)
@@ -3259,6 +3356,38 @@ mod tests {
             .unwrap();
         assert_eq!(entry.last_error.as_deref(), Some("boom"));
         assert_eq!(entry.state_json.as_deref(), Some(state_json.as_str()));
+    }
+
+    #[tokio::test]
+    async fn hash_replacements_roundtrip() {
+        let dir = tempdir().unwrap();
+        let config = test_config(dir.path().join("renderer.db"));
+        let db = Database::new(&config).await.unwrap();
+        let file_path = dir.path().join("replacement.png");
+        db.upsert_hash_replacement("QmTestCid", "image/png", file_path.to_str().unwrap())
+            .await
+            .unwrap();
+
+        let list = db.list_hash_replacements().await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].cid, "QmTestCid");
+
+        let fetched = db.get_hash_replacement("QmTestCid").await.unwrap().unwrap();
+        assert_eq!(fetched.content_type, "image/png");
+        assert_eq!(fetched.file_path, file_path.to_str().unwrap());
+
+        let removed = db
+            .delete_hash_replacement("QmTestCid")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(removed.cid, "QmTestCid");
+        assert!(
+            db.get_hash_replacement("QmTestCid")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

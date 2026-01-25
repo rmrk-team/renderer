@@ -808,6 +808,12 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - If warmups stop progressing, check pause state and resume via `/admin/api/warmup/resume`.
 - Use `/admin/api/warmup/jobs` and `/admin/api/warmup/jobs/{id}/cancel` to inspect or stop jobs.
 
+### Hash replacements
+
+- Use the Admin UI → “Hash Replacements” to upload a static image for a CID that is missing or unpinned.
+- The uploaded image is returned as-is (no resizing) whenever that CID is requested.
+- Files are stored under `PINNED_DIR/hash-replacements/`.
+
 ## Notes
 
 - Canvas size is derived from the first fixed part’s art. If SVG sizing is invalid,

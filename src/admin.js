@@ -307,6 +307,61 @@ async function purgeAll() {
   await loadCacheStats();
 }
 
+async function loadHashReplacements() {
+  const data = await apiFetch('/admin/api/hash-replacements');
+  const table = document.getElementById('hashReplacementTable');
+  table.innerHTML = '';
+  data.forEach(item => {
+    const row = document.createElement('tr');
+    const cidCell = document.createElement('td');
+    cidCell.textContent = item.cid;
+    const typeCell = document.createElement('td');
+    typeCell.textContent = item.content_type;
+    const pathCell = document.createElement('td');
+    pathCell.textContent = item.file_path;
+    const actionsCell = document.createElement('td');
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deleteHashReplacement(item.cid));
+    actionsCell.appendChild(deleteBtn);
+    row.appendChild(cidCell);
+    row.appendChild(typeCell);
+    row.appendChild(pathCell);
+    row.appendChild(actionsCell);
+    table.appendChild(row);
+  });
+}
+
+async function uploadHashReplacement() {
+  const cid = document.getElementById('hashReplacementCid').value.trim();
+  const fileInput = document.getElementById('hashReplacementFile');
+  const status = document.getElementById('hashReplacementStatus');
+  const file = fileInput.files && fileInput.files[0];
+  if (!cid || !file) {
+    status.textContent = 'CID and file are required';
+    return;
+  }
+  const form = new FormData();
+  form.append('cid', cid);
+  form.append('file', file);
+  const response = await fetch('/admin/api/hash-replacements', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || response.statusText);
+  }
+  status.textContent = `Uploaded ${cid}`;
+  await loadHashReplacements();
+}
+
+async function deleteHashReplacement(cid) {
+  await apiFetch(`/admin/api/hash-replacements/${encodeURIComponent(cid)}`, { method: 'DELETE' });
+  await loadHashReplacements();
+}
+
 async function loadRpc() {
   const chain = document.getElementById('rpcChain').value.trim();
   const data = await apiFetch(`/admin/api/rpc/${chain}`);
@@ -557,6 +612,8 @@ bindClick('loadCacheStatsBtn', loadCacheStats);
 bindClick('purgeCollectionBtn', purgeCollection);
 bindClick('purgeRendersBtn', purgeRenders);
 bindClick('purgeAllBtn', purgeAll);
+bindClick('loadHashReplacementsBtn', loadHashReplacements);
+bindClick('uploadHashReplacementBtn', uploadHashReplacement);
 bindClick('loadRpcBtn', loadRpc);
 bindClick('loadRpcHealthBtn', loadRpcHealth);
 bindClick('saveRpcBtn', saveRpc);
@@ -575,6 +632,7 @@ bindClick('loadUsageBtn', loadUsage);
     await loadWarmupStats();
     await loadWarmupJobs();
     await loadCacheStats();
+    await loadHashReplacements();
     await loadClients();
   } catch (err) {
     authStatus.textContent = 'Authentication required';
