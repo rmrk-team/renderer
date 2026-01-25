@@ -699,6 +699,19 @@ bun run scripts/marketplace-sim.ts \
   --width medium
 ```
 
+```bash
+# Terminal 4 (capture rendered outputs)
+bun run scripts/render-output.ts \
+  --base-url http://127.0.0.1:8085 \
+  --chain base \
+  --collection 0x... \
+  --start 1 \
+  --count 100 \
+  --output-dir ./pinned-testXX/outputs \
+  --width 512 \
+  --format png
+```
+
 ### CI suggestions
 
 ```bash
