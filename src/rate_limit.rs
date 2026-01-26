@@ -1,9 +1,9 @@
 use dashmap::DashMap;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use std::hash::Hash;
 
 const MAX_ENTRIES: usize = 10_000;
 const EVICT_AFTER: Duration = Duration::from_secs(60 * 60);
@@ -220,12 +220,7 @@ impl IdentityRateLimiter {
         }
     }
 
-    pub async fn check(
-        &self,
-        key: &str,
-        rate_per_minute: u64,
-        burst: u64,
-    ) -> RateLimitInfo {
+    pub async fn check(&self, key: &str, rate_per_minute: u64, burst: u64) -> RateLimitInfo {
         if rate_per_minute == 0 {
             return RateLimitInfo {
                 allowed: true,
@@ -242,16 +237,13 @@ impl IdentityRateLimiter {
         let rate_per_second = rate_per_minute as f64 / 60.0;
         let now = Instant::now();
         maybe_cleanup(&self.buckets, &self.last_cleanup_epoch, now);
-        let mut entry = self
-            .buckets
-            .entry(key.to_string())
-            .or_insert(KeyBucket {
-                tokens: burst as f64,
-                last_refill: now,
-                last_seen: now,
-                rate_per_second,
-                burst: burst as f64,
-            });
+        let mut entry = self.buckets.entry(key.to_string()).or_insert(KeyBucket {
+            tokens: burst as f64,
+            last_refill: now,
+            last_seen: now,
+            rate_per_second,
+            burst: burst as f64,
+        });
         let bucket = entry.value_mut();
         if (bucket.rate_per_second - rate_per_second).abs() > f64::EPSILON
             || (bucket.burst - burst as f64).abs() > f64::EPSILON

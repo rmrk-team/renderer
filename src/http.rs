@@ -2,11 +2,15 @@ use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::config::{AccessMode, Config};
 use crate::failure_log::FailureLogEntry;
+use crate::fallbacks::{
+    FALLBACK_OG_HEIGHT, FALLBACK_OG_WIDTH, FallbackMeta, fallback_etag, fallback_variant_filename,
+    fallback_variant_label, fallback_width_bucket, global_unapproved_dir,
+};
 use crate::landing;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
-    RenderRequest, render_token_with_limit,
+    RenderRequest, render_token_with_limit_checked,
 };
 use crate::state::AppState;
 use crate::usage::UsageEvent;
@@ -28,6 +32,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -278,7 +283,13 @@ async fn render_canonical(
     } else {
         false
     };
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let prefer_json = raw_mode || wants_json_response(&headers);
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
@@ -297,7 +308,29 @@ async fn render_canonical(
         approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
+    if let Err(err) = render::ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await
+    {
+        if !prefer_json {
+            if let Some(response) =
+                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+            {
+                return Ok(response);
+            }
+        }
+        return Err(map_render_error(err));
+    }
+    if !prefer_json {
+        if let Some(response) = resolve_token_override(&state, &request).await {
+            return Ok(response);
+        }
+    }
+    match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
             if !prefer_json {
@@ -364,7 +397,13 @@ async fn render_og(
     } else {
         false
     };
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let prefer_json = raw_mode || wants_json_response(&headers);
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
@@ -383,7 +422,29 @@ async fn render_og(
         approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
+    if let Err(err) = render::ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await
+    {
+        if !prefer_json {
+            if let Some(response) =
+                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+            {
+                return Ok(response);
+            }
+        }
+        return Err(map_render_error(err));
+    }
+    if !prefer_json {
+        if let Some(response) = resolve_token_override(&state, &request).await {
+            return Ok(response);
+        }
+    }
+    match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
             if !prefer_json {
@@ -449,7 +510,13 @@ async fn render_legacy(
     } else {
         false
     };
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let prefer_json = raw_mode || wants_json_response(&headers);
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
@@ -468,7 +535,29 @@ async fn render_legacy(
         approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
+    if let Err(err) = render::ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await
+    {
+        if !prefer_json {
+            if let Some(response) =
+                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+            {
+                return Ok(response);
+            }
+        }
+        return Err(map_render_error(err));
+    }
+    if !prefer_json {
+        if let Some(response) = resolve_token_override(&state, &request).await {
+            return Ok(response);
+        }
+    }
+    match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
             if !prefer_json {
@@ -496,12 +585,25 @@ async fn render_primary(
     Path((chain, collection, token_id, format)): Path<(String, String, String, String)>,
     Query(query): Query<RenderQuery>,
     RawQuery(raw_query): RawQuery,
+    headers: HeaderMap,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, None)
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let width_param = query.width.or(query.img_width);
+    let placeholder_width = width_param.clone();
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
+    let prefer_json = raw_mode || wants_json_response(&headers);
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let cache_timestamp =
         render::resolve_cache_timestamp(&state, &chain, &collection, query.cache.clone())
             .await
@@ -511,6 +613,43 @@ async fn render_primary(
         .unwrap_or_else(|| "none".to_string());
     let primary_cache_key = format!("{chain}:{collection}:{token_id}:{cache_stamp}");
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
+    let request = RenderRequest {
+        chain: chain.clone(),
+        collection: collection.clone(),
+        token_id: token_id.clone(),
+        asset_id: "primary".to_string(),
+        format,
+        cache_timestamp: cache_timestamp.clone(),
+        cache_param_present: query.cache.is_some(),
+        width_param: width_param.clone(),
+        og_mode: query.og_image.unwrap_or(false),
+        overlay: query.overlay.clone(),
+        background: query.bg.clone(),
+        fresh: fresh_requested,
+        approval_context,
+    };
+    if let Err(err) = render::ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await
+    {
+        if !prefer_json {
+            if let Some(response) =
+                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+            {
+                return Ok(response);
+            }
+        }
+        return Err(map_render_error(err));
+    }
+    if !prefer_json {
+        if let Some(response) = resolve_token_override(&state, &request).await {
+            return Ok(response);
+        }
+    }
     let asset_id = if fresh_requested {
         let _permit = state
             .rpc_semaphore
@@ -636,6 +775,8 @@ async fn render_primary_or_legacy_asset(
             Path((chain, collection, token_id, tail)),
             Query(query),
             RawQuery(raw_query),
+            headers,
+            context,
         )
         .await
     }
@@ -646,6 +787,8 @@ async fn render_primary_compat(
     Path((chain, collection, token_and_format)): Path<(String, String, String)>,
     Query(query): Query<RenderQuery>,
     RawQuery(raw_query): RawQuery,
+    headers: HeaderMap,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let (token_id, format) = split_dotted_segment(&token_and_format)?;
     render_primary(
@@ -653,6 +796,8 @@ async fn render_primary_compat(
         Path((chain, collection, token_id, format)),
         Query(query),
         RawQuery(raw_query),
+        headers,
+        context,
     )
     .await
 }
@@ -724,7 +869,13 @@ async fn head_render_canonical(
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
@@ -762,7 +913,13 @@ async fn head_render_og(
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
@@ -799,7 +956,13 @@ async fn head_render_legacy(
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
     let fresh = parse_fresh_flag(query.fresh.as_deref());
-    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let debug_requested =
+        parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let allow_debug = context
+        .as_ref()
+        .map(|ctx| ctx.0.allow_debug)
+        .unwrap_or(false);
+    let raw_mode = debug_requested && allow_debug;
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
@@ -840,10 +1003,11 @@ async fn head_render_primary_or_legacy_asset(
         )
         .await
     } else {
-        Err(
-            ApiError::new(StatusCode::METHOD_NOT_ALLOWED, "head not supported for primary renders")
-                .with_code("method_not_allowed"),
+        Err(ApiError::new(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "head not supported for primary renders",
         )
+        .with_code("method_not_allowed"))
     }
 }
 
@@ -930,11 +1094,16 @@ async fn head_cached_response(
     .await
     {
         if !raw_mode {
-            if let Some(response) = fallback_head_for_render_error(&request, &err) {
+            if let Some(response) = fallback_head_for_render_error(&state, &request, &err).await {
                 return Ok(response);
             }
         }
         return Err(map_render_error(err));
+    }
+    if !raw_mode {
+        if let Some(response) = resolve_token_override_head(&state, &request).await {
+            return Ok(response);
+        }
     }
     let cache_ts = match request.cache_timestamp.as_ref() {
         Some(value) => value,
@@ -1177,48 +1346,13 @@ fn placeholder_bytes_cached(format: &OutputFormat, width: u32, height: u32) -> V
     placeholder_bytes(format, width, height)
 }
 
-async fn unapproved_fallback_response(
-    format: &OutputFormat,
-    width: u32,
-    height: u32,
-    chain: &str,
-    collection: &str,
-) -> Response {
-    let mut lines = vec![
-        "COLLECTION NOT APPROVED".to_string(),
-        "REGISTER AT RENDERER.RMRK.APP".to_string(),
-    ];
-    if width >= 512 {
-        lines.push(format!("CHAIN: {}", chain.to_ascii_uppercase()));
-        lines.push(format!(
-            "COLLECTION: {}",
-            format_collection_label(collection)
-        ));
-    }
-    fallback_text_response(
-        format,
-        width,
-        height,
-        &lines,
-        "unapproved",
-        "approval_required",
-        "collection_not_approved",
-        StatusCode::OK,
-        None,
-    )
-    .await
-}
-
 async fn queued_fallback_response(
     format: &OutputFormat,
     width: u32,
     height: u32,
     retry_after_seconds: u64,
 ) -> Response {
-    let lines = vec![
-        "RENDER QUEUED".to_string(),
-        "RETRY IN A MOMENT".to_string(),
-    ];
+    let lines = vec!["RENDER QUEUED".to_string(), "RETRY IN A MOMENT".to_string()];
     fallback_text_response(
         format,
         width,
@@ -1383,7 +1517,9 @@ fn render_fallback_image(
     let scale = fallback_text_scale(width);
     let line_spacing = scale;
     let line_height = 7 * scale + line_spacing;
-    let total_height = line_height.saturating_mul(lines.len() as u32).saturating_sub(line_spacing);
+    let total_height = line_height
+        .saturating_mul(lines.len() as u32)
+        .saturating_sub(line_spacing);
     let start_y = if height > total_height {
         (height - total_height) / 2
     } else {
@@ -1406,6 +1542,335 @@ fn render_fallback_image(
     encode_image_bytes(format, image)
 }
 
+struct FallbackVariantFile {
+    path: PathBuf,
+    content_length: u64,
+    etag: String,
+}
+
+async fn read_fallback_meta(dir: &StdPath) -> Option<FallbackMeta> {
+    let meta_path = dir.join("meta.json");
+    let bytes = tokio::fs::read(meta_path).await.ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+async fn load_fallback_variant(
+    dir: &StdPath,
+    format: &OutputFormat,
+    width_param: &Option<String>,
+    og_mode: bool,
+) -> Option<FallbackVariantFile> {
+    let meta = read_fallback_meta(dir).await?;
+    let width = if og_mode {
+        FALLBACK_OG_WIDTH
+    } else {
+        fallback_width_bucket(width_param)
+    };
+    let variant_label = fallback_variant_label(og_mode, width);
+    let filename = fallback_variant_filename(&variant_label, format);
+    let path = dir.join(filename);
+    let metadata = tokio::fs::metadata(&path).await.ok()?;
+    let etag_label = if og_mode {
+        format!("og-{}x{}", FALLBACK_OG_WIDTH, FALLBACK_OG_HEIGHT)
+    } else {
+        variant_label.clone()
+    };
+    let etag = fallback_etag(&meta, &etag_label, format);
+    Some(FallbackVariantFile {
+        path,
+        content_length: metadata.len(),
+        etag,
+    })
+}
+
+async fn fallback_file_response(
+    dir: &StdPath,
+    format: &OutputFormat,
+    width_param: &Option<String>,
+    og_mode: bool,
+    fallback_kind: &str,
+    fallback_source: &str,
+    cache_control: &str,
+    complete: bool,
+    retry_after_seconds: Option<u64>,
+) -> Option<Response> {
+    let file = load_fallback_variant(dir, format, width_param, og_mode).await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(format.mime().as_ref())
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from_str(&file.content_length.to_string())
+            .unwrap_or(HeaderValue::from_static("0")),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_str(cache_control).unwrap_or(HeaderValue::from_static("no-store")),
+    );
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(&file.etag).unwrap_or(HeaderValue::from_static("")),
+    );
+    headers.insert(
+        "X-Renderer-Complete",
+        HeaderValue::from_static(if complete { "true" } else { "false" }),
+    );
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert(
+        "X-Renderer-Fallback",
+        HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    headers.insert(
+        "X-Renderer-Fallback-Source",
+        HeaderValue::from_str(fallback_source).unwrap_or(HeaderValue::from_static("unknown")),
+    );
+    if let Some(retry_after) = retry_after_seconds {
+        let value = HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static("5"));
+        headers.insert(header::RETRY_AFTER, value);
+    }
+    match tokio::fs::File::open(&file.path).await {
+        Ok(file) => {
+            let stream = ReaderStream::new(file);
+            let body = Body::from_stream(stream);
+            Some((headers, body).into_response())
+        }
+        Err(err) => {
+            tracing::warn!(error = ?err, path = %file.path.display(), "fallback file open failed");
+            None
+        }
+    }
+}
+
+async fn fallback_head_from_dir(
+    dir: &StdPath,
+    format: &OutputFormat,
+    width_param: &Option<String>,
+    og_mode: bool,
+    fallback_kind: &str,
+    fallback_source: &str,
+    cache_control: &str,
+    complete: bool,
+    retry_after_seconds: Option<u64>,
+) -> Option<Response> {
+    let file = load_fallback_variant(dir, format, width_param, og_mode).await?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(format.mime().as_ref())
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from_str(&file.content_length.to_string())
+            .unwrap_or(HeaderValue::from_static("0")),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_str(cache_control).unwrap_or(HeaderValue::from_static("no-store")),
+    );
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(&file.etag).unwrap_or(HeaderValue::from_static("")),
+    );
+    headers.insert(
+        "X-Renderer-Complete",
+        HeaderValue::from_static(if complete { "true" } else { "false" }),
+    );
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert(
+        "X-Renderer-Fallback",
+        HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    headers.insert(
+        "X-Renderer-Fallback-Source",
+        HeaderValue::from_str(fallback_source).unwrap_or(HeaderValue::from_static("unknown")),
+    );
+    if let Some(retry_after) = retry_after_seconds {
+        let value = HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static("5"));
+        headers.insert(header::RETRY_AFTER, value);
+    }
+    Some((StatusCode::OK, headers).into_response())
+}
+
+async fn resolve_unapproved_fallback_head(
+    state: &AppState,
+    request: &RenderRequest,
+) -> Option<Response> {
+    let config = state
+        .db
+        .get_collection_fallback_config(&request.chain, &request.collection)
+        .await
+        .ok()
+        .flatten();
+    if let Some(config) = config {
+        if config.unapproved_fallback_enabled {
+            if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
+                if let Some(response) = fallback_head_from_dir(
+                    StdPath::new(dir),
+                    &request.format,
+                    &request.width_param,
+                    request.og_mode,
+                    "unapproved",
+                    "collection",
+                    "public, max-age=60",
+                    false,
+                    None,
+                )
+                .await
+                {
+                    return Some(response);
+                }
+            }
+        }
+    }
+    let dir = global_unapproved_dir(&state.config);
+    fallback_head_from_dir(
+        &dir,
+        &request.format,
+        &request.width_param,
+        request.og_mode,
+        "unapproved",
+        "global",
+        "public, max-age=60",
+        false,
+        None,
+    )
+    .await
+}
+
+async fn resolve_token_override_head(
+    state: &AppState,
+    request: &RenderRequest,
+) -> Option<Response> {
+    let override_row = state
+        .db
+        .get_token_override(&request.chain, &request.collection, &request.token_id)
+        .await
+        .ok()
+        .flatten()?;
+    if !override_row.enabled {
+        return None;
+    }
+    fallback_head_from_dir(
+        StdPath::new(&override_row.override_dir),
+        &request.format,
+        &request.width_param,
+        request.og_mode,
+        "token_override",
+        "token",
+        "public, max-age=3600",
+        true,
+        None,
+    )
+    .await
+}
+
+async fn resolve_unapproved_fallback(
+    state: &AppState,
+    request: &RenderRequest,
+) -> Option<Response> {
+    let config = state
+        .db
+        .get_collection_fallback_config(&request.chain, &request.collection)
+        .await
+        .ok()
+        .flatten();
+    if let Some(config) = config {
+        if config.unapproved_fallback_enabled {
+            if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
+                if let Some(response) = fallback_file_response(
+                    StdPath::new(dir),
+                    &request.format,
+                    &request.width_param,
+                    request.og_mode,
+                    "unapproved",
+                    "collection",
+                    "public, max-age=60",
+                    false,
+                    None,
+                )
+                .await
+                {
+                    return Some(response);
+                }
+            }
+        }
+    }
+    let dir = global_unapproved_dir(&state.config);
+    fallback_file_response(
+        &dir,
+        &request.format,
+        &request.width_param,
+        request.og_mode,
+        "unapproved",
+        "global",
+        "public, max-age=60",
+        false,
+        None,
+    )
+    .await
+}
+
+async fn resolve_render_failure_fallback(
+    state: &AppState,
+    request: &RenderRequest,
+) -> Option<Response> {
+    let config = state
+        .db
+        .get_collection_fallback_config(&request.chain, &request.collection)
+        .await
+        .ok()
+        .flatten();
+    if let Some(config) = config {
+        if config.render_fallback_enabled {
+            if let Some(dir) = config.render_fallback_dir.as_ref() {
+                return fallback_file_response(
+                    StdPath::new(dir),
+                    &request.format,
+                    &request.width_param,
+                    request.og_mode,
+                    "render_fallback",
+                    "collection",
+                    "public, max-age=300",
+                    false,
+                    None,
+                )
+                .await;
+            }
+        }
+    }
+    None
+}
+
+async fn resolve_token_override(state: &AppState, request: &RenderRequest) -> Option<Response> {
+    let override_row = state
+        .db
+        .get_token_override(&request.chain, &request.collection, &request.token_id)
+        .await
+        .ok()
+        .flatten()?;
+    if !override_row.enabled {
+        return None;
+    }
+    fallback_file_response(
+        StdPath::new(&override_row.override_dir),
+        &request.format,
+        &request.width_param,
+        request.og_mode,
+        "token_override",
+        "token",
+        "public, max-age=3600",
+        true,
+        None,
+    )
+    .await
+}
+
 async fn fallback_for_render_error(
     state: &AppState,
     request: &RenderRequest,
@@ -1415,17 +1880,16 @@ async fn fallback_for_render_error(
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return match approval_error {
-            render::ApprovalCheckError::NotApproved => Some(
-                unapproved_fallback_response(
-                    &request.format,
-                    width,
-                    height,
-                    &request.chain,
-                    &request.collection,
-                )
-                .await,
-            ),
-            render::ApprovalCheckError::RateLimited { retry_after_seconds } => Some(
+            render::ApprovalCheckError::NotApproved => {
+                if let Some(response) = resolve_unapproved_fallback(state, request).await {
+                    Some(response)
+                } else {
+                    None
+                }
+            }
+            render::ApprovalCheckError::RateLimited {
+                retry_after_seconds,
+            } => Some(
                 approval_rate_limited_fallback_response(
                     &request.format,
                     width,
@@ -1452,7 +1916,7 @@ async fn fallback_for_render_error(
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return Some(queued_fallback_response(&request.format, width, height, 5).await);
     }
-    None
+    resolve_render_failure_fallback(state, request).await
 }
 
 fn fallback_head_response(
@@ -1491,28 +1955,25 @@ fn fallback_head_response(
     (StatusCode::OK, headers).into_response()
 }
 
-fn fallback_head_for_render_error(
+async fn fallback_head_for_render_error(
+    state: &AppState,
     request: &RenderRequest,
     error: &anyhow::Error,
 ) -> Option<Response> {
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         return match approval_error {
-            render::ApprovalCheckError::NotApproved => Some(fallback_head_response(
-                &request.format,
-                "unapproved",
-                "approval_required",
-                "collection_not_approved",
-                None,
-            )),
-            render::ApprovalCheckError::RateLimited { retry_after_seconds } => {
-                Some(fallback_head_response(
-                    &request.format,
-                    "approval_rate_limited",
-                    "approval_rate_limited",
-                    "approval_check_rate_limited",
-                    Some(*retry_after_seconds),
-                ))
+            render::ApprovalCheckError::NotApproved => {
+                resolve_unapproved_fallback_head(state, request).await
             }
+            render::ApprovalCheckError::RateLimited {
+                retry_after_seconds,
+            } => Some(fallback_head_response(
+                &request.format,
+                "approval_rate_limited",
+                "approval_rate_limited",
+                "approval_check_rate_limited",
+                Some(*retry_after_seconds),
+            )),
             render::ApprovalCheckError::Stale => Some(fallback_head_response(
                 &request.format,
                 "approval_stale",
@@ -1576,7 +2037,9 @@ fn text_width(text: &str, scale: u32) -> u32 {
     let glyph_width = 5 * scale;
     let spacing = scale;
     let len = text.chars().count() as u32;
-    glyph_width.saturating_mul(len).saturating_add(spacing.saturating_mul(len.saturating_sub(1)))
+    glyph_width
+        .saturating_mul(len)
+        .saturating_add(spacing.saturating_mul(len.saturating_sub(1)))
 }
 
 fn draw_text(image: &mut RgbaImage, x: u32, y: u32, scale: u32, text: &str, color: Rgba<u8>) {
@@ -1588,14 +2051,7 @@ fn draw_text(image: &mut RgbaImage, x: u32, y: u32, scale: u32, text: &str, colo
     }
 }
 
-fn draw_glyph(
-    image: &mut RgbaImage,
-    x: u32,
-    y: u32,
-    scale: u32,
-    ch: char,
-    color: Rgba<u8>,
-) {
+fn draw_glyph(image: &mut RgbaImage, x: u32, y: u32, scale: u32, ch: char, color: Rgba<u8>) {
     let rows = glyph_rows(ch);
     for (row_idx, row) in rows.iter().enumerate() {
         for col in 0..5 {
@@ -1618,48 +2074,132 @@ fn draw_glyph(
 
 fn glyph_rows(ch: char) -> [u8; 7] {
     match ch.to_ascii_uppercase() {
-        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
-        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
-        'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
-        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
-        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
-        'G' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10011, 0b10001, 0b01110],
-        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
-        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
-        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
-        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
-        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
-        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
-        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
-        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
-        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
-        'S' => [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
-        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
-        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
-        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
-        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010],
-        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
-        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
-        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
-        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
-        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
-        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
-        '3' => [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110],
-        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
-        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
-        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
-        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
-        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
-        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b11100],
-        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
-        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100],
-        ':' => [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000],
-        '/' => [0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b00000, 0b00000],
-        ' ' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
-        _ => [0b01110, 0b10001, 0b00010, 0b00100, 0b00000, 0b00100, 0b00100],
+        'A' => [
+            0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'B' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+        ],
+        'C' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+        ],
+        'D' => [
+            0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+        ],
+        'E' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+        ],
+        'F' => [
+            0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'G' => [
+            0b01110, 0b10001, 0b10000, 0b10000, 0b10011, 0b10001, 0b01110,
+        ],
+        'H' => [
+            0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+        ],
+        'I' => [
+            0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        'J' => [
+            0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100,
+        ],
+        'K' => [
+            0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+        ],
+        'L' => [
+            0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+        ],
+        'M' => [
+            0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+        ],
+        'N' => [
+            0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001,
+        ],
+        'O' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'P' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+        ],
+        'Q' => [
+            0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+        ],
+        'R' => [
+            0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+        ],
+        'S' => [
+            0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110,
+        ],
+        'T' => [
+            0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'U' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+        ],
+        'V' => [
+            0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+        ],
+        'W' => [
+            0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010,
+        ],
+        'X' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+        ],
+        'Y' => [
+            0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+        ],
+        'Z' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+        ],
+        '0' => [
+            0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+        ],
+        '1' => [
+            0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+        ],
+        '2' => [
+            0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+        ],
+        '3' => [
+            0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110,
+        ],
+        '4' => [
+            0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+        ],
+        '5' => [
+            0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+        ],
+        '6' => [
+            0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+        ],
+        '7' => [
+            0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+        ],
+        '8' => [
+            0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+        ],
+        '9' => [
+            0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b11100,
+        ],
+        '-' => [
+            0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000,
+        ],
+        '.' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100,
+        ],
+        ':' => [
+            0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000,
+        ],
+        '/' => [
+            0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b00000, 0b00000,
+        ],
+        ' ' => [
+            0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000,
+        ],
+        _ => [
+            0b01110, 0b10001, 0b00010, 0b00100, 0b00000, 0b00100, 0b00100,
+        ],
     }
 }
 
@@ -1827,6 +2367,7 @@ struct AccessContext {
     max_concurrent_renders_override: Option<usize>,
     allow_fresh: bool,
     allow_on_demand_approval: bool,
+    allow_debug: bool,
 }
 
 impl AccessContext {
@@ -1945,8 +2486,8 @@ pub async fn access_middleware(
         None
     };
     let key_active = key_info.as_ref().map(|key| key.active).unwrap_or(false);
-    let allow_on_demand_approval =
-        key_active || matches!(ip_rule.as_deref(), Some("allow"));
+    let allow_on_demand_approval = key_active || matches!(ip_rule.as_deref(), Some("allow"));
+    let allow_debug = key_active || matches!(ip_rule.as_deref(), Some("allow"));
 
     let ip_identity = ip.map(|ip| AccessContext {
         identity_key: Arc::from(format!("ip:{ip}")),
@@ -1954,6 +2495,7 @@ pub async fn access_middleware(
         max_concurrent_renders_override: None,
         allow_fresh: false,
         allow_on_demand_approval,
+        allow_debug,
     });
 
     let identity = if let Some(key) = key_info.as_ref() {
@@ -1965,6 +2507,7 @@ pub async fn access_middleware(
                 .and_then(|value| value.try_into().ok()),
             allow_fresh: key.allow_fresh,
             allow_on_demand_approval,
+            allow_debug,
         })
     } else if ip_identity.is_some() {
         ip_identity.clone()
@@ -2095,10 +2638,7 @@ async fn is_access_allowed(
     }
 }
 
-fn is_private_access_allowed(
-    key: Option<&crate::db::ClientKey>,
-    ip_rule: Option<&str>,
-) -> bool {
+fn is_private_access_allowed(key: Option<&crate::db::ClientKey>, ip_rule: Option<&str>) -> bool {
     if let Some(key) = key {
         if key.active {
             return true;
@@ -2352,7 +2892,10 @@ fn is_reasonable_token_len(token: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::OPENAPI_YAML;
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::header;
+    use tempfile::tempdir;
 
     #[test]
     fn openapi_yaml_parses() {
@@ -2360,6 +2903,70 @@ mod tests {
             serde_yaml::from_str(OPENAPI_YAML).expect("valid openapi yaml");
         assert!(spec.openapi.starts_with('3'));
         assert!(!spec.paths.paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fallback_file_response_sets_headers_and_body() {
+        let dir = tempdir().unwrap();
+        let meta = FallbackMeta {
+            updated_at_ms: 123,
+            source_sha256: "deadbeef".to_string(),
+            source_width: 10,
+            source_height: 20,
+            variants: vec!["w512.png".to_string()],
+        };
+        let meta_bytes = serde_json::to_vec(&meta).unwrap();
+        std::fs::write(dir.path().join("meta.json"), meta_bytes).unwrap();
+        std::fs::write(dir.path().join("w512.png"), b"hello").unwrap();
+
+        let response = fallback_file_response(
+            dir.path(),
+            &OutputFormat::Png,
+            &None,
+            false,
+            "unapproved",
+            "global",
+            "public, max-age=60",
+            false,
+            None,
+        )
+        .await
+        .expect("fallback response");
+
+        let headers = response.headers();
+        assert_eq!(
+            headers
+                .get("X-Renderer-Fallback")
+                .and_then(|value| value.to_str().ok()),
+            Some("unapproved")
+        );
+        assert_eq!(
+            headers
+                .get("X-Renderer-Fallback-Source")
+                .and_then(|value| value.to_str().ok()),
+            Some("global")
+        );
+        assert_eq!(
+            headers
+                .get(header::CACHE_CONTROL)
+                .and_then(|value| value.to_str().ok()),
+            Some("public, max-age=60")
+        );
+        assert_eq!(
+            headers
+                .get(header::CONTENT_LENGTH)
+                .and_then(|value| value.to_str().ok()),
+            Some("5")
+        );
+        let expected_etag = fallback_etag(&meta, "w512", &OutputFormat::Png);
+        assert_eq!(
+            headers
+                .get(header::ETAG)
+                .and_then(|value| value.to_str().ok()),
+            Some(expected_etag.as_str())
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body, "hello");
     }
 }
 
@@ -2639,44 +3246,40 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
     }
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         return match approval_error {
-            render::ApprovalCheckError::NotApproved => ApiError::new(
-                StatusCode::FORBIDDEN,
-                "collection not approved",
-            )
-            .with_code("collection_not_approved")
-            .with_log_detail(detail),
-            render::ApprovalCheckError::RateLimited { retry_after_seconds } => ApiError::new(
-                StatusCode::TOO_MANY_REQUESTS,
-                "approval check rate limited",
-            )
-            .with_code("approval_check_rate_limited")
-            .with_field("retry_after_seconds", Value::Number((*retry_after_seconds).into()))
-            .with_header(
-                header::RETRY_AFTER,
-                HeaderValue::from_str(&retry_after_seconds.to_string())
-                    .unwrap_or(HeaderValue::from_static("60")),
-            )
-            .with_log_detail(detail),
-            render::ApprovalCheckError::Stale => ApiError::new(
-                StatusCode::FORBIDDEN,
-                "approval stale",
-            )
-            .with_code("approval_stale")
-            .with_log_detail(detail),
+            render::ApprovalCheckError::NotApproved => {
+                ApiError::new(StatusCode::FORBIDDEN, "collection not approved")
+                    .with_code("collection_not_approved")
+                    .with_log_detail(detail)
+            }
+            render::ApprovalCheckError::RateLimited {
+                retry_after_seconds,
+            } => ApiError::new(StatusCode::TOO_MANY_REQUESTS, "approval check rate limited")
+                .with_code("approval_check_rate_limited")
+                .with_field(
+                    "retry_after_seconds",
+                    Value::Number((*retry_after_seconds).into()),
+                )
+                .with_header(
+                    header::RETRY_AFTER,
+                    HeaderValue::from_str(&retry_after_seconds.to_string())
+                        .unwrap_or(HeaderValue::from_static("60")),
+                )
+                .with_log_detail(detail),
+            render::ApprovalCheckError::Stale => {
+                ApiError::new(StatusCode::FORBIDDEN, "approval stale")
+                    .with_code("approval_stale")
+                    .with_log_detail(detail)
+            }
         };
     }
     if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
         return match fetch_error {
-            AssetFetchError::InvalidUri => {
-                ApiError::bad_request("invalid asset uri")
-                    .with_code("invalid_asset_uri")
-                    .with_log_detail(detail)
-            }
-            AssetFetchError::Blocked => {
-                ApiError::bad_request("asset uri not allowed")
-                    .with_code("asset_uri_blocked")
-                    .with_log_detail(detail)
-            }
+            AssetFetchError::InvalidUri => ApiError::bad_request("invalid asset uri")
+                .with_code("invalid_asset_uri")
+                .with_log_detail(detail),
+            AssetFetchError::Blocked => ApiError::bad_request("asset uri not allowed")
+                .with_code("asset_uri_blocked")
+                .with_log_detail(detail),
             AssetFetchError::TooLarge => {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
                     .with_code("asset_too_large")

@@ -1,6 +1,6 @@
 use crate::canonical;
 use crate::config::{AdminCollectionInput, Config};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -32,6 +32,28 @@ pub struct CollectionConfig {
     pub last_approval_sync_block: Option<i64>,
     pub last_approval_check_at: Option<i64>,
     pub last_approval_check_result: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CollectionFallbackConfig {
+    pub chain: String,
+    pub collection_address: String,
+    pub render_fallback_enabled: bool,
+    pub render_fallback_dir: Option<String>,
+    pub unapproved_fallback_enabled: bool,
+    pub unapproved_fallback_dir: Option<String>,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenOverride {
+    pub chain: String,
+    pub collection_address: String,
+    pub token_id: String,
+    pub enabled: bool,
+    pub override_dir: String,
+    pub reason: Option<String>,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,6 +445,26 @@ impl Database {
         CREATE TABLE IF NOT EXISTS fresh_requests (
           key TEXT PRIMARY KEY,
           last_refresh_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS collection_fallback_config (
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          render_fallback_enabled INTEGER NOT NULL DEFAULT 0,
+          render_fallback_dir TEXT NULL,
+          unapproved_fallback_enabled INTEGER NOT NULL DEFAULT 0,
+          unapproved_fallback_dir TEXT NULL,
+          updated_at_ms INTEGER NOT NULL,
+          PRIMARY KEY(chain, collection_address)
+        );
+        CREATE TABLE IF NOT EXISTS token_overrides (
+          chain TEXT NOT NULL,
+          collection_address TEXT NOT NULL,
+          token_id TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          override_dir TEXT NOT NULL,
+          reason TEXT NULL,
+          updated_at_ms INTEGER NOT NULL,
+          PRIMARY KEY(chain, collection_address, token_id)
         );
         CREATE INDEX IF NOT EXISTS fresh_requests_last_refresh_idx
           ON fresh_requests(last_refresh_at);
@@ -1052,6 +1094,217 @@ impl Database {
                 .get::<Option<i64>, _>("last_approval_check_result")
                 .map(|value| value == 1),
         }))
+    }
+
+    pub async fn get_collection_fallback_config(
+        &self,
+        chain: &str,
+        collection_address: &str,
+    ) -> Result<Option<CollectionFallbackConfig>> {
+        let row = sqlx::query(
+            r#"
+            SELECT chain, collection_address, render_fallback_enabled, render_fallback_dir,
+                   unapproved_fallback_enabled, unapproved_fallback_dir, updated_at_ms
+            FROM collection_fallback_config
+            WHERE chain = ?1 AND collection_address = ?2
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| CollectionFallbackConfig {
+            chain: row.get("chain"),
+            collection_address: row.get("collection_address"),
+            render_fallback_enabled: row.get::<i64, _>("render_fallback_enabled") == 1,
+            render_fallback_dir: row.get("render_fallback_dir"),
+            unapproved_fallback_enabled: row.get::<i64, _>("unapproved_fallback_enabled") == 1,
+            unapproved_fallback_dir: row.get("unapproved_fallback_dir"),
+            updated_at_ms: row.get("updated_at_ms"),
+        }))
+    }
+
+    pub async fn set_collection_unapproved_fallback(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        enabled: bool,
+        dir: Option<&str>,
+    ) -> Result<CollectionFallbackConfig> {
+        let now = now_epoch_ms();
+        sqlx::query(
+            r#"
+            INSERT INTO collection_fallback_config
+              (chain, collection_address, unapproved_fallback_enabled, unapproved_fallback_dir, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              unapproved_fallback_enabled = excluded.unapproved_fallback_enabled,
+              unapproved_fallback_dir = excluded.unapproved_fallback_dir,
+              updated_at_ms = excluded.updated_at_ms
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(if enabled { 1 } else { 0 })
+        .bind(dir)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        self.get_collection_fallback_config(chain, collection_address)
+            .await?
+            .ok_or_else(|| anyhow!("collection fallback config not found"))
+    }
+
+    pub async fn set_collection_render_fallback(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        enabled: bool,
+        dir: Option<&str>,
+    ) -> Result<CollectionFallbackConfig> {
+        let now = now_epoch_ms();
+        sqlx::query(
+            r#"
+            INSERT INTO collection_fallback_config
+              (chain, collection_address, render_fallback_enabled, render_fallback_dir, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              render_fallback_enabled = excluded.render_fallback_enabled,
+              render_fallback_dir = excluded.render_fallback_dir,
+              updated_at_ms = excluded.updated_at_ms
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(if enabled { 1 } else { 0 })
+        .bind(dir)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        self.get_collection_fallback_config(chain, collection_address)
+            .await?
+            .ok_or_else(|| anyhow!("collection fallback config not found"))
+    }
+
+    pub async fn get_token_override(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+    ) -> Result<Option<TokenOverride>> {
+        let row = sqlx::query(
+            r#"
+            SELECT chain, collection_address, token_id, enabled, override_dir, reason, updated_at_ms
+            FROM token_overrides
+            WHERE chain = ?1 AND collection_address = ?2 AND token_id = ?3
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| TokenOverride {
+            chain: row.get("chain"),
+            collection_address: row.get("collection_address"),
+            token_id: row.get("token_id"),
+            enabled: row.get::<i64, _>("enabled") == 1,
+            override_dir: row.get("override_dir"),
+            reason: row.get("reason"),
+            updated_at_ms: row.get("updated_at_ms"),
+        }))
+    }
+
+    pub async fn list_token_overrides(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        search: Option<&str>,
+    ) -> Result<Vec<TokenOverride>> {
+        let mut query = String::from(
+            "SELECT chain, collection_address, token_id, enabled, override_dir, reason, updated_at_ms \
+             FROM token_overrides WHERE chain = ?1 AND collection_address = ?2",
+        );
+        if search.is_some() {
+            query.push_str(" AND token_id LIKE ?3");
+        }
+        query.push_str(" ORDER BY token_id ASC");
+        let mut stmt = sqlx::query(&query).bind(chain).bind(collection_address);
+        if let Some(search) = search {
+            let pattern = format!("%{}%", search);
+            stmt = stmt.bind(pattern);
+        }
+        let rows = stmt.fetch_all(&self.pool).await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| TokenOverride {
+                chain: row.get("chain"),
+                collection_address: row.get("collection_address"),
+                token_id: row.get("token_id"),
+                enabled: row.get::<i64, _>("enabled") == 1,
+                override_dir: row.get("override_dir"),
+                reason: row.get("reason"),
+                updated_at_ms: row.get("updated_at_ms"),
+            })
+            .collect())
+    }
+
+    pub async fn upsert_token_override(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+        enabled: bool,
+        override_dir: &str,
+        reason: Option<&str>,
+    ) -> Result<TokenOverride> {
+        let now = now_epoch_ms();
+        sqlx::query(
+            r#"
+            INSERT INTO token_overrides
+              (chain, collection_address, token_id, enabled, override_dir, reason, updated_at_ms)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            ON CONFLICT(chain, collection_address, token_id) DO UPDATE SET
+              enabled = excluded.enabled,
+              override_dir = excluded.override_dir,
+              reason = excluded.reason,
+              updated_at_ms = excluded.updated_at_ms
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(token_id)
+        .bind(if enabled { 1 } else { 0 })
+        .bind(override_dir)
+        .bind(reason)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        self.get_token_override(chain, collection_address, token_id)
+            .await?
+            .ok_or_else(|| anyhow!("token override not found"))
+    }
+
+    pub async fn delete_token_override(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        token_id: &str,
+    ) -> Result<Option<TokenOverride>> {
+        let existing = self
+            .get_token_override(chain, collection_address, token_id)
+            .await?;
+        if existing.is_some() {
+            sqlx::query(
+                "DELETE FROM token_overrides WHERE chain = ?1 AND collection_address = ?2 AND token_id = ?3",
+            )
+            .bind(chain)
+            .bind(collection_address)
+            .bind(token_id)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(existing)
     }
 
     pub async fn get_collection_cache_epoch(
@@ -3011,6 +3264,13 @@ fn now_epoch() -> i64 {
         .unwrap_or(0)
 }
 
+fn now_epoch_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3026,6 +3286,7 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path: path,
             cache_dir: PathBuf::from("cache"),
+            fallbacks_dir: PathBuf::from("cache/fallbacks"),
             pinning_enabled: false,
             pinned_dir: PathBuf::from("pinned"),
             local_ipfs_enabled: false,
@@ -3075,6 +3336,8 @@ mod tests {
             max_background_length: 1,
             max_in_flight_requests: 1,
             max_admin_body_bytes: 1,
+            fallback_upload_max_bytes: 1,
+            fallback_upload_max_pixels: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,

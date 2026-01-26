@@ -247,15 +247,34 @@ pub async fn render_token_with_limit(
     request: RenderRequest,
     key_limit: Option<RenderKeyLimit>,
 ) -> Result<RenderResponse> {
+    render_token_with_limit_internal(state, request, key_limit, false).await
+}
+
+pub async fn render_token_with_limit_checked(
+    state: Arc<AppState>,
+    request: RenderRequest,
+    key_limit: Option<RenderKeyLimit>,
+) -> Result<RenderResponse> {
+    render_token_with_limit_internal(state, request, key_limit, true).await
+}
+
+async fn render_token_with_limit_internal(
+    state: Arc<AppState>,
+    request: RenderRequest,
+    key_limit: Option<RenderKeyLimit>,
+    approval_checked: bool,
+) -> Result<RenderResponse> {
     let mut request = request;
     apply_cache_epoch(&state, &mut request).await?;
-    ensure_collection_approved(
-        &state,
-        &request.chain,
-        &request.collection,
-        &request.approval_context,
-    )
-    .await?;
+    if !approval_checked {
+        ensure_collection_approved(
+            &state,
+            &request.chain,
+            &request.collection,
+            &request.approval_context,
+        )
+        .await?;
+    }
 
     validate_query_lengths(
         &request,
@@ -1831,10 +1850,7 @@ async fn compute_render_cache_key_for_layers(
         &fingerprinted_variant_key,
         request.format.extension(),
     )?;
-    Ok(Some(RenderCacheSelection {
-        key,
-        fingerprint,
-    }))
+    Ok(Some(RenderCacheSelection { key, fingerprint }))
 }
 
 async fn compute_render_cache_key_for_request(
@@ -3538,7 +3554,7 @@ mod tests {
                 overlay: None,
                 background: None,
                 fresh: false,
-            approval_context: ApprovalCheckContext::deny(),
+                approval_context: ApprovalCheckContext::deny(),
             };
 
             let render = render_token(state.clone(), request).await?;

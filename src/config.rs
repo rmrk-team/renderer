@@ -16,6 +16,7 @@ pub struct Config {
     pub admin_password: String,
     pub db_path: PathBuf,
     pub cache_dir: PathBuf,
+    pub fallbacks_dir: PathBuf,
     pub pinning_enabled: bool,
     pub pinned_dir: PathBuf,
     pub local_ipfs_enabled: bool,
@@ -65,6 +66,8 @@ pub struct Config {
     pub max_background_length: usize,
     pub max_in_flight_requests: usize,
     pub max_admin_body_bytes: usize,
+    pub fallback_upload_max_bytes: usize,
+    pub fallback_upload_max_pixels: u64,
     pub rate_limit_per_minute: u64,
     pub rate_limit_burst: u64,
     pub auth_failure_rate_limit_per_minute: u64,
@@ -187,6 +190,10 @@ impl Config {
         let cache_dir = PathBuf::from(
             env::var("CACHE_DIR").unwrap_or_else(|_| "/var/cache/renderer".to_string()),
         );
+        let fallbacks_dir = PathBuf::from(
+            env::var("FALLBACKS_DIR")
+                .unwrap_or_else(|_| cache_dir.join("fallbacks").to_string_lossy().to_string()),
+        );
         let pinning_enabled = parse_bool("PINNING_ENABLED", true);
         let pinned_dir = PathBuf::from(
             env::var("PINNED_DIR").unwrap_or_else(|_| "/var/lib/renderer/pinned".to_string()),
@@ -293,6 +300,8 @@ impl Config {
         let max_background_length = parse_usize("MAX_BG_LENGTH", 64);
         let max_in_flight_requests = parse_usize("MAX_IN_FLIGHT_REQUESTS", 512);
         let max_admin_body_bytes = parse_usize("MAX_ADMIN_BODY_BYTES", 1_048_576);
+        let fallback_upload_max_bytes = parse_usize("FALLBACK_UPLOAD_MAX_BYTES", 5 * 1024 * 1024);
+        let fallback_upload_max_pixels = parse_u64("FALLBACK_UPLOAD_MAX_PIXELS", 16_000_000);
         let rate_limit_per_minute = parse_u64("RATE_LIMIT_PER_MINUTE", 0);
         let rate_limit_burst = parse_u64("RATE_LIMIT_BURST", 0);
         let auth_failure_rate_limit_per_minute = parse_u64("AUTH_FAILURE_RATE_LIMIT_PER_MINUTE", 0);
@@ -387,6 +396,7 @@ impl Config {
             admin_password,
             db_path,
             cache_dir,
+            fallbacks_dir,
             pinning_enabled,
             pinned_dir,
             local_ipfs_enabled,
@@ -436,6 +446,8 @@ impl Config {
             max_background_length,
             max_in_flight_requests,
             max_admin_body_bytes,
+            fallback_upload_max_bytes,
+            fallback_upload_max_pixels,
             rate_limit_per_minute,
             rate_limit_burst,
             auth_failure_rate_limit_per_minute,

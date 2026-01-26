@@ -3,10 +3,15 @@ use crate::catalog_warmup::{CatalogWarmupRequest, enqueue_catalog_warmup};
 use crate::config::{AdminCollectionInput, Config};
 use crate::db::{
     Client, ClientKey, CollectionConfig, HashReplacement, IpRule, PinnedAssetCounts, RpcEndpoint,
-    UsageRow, WarmupJob,
+    TokenOverride, UsageRow, WarmupJob,
+};
+use crate::fallbacks::{
+    FALLBACK_OG_HEIGHT, FALLBACK_OG_WIDTH, FALLBACK_WIDTH_PRESETS, FallbackMeta,
+    collection_fallback_dir, global_unapproved_dir, token_override_dir,
 };
 use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
+use crate::render::OutputFormat;
 use crate::render::refresh_canvas_size;
 use crate::state::AppState;
 use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
@@ -22,20 +27,29 @@ use axum::{Json, Router};
 use base64::Engine;
 use ethers::providers::Middleware;
 use hmac::{Hmac, Mac};
+use image::imageops;
+use image::imageops::FilterType;
+use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
+use std::io::Write;
+use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use tower_http::limit::RequestBodyLimitLayer;
 use tracing::warn;
 
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
-    let max_body = if state.config.max_admin_body_bytes == 0 {
+    let mut max_body = if state.config.max_admin_body_bytes == 0 {
         usize::MAX
     } else {
         state.config.max_admin_body_bytes
     };
+    if state.config.fallback_upload_max_bytes > max_body {
+        max_body = state.config.fallback_upload_max_bytes;
+    }
     let api = Router::new()
         .route(
             "/api/collections",
@@ -76,6 +90,31 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route(
             "/api/hash-replacements/{cid}",
             delete(delete_hash_replacement),
+        )
+        .route(
+            "/api/fallbacks/unapproved",
+            post(upload_global_unapproved_fallback).delete(delete_global_unapproved_fallback),
+        )
+        .route(
+            "/api/collections/{chain}/{collection}/fallbacks",
+            get(get_collection_fallbacks),
+        )
+        .route(
+            "/api/collections/{chain}/{collection}/fallbacks/unapproved",
+            post(upload_collection_unapproved_fallback)
+                .delete(delete_collection_unapproved_fallback),
+        )
+        .route(
+            "/api/collections/{chain}/{collection}/fallbacks/render",
+            post(upload_collection_render_fallback).delete(delete_collection_render_fallback),
+        )
+        .route(
+            "/api/collections/{chain}/{collection}/overrides",
+            get(list_token_overrides),
+        )
+        .route(
+            "/api/collections/{chain}/{collection}/overrides/{token_id}",
+            post(upload_token_override).delete(delete_token_override),
         )
         .route("/api/rpc/{chain}", get(list_rpc).put(replace_rpc))
         .route("/api/rpc/{chain}/health", get(rpc_health))
@@ -686,6 +725,412 @@ async fn delete_hash_replacement(
         "status": "ok",
         "removed": removed.is_some()
     })))
+}
+
+#[derive(Debug)]
+struct FallbackUploadPayload {
+    bytes: bytes::Bytes,
+    reason: Option<String>,
+}
+
+async fn parse_fallback_upload(
+    mut multipart: Multipart,
+) -> Result<FallbackUploadPayload, AdminError> {
+    let mut bytes: Option<bytes::Bytes> = None;
+    let mut reason: Option<String> = None;
+    while let Some(field) = multipart.next_field().await.map_err(|err| anyhow!(err))? {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "file" {
+            bytes = Some(field.bytes().await.map_err(|err| anyhow!(err))?);
+        } else if name == "reason" {
+            reason = Some(field.text().await.map_err(|err| anyhow!(err))?);
+        }
+    }
+    let bytes = bytes.ok_or_else(|| anyhow!("missing file"))?;
+    if bytes.is_empty() {
+        return Err(anyhow!("empty upload file").into());
+    }
+    Ok(FallbackUploadPayload { bytes, reason })
+}
+
+async fn upload_global_unapproved_fallback(
+    State(state): State<Arc<AppState>>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let payload = parse_fallback_upload(multipart).await?;
+    let dir = global_unapproved_dir(&state.config);
+    let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "dir": dir.to_string_lossy(),
+        "meta": meta
+    })))
+}
+
+async fn delete_global_unapproved_fallback(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let dir = global_unapproved_dir(&state.config);
+    let exists = tokio::fs::metadata(&dir).await.is_ok();
+    if exists {
+        if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
+            warn!(error = ?err, path = %dir.display(), "failed to remove global fallback dir");
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": exists
+    })))
+}
+
+async fn get_collection_fallbacks(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let config = state
+        .db
+        .get_collection_fallback_config(&chain, &collection)
+        .await?;
+    let response = config
+        .map(|config| {
+            serde_json::json!({
+                "chain": config.chain,
+                "collection_address": config.collection_address,
+                "render_fallback_enabled": config.render_fallback_enabled,
+                "render_fallback_dir": config.render_fallback_dir,
+                "unapproved_fallback_enabled": config.unapproved_fallback_enabled,
+                "unapproved_fallback_dir": config.unapproved_fallback_dir,
+                "updated_at_ms": config.updated_at_ms
+            })
+        })
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "chain": chain,
+                "collection_address": collection,
+                "render_fallback_enabled": false,
+                "render_fallback_dir": null,
+                "unapproved_fallback_enabled": false,
+                "unapproved_fallback_dir": null,
+                "updated_at_ms": null
+            })
+        });
+    Ok(Json(response))
+}
+
+async fn upload_collection_unapproved_fallback(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let payload = parse_fallback_upload(multipart).await?;
+    let dir = collection_fallback_dir(&state.config, &chain, &collection, "unapproved")?;
+    let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
+    let config = state
+        .db
+        .set_collection_unapproved_fallback(&chain, &collection, true, Some(&dir.to_string_lossy()))
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "fallback": config,
+        "meta": meta
+    })))
+}
+
+async fn delete_collection_unapproved_fallback(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let dir = collection_fallback_dir(&state.config, &chain, &collection, "unapproved")?;
+    let exists = tokio::fs::metadata(&dir).await.is_ok();
+    if exists {
+        if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
+            warn!(error = ?err, path = %dir.display(), "failed to remove fallback dir");
+        }
+    }
+    let config = state
+        .db
+        .set_collection_unapproved_fallback(&chain, &collection, false, None)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": exists,
+        "fallback": config
+    })))
+}
+
+async fn upload_collection_render_fallback(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let payload = parse_fallback_upload(multipart).await?;
+    let dir = collection_fallback_dir(&state.config, &chain, &collection, "render")?;
+    let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
+    let config = state
+        .db
+        .set_collection_render_fallback(&chain, &collection, true, Some(&dir.to_string_lossy()))
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "fallback": config,
+        "meta": meta
+    })))
+}
+
+async fn delete_collection_render_fallback(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let dir = collection_fallback_dir(&state.config, &chain, &collection, "render")?;
+    let exists = tokio::fs::metadata(&dir).await.is_ok();
+    if exists {
+        if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
+            warn!(error = ?err, path = %dir.display(), "failed to remove fallback dir");
+        }
+    }
+    let config = state
+        .db
+        .set_collection_render_fallback(&chain, &collection, false, None)
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": exists,
+        "fallback": config
+    })))
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenOverrideQuery {
+    search: Option<String>,
+}
+
+async fn list_token_overrides(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection)): Path<(String, String)>,
+    Query(query): Query<TokenOverrideQuery>,
+) -> Result<Json<Vec<TokenOverride>>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let overrides = state
+        .db
+        .list_token_overrides(&chain, &collection, query.search.as_deref())
+        .await?;
+    Ok(Json(overrides))
+}
+
+async fn upload_token_override(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection, token_id)): Path<(String, String, String)>,
+    multipart: Multipart,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let payload = parse_fallback_upload(multipart).await?;
+    let dir = token_override_dir(&state.config, &chain, &collection, &token_id)?;
+    let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
+    let override_row = state
+        .db
+        .upsert_token_override(
+            &chain,
+            &collection,
+            &token_id,
+            true,
+            &dir.to_string_lossy(),
+            payload.reason.as_deref(),
+        )
+        .await?;
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "override": override_row,
+        "meta": meta
+    })))
+}
+
+async fn delete_token_override(
+    State(state): State<Arc<AppState>>,
+    Path((chain, collection, token_id)): Path<(String, String, String)>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let removed = state
+        .db
+        .delete_token_override(&chain, &collection, &token_id)
+        .await?;
+    if let Some(row) = removed.as_ref() {
+        let dir = PathBuf::from(&row.override_dir);
+        if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
+            warn!(error = ?err, path = %dir.display(), "failed to remove override dir");
+        }
+    }
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "removed": removed.is_some()
+    })))
+}
+
+async fn write_fallback_variants(
+    state: &AppState,
+    dir: &StdPath,
+    bytes: bytes::Bytes,
+) -> Result<FallbackMeta, AdminError> {
+    if state.config.fallback_upload_max_bytes > 0
+        && bytes.len() > state.config.fallback_upload_max_bytes
+    {
+        return Err(anyhow!("fallback upload too large").into());
+    }
+    let max_pixels = state.config.fallback_upload_max_pixels;
+    let dir = dir.to_path_buf();
+    let bytes_vec = bytes.to_vec();
+    let meta = tokio::task::spawn_blocking(move || {
+        generate_and_write_fallback(dir, bytes_vec, max_pixels)
+    })
+    .await
+    .map_err(|err| anyhow!("fallback upload task failed: {err}"))??;
+    Ok(meta)
+}
+
+fn generate_and_write_fallback(
+    dir: PathBuf,
+    bytes: Vec<u8>,
+    max_pixels: u64,
+) -> anyhow::Result<FallbackMeta> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()?;
+    reader.limits(raster_limits(max_pixels));
+    let format = reader
+        .format()
+        .ok_or_else(|| anyhow!("unknown image format"))?;
+    if !matches!(
+        format,
+        ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP
+    ) {
+        return Err(anyhow!("unsupported image format"));
+    }
+    let image = reader.decode()?;
+    let (src_width, src_height) = image.dimensions();
+    if src_width == 0 || src_height == 0 {
+        return Err(anyhow!("invalid image dimensions"));
+    }
+    let pixels = (src_width as u64).saturating_mul(src_height as u64);
+    if max_pixels > 0 && pixels > max_pixels {
+        return Err(anyhow!("image exceeds max pixel limit"));
+    }
+    let source_sha256 = hex::encode(Sha256::digest(&bytes));
+    let updated_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+
+    let formats = [OutputFormat::Webp, OutputFormat::Png, OutputFormat::Jpeg];
+    let mut variants: Vec<(String, Vec<u8>)> = Vec::new();
+    for (_, width) in FALLBACK_WIDTH_PRESETS.iter() {
+        let target_height = ((src_height as f64) * (*width as f64) / (src_width as f64))
+            .round()
+            .max(1.0) as u32;
+        let resized = image.resize_exact(*width, target_height, FilterType::Lanczos3);
+        for format in formats {
+            let name = format!("w{}.{}", width, format.extension());
+            let bytes = encode_fallback_image(&resized, format)?;
+            variants.push((name, bytes));
+        }
+    }
+    for format in formats {
+        let og_image = build_og_variant(&image, format);
+        let name = format!("og.{}", format.extension());
+        let bytes = encode_fallback_image(&og_image, format)?;
+        variants.push((name, bytes));
+    }
+
+    std::fs::create_dir_all(&dir)?;
+    let mut variant_names = Vec::new();
+    for (name, data) in variants {
+        let path = dir.join(&name);
+        write_atomic(&path, &data)?;
+        variant_names.push(name);
+    }
+    let meta = FallbackMeta {
+        updated_at_ms,
+        source_sha256,
+        source_width: src_width,
+        source_height: src_height,
+        variants: variant_names,
+    };
+    let meta_bytes = serde_json::to_vec_pretty(&meta)?;
+    write_atomic(&dir.join("meta.json"), &meta_bytes)?;
+    Ok(meta)
+}
+
+fn raster_limits(max_pixels: u64) -> image::Limits {
+    let max_dim = max_pixels.min(u32::MAX as u64) as u32;
+    let max_alloc = max_pixels.saturating_mul(4);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(max_dim);
+    limits.max_image_height = Some(max_dim);
+    limits.max_alloc = Some(max_alloc);
+    limits
+}
+
+fn build_og_variant(image: &DynamicImage, format: OutputFormat) -> DynamicImage {
+    let (src_width, src_height) = image.dimensions();
+    let scale = (FALLBACK_OG_WIDTH as f32 / src_width as f32)
+        .min(FALLBACK_OG_HEIGHT as f32 / src_height as f32);
+    let target_width = (src_width as f32 * scale).round().max(1.0) as u32;
+    let target_height = (src_height as f32 * scale).round().max(1.0) as u32;
+    let resized = image.resize_exact(target_width, target_height, FilterType::Lanczos3);
+    let background = match format {
+        OutputFormat::Jpeg => Rgba([255, 255, 255, 255]),
+        _ => Rgba([0, 0, 0, 0]),
+    };
+    let mut canvas = RgbaImage::from_pixel(FALLBACK_OG_WIDTH, FALLBACK_OG_HEIGHT, background);
+    let offset_x = (FALLBACK_OG_WIDTH - target_width) / 2;
+    let offset_y = (FALLBACK_OG_HEIGHT - target_height) / 2;
+    imageops::overlay(
+        &mut canvas,
+        &resized.to_rgba8(),
+        offset_x.into(),
+        offset_y.into(),
+    );
+    DynamicImage::ImageRgba8(canvas)
+}
+
+fn encode_fallback_image(image: &DynamicImage, format: OutputFormat) -> anyhow::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    match format {
+        OutputFormat::Webp => {
+            let rgba = image.to_rgba8();
+            let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
+            encoder.encode(
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
+                image::ColorType::Rgba8.into(),
+            )?;
+        }
+        OutputFormat::Png => {
+            image.write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png)?;
+        }
+        OutputFormat::Jpeg => {
+            let rgb = image.to_rgb8();
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
+            encoder.encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ColorType::Rgb8.into(),
+            )?;
+        }
+    }
+    Ok(bytes)
+}
+
+fn write_atomic(path: &StdPath, bytes: &[u8]) -> anyhow::Result<()> {
+    let tmp_path = path.with_extension("tmp");
+    let mut file = std::fs::File::create(&tmp_path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    std::fs::rename(tmp_path, path)?;
+    Ok(())
 }
 
 async fn list_rpc(
@@ -1664,9 +2109,12 @@ const ADMIN_HTML: &str = r#"<!doctype html>
 mod tests {
     use super::*;
     use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
+    use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, Rgba, RgbaImage};
     use std::collections::HashMap;
+    use std::io::Cursor;
     use std::path::PathBuf;
     use std::time::Duration;
+    use tempfile::tempdir;
 
     fn base_config() -> Config {
         Config {
@@ -1675,6 +2123,7 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path: PathBuf::from("renderer.db"),
             cache_dir: PathBuf::from("cache"),
+            fallbacks_dir: PathBuf::from("cache/fallbacks"),
             pinning_enabled: false,
             pinned_dir: PathBuf::from("pinned"),
             local_ipfs_enabled: false,
@@ -1724,6 +2173,8 @@ mod tests {
             max_background_length: 1,
             max_in_flight_requests: 1,
             max_admin_body_bytes: 1,
+            fallback_upload_max_bytes: 1,
+            fallback_upload_max_pixels: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,
@@ -1802,5 +2253,32 @@ mod tests {
             HeaderValue::from_static("Bearer wrong"),
         );
         assert!(!is_authorized(&config, &headers));
+    }
+
+    #[test]
+    fn generate_fallback_variants_write_meta_and_og() {
+        let dir = tempdir().unwrap();
+        let image = RgbaImage::from_pixel(8, 4, Rgba([10, 20, 30, 255]));
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+            .unwrap();
+
+        let meta = generate_and_write_fallback(dir.path().to_path_buf(), bytes, 1_000_000).unwrap();
+        assert_eq!(meta.source_width, 8);
+        assert_eq!(meta.source_height, 4);
+        assert!(meta.variants.iter().any(|name| name == "w512.png"));
+        assert!(meta.variants.iter().any(|name| name == "og.png"));
+
+        let og_bytes = std::fs::read(dir.path().join("og.png")).unwrap();
+        let og_image = ImageReader::new(Cursor::new(og_bytes))
+            .with_guessed_format()
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(
+            og_image.dimensions(),
+            (FALLBACK_OG_WIDTH, FALLBACK_OG_HEIGHT)
+        );
     }
 }

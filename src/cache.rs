@@ -1,8 +1,8 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
-use filetime::FileTime;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
+use filetime::FileTime;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -354,11 +354,7 @@ pub struct SingleflightPermit {
 }
 
 impl SingleflightPermit {
-    fn leader(
-        inner: Arc<DashMap<String, Arc<Notify>>>,
-        notify: Arc<Notify>,
-        key: String,
-    ) -> Self {
+    fn leader(inner: Arc<DashMap<String, Arc<Notify>>>, notify: Arc<Notify>, key: String) -> Self {
         Self {
             key,
             notify,
@@ -367,11 +363,7 @@ impl SingleflightPermit {
         }
     }
 
-    fn waiter(
-        inner: Arc<DashMap<String, Arc<Notify>>>,
-        notify: Arc<Notify>,
-        key: String,
-    ) -> Self {
+    fn waiter(inner: Arc<DashMap<String, Arc<Notify>>>, notify: Arc<Notify>, key: String) -> Self {
         Self {
             key,
             notify,

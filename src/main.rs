@@ -10,6 +10,7 @@ mod chain;
 mod config;
 mod db;
 mod failure_log;
+mod fallbacks;
 mod http;
 mod landing;
 mod local_ipfs;
@@ -297,6 +298,7 @@ mod tests {
             admin_password: "secret".to_string(),
             db_path,
             cache_dir,
+            fallbacks_dir: PathBuf::from("cache/fallbacks"),
             pinning_enabled: false,
             pinned_dir: PathBuf::from("pinned"),
             local_ipfs_enabled: false,
@@ -346,6 +348,8 @@ mod tests {
             max_background_length: 1,
             max_in_flight_requests: 1,
             max_admin_body_bytes: 1,
+            fallback_upload_max_bytes: 1,
+            fallback_upload_max_pixels: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,
