@@ -1,0 +1,66 @@
+{
+  "title": "Renderer Overview",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests/sec",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_http_requests_total[1m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error rate",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_render_requests_total{result=\"error\"}[5m])) / sum(rate(renderer_render_requests_total[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "p95/p99 render duration",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(renderer_render_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(renderer_render_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Cache hit rate",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_render_requests_total{result=\"cache_hit\"}[5m])) / sum(rate(renderer_render_requests_total[5m]))"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    }
+  ]
+}

@@ -40,6 +40,8 @@ pub struct Metrics {
     top_collection_request_last: Mutex<HashMap<String, u64>>,
     top_collection_bytes_last: Mutex<HashMap<String, u64>>,
     ip_label_mode: MetricsIpLabelMode,
+    expensive_cache: Mutex<ExpensiveMetricsCache>,
+    expensive_interval: Duration,
 }
 
 impl Metrics {
@@ -236,6 +238,8 @@ impl Metrics {
             top_collection_request_last: Mutex::new(HashMap::new()),
             top_collection_bytes_last: Mutex::new(HashMap::new()),
             ip_label_mode: config.metrics_ip_label_mode,
+            expensive_cache: Mutex::new(ExpensiveMetricsCache::default()),
+            expensive_interval: config.metrics_expensive_refresh_interval,
         }
     }
 
@@ -437,6 +441,14 @@ impl Drop for InflightGuard {
     }
 }
 
+#[derive(Default)]
+struct ExpensiveMetricsCache {
+    updated_at: Option<std::time::Instant>,
+    render_entries: u64,
+    fallback_entries: u64,
+    fallback_bytes: u64,
+}
+
 #[derive(Debug)]
 struct SpaceSaving {
     capacity: usize,
@@ -549,25 +561,25 @@ fn split_pair_label(label: &str) -> (&str, &str) {
 
 pub async fn refresh_metrics(state: &AppState) {
     let metrics = &state.metrics;
-    if let Ok((render_bytes, _asset_bytes)) = state.cache.cached_sizes().await {
+    if let Ok((render_bytes, asset_bytes)) = state.cache.cached_sizes().await {
         metrics.set_disk_bytes("render_cache", render_bytes);
+        metrics.set_disk_bytes("asset_cache", asset_bytes);
     }
-    if let Ok(bytes) = state.cache.scan_dir_size(&state.config.pinned_dir).await {
+    if let Ok(bytes) = state.db.pinned_asset_bytes().await {
         metrics.set_disk_bytes("pinned", bytes);
-    }
-    if let Ok(bytes) = state.cache.scan_dir_size(&state.config.fallbacks_dir).await {
-        metrics.set_disk_bytes("fallbacks", bytes);
     }
     if let Ok(metadata) = tokio::fs::metadata(&state.config.db_path).await {
         metrics.set_disk_bytes("db", metadata.len());
     }
 
-    let render_entries = count_files(&state.cache.renders_dir).await;
-    let pinned_entries = count_files(&state.config.pinned_dir).await;
-    let fallback_entries = count_files(&state.config.fallbacks_dir).await;
+    if let Ok(counts) = state.db.pinned_asset_counts().await {
+        metrics.set_cache_entries("pinned_assets", counts.pinned as u64);
+    }
+    let (render_entries, fallback_entries, fallback_bytes) =
+        refresh_expensive_metrics(state, metrics).await;
     metrics.set_cache_entries("render_cache", render_entries);
-    metrics.set_cache_entries("pinned_assets", pinned_entries);
     metrics.set_cache_entries("fallback_variants", fallback_entries);
+    metrics.set_disk_bytes("fallbacks", fallback_bytes);
 
     metrics.set_semaphore_in_use(
         "render",
@@ -605,6 +617,57 @@ pub async fn refresh_metrics(state: &AppState) {
     }
 
     metrics.flush_topk();
+}
+
+async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64, u64, u64) {
+    if metrics.expensive_interval.is_zero() {
+        let cache = metrics
+            .expensive_cache
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        return (
+            cache.render_entries,
+            cache.fallback_entries,
+            cache.fallback_bytes,
+        );
+    }
+    let (should_refresh, cached_values) = {
+        let cache = metrics
+            .expensive_cache
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let should_refresh = cache
+            .updated_at
+            .map(|updated| updated.elapsed() >= metrics.expensive_interval)
+            .unwrap_or(true);
+        (
+            should_refresh,
+            (
+                cache.render_entries,
+                cache.fallback_entries,
+                cache.fallback_bytes,
+            ),
+        )
+    };
+    if !should_refresh {
+        return cached_values;
+    }
+    let render_entries = count_files(&state.cache.renders_dir).await;
+    let fallback_entries = count_files(&state.config.fallbacks_dir).await;
+    let fallback_bytes = state
+        .cache
+        .scan_dir_size(&state.config.fallbacks_dir)
+        .await
+        .unwrap_or(0);
+    let mut cache = metrics
+        .expensive_cache
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
+    cache.render_entries = render_entries;
+    cache.fallback_entries = fallback_entries;
+    cache.fallback_bytes = fallback_bytes;
+    cache.updated_at = Some(std::time::Instant::now());
+    (render_entries, fallback_entries, fallback_bytes)
 }
 
 fn semaphore_in_use(max: usize, semaphore: &Semaphore) -> i64 {

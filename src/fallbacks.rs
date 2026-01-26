@@ -89,6 +89,9 @@ pub fn safe_dir_segment(value: &str, max_len: usize, label: &str) -> Result<Stri
     if trimmed.is_empty() {
         return Err(anyhow!("invalid {label} segment"));
     }
+    if trimmed == "." || trimmed == ".." {
+        return Err(anyhow!("invalid {label} segment"));
+    }
     if trimmed.len() > max_len {
         return Err(anyhow!("{label} segment too long"));
     }
@@ -144,6 +147,9 @@ fn safe_token_segment(token_id: &str) -> Result<String> {
     }
     let trimmed = out.trim_matches('-').to_string();
     if trimmed.is_empty() {
+        return Err(anyhow!("invalid token_id segment"));
+    }
+    if trimmed == "." || trimmed == ".." {
         return Err(anyhow!("invalid token_id segment"));
     }
     if trimmed.len() > 128 {

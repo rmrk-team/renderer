@@ -3157,6 +3157,19 @@ impl Database {
         })
     }
 
+    pub async fn pinned_asset_bytes(&self) -> Result<u64> {
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(SUM(size_bytes), 0) as total_bytes
+            FROM pinned_assets
+            WHERE status = 'pinned'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>("total_bytes").max(0) as u64)
+    }
+
     pub async fn list_hash_replacements(&self) -> Result<Vec<HashReplacement>> {
         let rows = sqlx::query(
             r#"
@@ -3362,6 +3375,9 @@ mod tests {
             metrics_top_collections: 0,
             metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
             metrics_refresh_interval: std::time::Duration::from_secs(1),
+            metrics_expensive_refresh_interval: std::time::Duration::from_secs(1),
+            token_override_cache_ttl: std::time::Duration::from_secs(1),
+            token_override_cache_capacity: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,

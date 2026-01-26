@@ -11,6 +11,22 @@ docker compose -f docker-compose.metrics.yml up -d
 By default Prometheus scrapes `host.docker.internal:8080`. If your renderer runs on a different
 port, update `metrics/prometheus.yml`.
 
+Security defaults:
+
+- The compose file binds Prometheus, Grafana, and node_exporter to `127.0.0.1`.
+- Anonymous Grafana access is disabled.
+- Set `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` before first start.
+- Do not expose these ports publicly; use SSH tunneling or a reverse proxy with auth if needed.
+
+Performance note:
+
+- `METRICS_REFRESH_INTERVAL_SECONDS` controls the cheap refresh loop (set to `0` to disable).
+- `METRICS_EXPENSIVE_REFRESH_SECONDS` controls disk scans for fallback/render counts (defaults to 300s).
+
+Grafana provisioning:
+
+- The compose file mounts `metrics/dashboards/renderer-overview.json` and auto-provisions it.
+
 ## Non-Docker setup (production-friendly)
 
 1. Install Prometheus + Grafana (OS packages or upstream binaries).
@@ -52,6 +68,7 @@ scrape_configs:
 
 ### Cache
 - Render cache bytes: `renderer_disk_bytes{path="render_cache"}`
+- Asset cache bytes: `renderer_disk_bytes{path="asset_cache"}`
 - Pinned bytes: `renderer_disk_bytes{path="pinned"}`
 - Fallback bytes: `renderer_disk_bytes{path="fallbacks"}`
 - Cache entries: `renderer_cache_entries`

@@ -942,6 +942,8 @@ async fn upload_token_override(
             payload.reason.as_deref(),
         )
         .await?;
+    let cache_key = crate::state::token_override_cache_key(&chain, &collection, &token_id);
+    state.token_override_cache.invalidate(&cache_key).await;
     Ok(Json(serde_json::json!({
         "status": "ok",
         "override": override_row,
@@ -958,8 +960,13 @@ async fn delete_token_override(
         .db
         .delete_token_override(&chain, &collection, &token_id)
         .await?;
-    if let Some(row) = removed.as_ref() {
-        let dir = PathBuf::from(&row.override_dir);
+    let cache_key = crate::state::token_override_cache_key(&chain, &collection, &token_id);
+    state.token_override_cache.invalidate(&cache_key).await;
+    if removed.is_some() {
+        let dir = token_override_dir(&state.config, &chain, &collection, &token_id)?;
+        if !dir.starts_with(&state.config.fallbacks_dir) {
+            return Err(AdminError::bad_request("invalid override path"));
+        }
         if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
             warn!(error = ?err, path = %dir.display(), "failed to remove override dir");
         }
@@ -2182,6 +2189,9 @@ mod tests {
             metrics_top_collections: 0,
             metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
             metrics_refresh_interval: Duration::from_secs(1),
+            metrics_expensive_refresh_interval: Duration::from_secs(1),
+            token_override_cache_ttl: Duration::from_secs(1),
+            token_override_cache_capacity: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,

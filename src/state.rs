@@ -44,6 +44,7 @@ pub struct AppState {
     pub api_key_cache: ApiKeyCache,
     pub primary_asset_cache: PrimaryAssetCache,
     pub approval_negative_cache: ApprovalNegativeCache,
+    pub token_override_cache: TokenOverrideCache,
     pub ip_rules: IpRuleCache,
     pub require_approval_cache: RequireApprovalCache,
     pub collection_config_cache: CollectionConfigCache,
@@ -99,6 +100,10 @@ impl AppState {
             Duration::from_secs(config.approval_negative_cache_seconds),
             config.approval_negative_cache_capacity,
         );
+        let token_override_cache = TokenOverrideCache::new(
+            config.token_override_cache_ttl,
+            config.token_override_cache_capacity,
+        );
         let ip_rules = IpRuleCache::new();
         let require_approval_cache = RequireApprovalCache::new(REQUIRE_APPROVAL_CACHE_TTL);
         let collection_config_cache = CollectionConfigCache::new(
@@ -138,6 +143,7 @@ impl AppState {
             api_key_cache,
             primary_asset_cache,
             approval_negative_cache,
+            token_override_cache,
             ip_rules,
             require_approval_cache,
             collection_config_cache,
@@ -240,6 +246,13 @@ pub struct ApprovalNegativeCache {
 }
 
 #[derive(Clone)]
+pub struct TokenOverrideCache {
+    ttl: Duration,
+    capacity: usize,
+    inner: Arc<Mutex<TokenOverrideCacheInner>>,
+}
+
+#[derive(Clone)]
 pub struct RequireApprovalCache {
     ttl: Duration,
     inner: Arc<Mutex<Option<CachedBool>>>,
@@ -247,6 +260,22 @@ pub struct RequireApprovalCache {
 
 struct CachedBool {
     value: bool,
+    expires_at: Instant,
+}
+
+#[derive(Clone)]
+pub struct TokenOverrideEntry {
+    pub enabled: bool,
+    pub override_dir: String,
+}
+
+struct TokenOverrideCacheInner {
+    map: HashMap<String, CachedTokenOverride>,
+    order: VecDeque<String>,
+}
+
+struct CachedTokenOverride {
+    value: Option<TokenOverrideEntry>,
     expires_at: Instant,
 }
 
@@ -559,6 +588,78 @@ impl ApprovalNegativeCache {
             if let Some(oldest) = inner.order.pop_front() {
                 inner.map.remove(&oldest);
             }
+        }
+    }
+}
+
+impl TokenOverrideCache {
+    pub fn new(ttl: Duration, capacity: usize) -> Self {
+        Self {
+            ttl,
+            capacity,
+            inner: Arc::new(Mutex::new(TokenOverrideCacheInner {
+                map: HashMap::new(),
+                order: VecDeque::new(),
+            })),
+        }
+    }
+
+    pub async fn get(&self, key: &str) -> Option<Option<TokenOverrideEntry>> {
+        if self.capacity == 0 || self.ttl.is_zero() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut inner = self.inner.lock().await;
+        let mut expired = false;
+        let value = if let Some(entry) = inner.map.get(key) {
+            if entry.expires_at <= now {
+                expired = true;
+                None
+            } else {
+                Some(entry.value.clone())
+            }
+        } else {
+            None
+        };
+        if expired {
+            inner.map.remove(key);
+            inner.order.retain(|item| item != key);
+            return None;
+        }
+        if let Some(value) = value {
+            touch_key(&mut inner.order, key);
+            return Some(value);
+        }
+        None
+    }
+
+    pub async fn insert(&self, key: String, value: Option<TokenOverrideEntry>) {
+        if self.capacity == 0 || self.ttl.is_zero() {
+            return;
+        }
+        let mut inner = self.inner.lock().await;
+        if inner.map.contains_key(&key) {
+            inner.order.retain(|item| item != &key);
+        }
+        inner.order.push_back(key.clone());
+        inner.map.insert(
+            key.clone(),
+            CachedTokenOverride {
+                value,
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+        while inner.order.len() > self.capacity {
+            if let Some(oldest) = inner.order.pop_front() {
+                inner.map.remove(&oldest);
+            }
+        }
+    }
+
+    pub async fn invalidate(&self, key: &str) {
+        let mut inner = self.inner.lock().await;
+        if inner.map.remove(key).is_some() {
+            inner.order.retain(|item| item != key);
         }
     }
 }
@@ -899,6 +1000,10 @@ fn touch_key(order: &mut VecDeque<String>, key_hash: &str) {
 
 pub(crate) fn collection_cache_key(chain: &str, collection: &str) -> String {
     format!("{chain}:{collection}")
+}
+
+pub(crate) fn token_override_cache_key(chain: &str, collection: &str, token_id: &str) -> String {
+    format!("{chain}:{collection}:{token_id}")
 }
 
 #[derive(Clone)]

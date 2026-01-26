@@ -242,13 +242,15 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let metrics_state = state.clone();
-    tokio::spawn(async move {
-        loop {
-            metrics::refresh_metrics(&metrics_state).await;
-            tokio::time::sleep(metrics_state.config.metrics_refresh_interval).await;
-        }
-    });
+    if !state.config.metrics_refresh_interval.is_zero() {
+        let metrics_state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                metrics::refresh_metrics(&metrics_state).await;
+                tokio::time::sleep(metrics_state.config.metrics_refresh_interval).await;
+            }
+        });
+    }
 
     if let Some(usage_rx) = usage_rx {
         let usage_db = state.db.clone();
@@ -369,6 +371,9 @@ mod tests {
             metrics_top_collections: 0,
             metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
             metrics_refresh_interval: Duration::from_secs(1),
+            metrics_expensive_refresh_interval: Duration::from_secs(1),
+            token_override_cache_ttl: Duration::from_secs(1),
+            token_override_cache_capacity: 1,
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,

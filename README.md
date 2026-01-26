@@ -101,7 +101,6 @@ access is granted when any of the following are true:
 - admin bearer auth is presented (`METRICS_REQUIRE_ADMIN_KEY=true`)
 
 See `metrics/README.md` for dashboards, Docker compose, and non-Docker setup guidance.
-Specification details live in `spec-docs/MINI_GRAFANA.md`.
 
 Minimal non-Docker steps:
 
@@ -110,6 +109,12 @@ Minimal non-Docker steps:
    - allowlist `METRICS_ALLOW_IPS=127.0.0.1/32`, or
    - use a bearer token in the scrape config.
 3. Add Prometheus as a Grafana datasource and use the panel queries from `metrics/README.md`.
+
+Security note: `docker-compose.metrics.yml` binds ports to `127.0.0.1` and disables anonymous
+Grafana access by default. Avoid public exposure without an authenticated proxy.
+
+Performance note: `METRICS_REFRESH_INTERVAL_SECONDS` controls cheap gauges (set `0` to disable),
+and `METRICS_EXPENSIVE_REFRESH_SECONDS` controls disk scans (default 300s).
 
 AccessMode semantics:
 
@@ -699,7 +704,10 @@ Images are processed on upload (size limits + re-encoding), stored under `FALLBA
 and served directly from disk with consistent `ETag` + cache headers. Authorized clients
 can still bypass fallbacks with `?debug=1`/`?raw=1` to see JSON errors.
 
-See `spec-docs/MINI_OVERRIDE.md` for detailed behavior and endpoints.
+Token override lookups are cached in memory; tune with
+`TOKEN_OVERRIDE_CACHE_TTL_SECONDS` and `TOKEN_OVERRIDE_CACHE_CAPACITY`.
+
+See `spec-docs/RENDERER_SPEC_v1.2_UPDATED.md` for full behavior and endpoints.
 
 ## Build & Deploy
 

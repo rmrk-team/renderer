@@ -12,7 +12,7 @@ use crate::render::{
     ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
     RenderRequest, render_token_with_limit_checked,
 };
-use crate::state::AppState;
+use crate::state::{AppState, TokenOverrideEntry, token_override_cache_key};
 use crate::usage::UsageEvent;
 use crate::{admin, render};
 use axum::body::Body;
@@ -39,6 +39,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use tokio_util::io::ReaderStream;
+use tracing::warn;
 
 const OPENAPI_YAML: &str = include_str!("../openapi.yaml");
 const MAX_FORWARDED_IPS: usize = 20;
@@ -259,6 +260,11 @@ async fn metrics(
         HeaderValue::from_str(encoder.format_type())
             .unwrap_or(HeaderValue::from_static("text/plain; version=0.0.4")),
     );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        "X-Content-Type-Options",
+        HeaderValue::from_static("nosniff"),
+    );
     headers.insert(
         header::CONTENT_LENGTH,
         HeaderValue::from_str(&body.len().to_string()).unwrap_or(HeaderValue::from_static("0")),
@@ -358,7 +364,8 @@ async fn render_canonical(
     {
         if !prefer_json {
             if let Some(response) =
-                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                    .await
             {
                 record_render_metrics(
                     &state,
@@ -374,7 +381,7 @@ async fn render_canonical(
         return Err(map_render_error(err));
     }
     if !prefer_json {
-        if let Some(response) = resolve_token_override(&state, &request).await {
+        if let Some(response) = resolve_token_override(&state, &request, &headers).await {
             record_render_metrics(
                 &state,
                 &response,
@@ -400,7 +407,8 @@ async fn render_canonical(
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
-                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                    fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                        .await
                 {
                     record_render_metrics(
                         &state,
@@ -522,7 +530,8 @@ async fn render_og(
     {
         if !prefer_json {
             if let Some(response) =
-                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                    .await
             {
                 record_render_metrics(
                     &state,
@@ -538,7 +547,7 @@ async fn render_og(
         return Err(map_render_error(err));
     }
     if !prefer_json {
-        if let Some(response) = resolve_token_override(&state, &request).await {
+        if let Some(response) = resolve_token_override(&state, &request, &headers).await {
             record_render_metrics(
                 &state,
                 &response,
@@ -564,7 +573,8 @@ async fn render_og(
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
-                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                    fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                        .await
                 {
                     record_render_metrics(
                         &state,
@@ -685,7 +695,8 @@ async fn render_legacy(
     {
         if !prefer_json {
             if let Some(response) =
-                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                    .await
             {
                 record_render_metrics(
                     &state,
@@ -701,7 +712,7 @@ async fn render_legacy(
         return Err(map_render_error(err));
     }
     if !prefer_json {
-        if let Some(response) = resolve_token_override(&state, &request).await {
+        if let Some(response) = resolve_token_override(&state, &request, &headers).await {
             record_render_metrics(
                 &state,
                 &response,
@@ -727,7 +738,8 @@ async fn render_legacy(
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
-                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                    fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                        .await
                 {
                     record_render_metrics(
                         &state,
@@ -820,7 +832,8 @@ async fn render_primary(
     {
         if !prefer_json {
             if let Some(response) =
-                fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                    .await
             {
                 record_render_metrics(
                     &state,
@@ -836,7 +849,7 @@ async fn render_primary(
         return Err(map_render_error(err));
     }
     if !prefer_json {
-        if let Some(response) = resolve_token_override(&state, &request).await {
+        if let Some(response) = resolve_token_override(&state, &request, &headers).await {
             record_render_metrics(
                 &state,
                 &response,
@@ -1801,6 +1814,7 @@ async fn fallback_file_response(
     cache_control: &str,
     complete: bool,
     retry_after_seconds: Option<u64>,
+    request_headers: &HeaderMap,
 ) -> Option<Response> {
     let file = load_fallback_variant(dir, format, width_param, og_mode).await?;
     let mut headers = HeaderMap::new();
@@ -1835,10 +1849,18 @@ async fn fallback_file_response(
         "X-Renderer-Fallback-Source",
         HeaderValue::from_str(fallback_source).unwrap_or(HeaderValue::from_static("unknown")),
     );
+    headers.insert(
+        "X-Renderer-Error-Code",
+        HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
     if let Some(retry_after) = retry_after_seconds {
         let value = HeaderValue::from_str(&retry_after.to_string())
             .unwrap_or(HeaderValue::from_static("5"));
         headers.insert(header::RETRY_AFTER, value);
+    }
+    if if_none_match_matches(request_headers, &file.etag) {
+        headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("0"));
+        return Some((StatusCode::NOT_MODIFIED, headers).into_response());
     }
     match tokio::fs::File::open(&file.path).await {
         Ok(file) => {
@@ -1851,6 +1873,20 @@ async fn fallback_file_response(
             None
         }
     }
+}
+
+fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
+    let value = match headers.get(header::IF_NONE_MATCH) {
+        Some(value) => value.to_str().unwrap_or(""),
+        None => return false,
+    };
+    if value.trim() == "*" {
+        return true;
+    }
+    value
+        .split(',')
+        .map(|item| item.trim())
+        .any(|item| item == etag)
 }
 
 async fn fallback_head_from_dir(
@@ -1955,17 +1991,12 @@ async fn resolve_token_override_head(
     state: &AppState,
     request: &RenderRequest,
 ) -> Option<Response> {
-    let override_row = state
-        .db
-        .get_token_override(&request.chain, &request.collection, &request.token_id)
-        .await
-        .ok()
-        .flatten()?;
-    if !override_row.enabled {
+    let override_entry = token_override_cached(state, request).await?;
+    if !override_entry.enabled {
         return None;
     }
     fallback_head_from_dir(
-        StdPath::new(&override_row.override_dir),
+        StdPath::new(&override_entry.override_dir),
         &request.format,
         &request.width_param,
         request.og_mode,
@@ -1981,6 +2012,7 @@ async fn resolve_token_override_head(
 async fn resolve_unapproved_fallback(
     state: &AppState,
     request: &RenderRequest,
+    headers: &HeaderMap,
 ) -> Option<Response> {
     let config = state
         .db
@@ -2001,6 +2033,7 @@ async fn resolve_unapproved_fallback(
                     "public, max-age=60",
                     false,
                     None,
+                    headers,
                 )
                 .await
                 {
@@ -2020,6 +2053,7 @@ async fn resolve_unapproved_fallback(
         "public, max-age=60",
         false,
         None,
+        headers,
     )
     .await
 }
@@ -2027,6 +2061,7 @@ async fn resolve_unapproved_fallback(
 async fn resolve_render_failure_fallback(
     state: &AppState,
     request: &RenderRequest,
+    headers: &HeaderMap,
 ) -> Option<Response> {
     let config = state
         .db
@@ -2047,6 +2082,7 @@ async fn resolve_render_failure_fallback(
                     "public, max-age=300",
                     false,
                     None,
+                    headers,
                 )
                 .await;
             }
@@ -2055,18 +2091,17 @@ async fn resolve_render_failure_fallback(
     None
 }
 
-async fn resolve_token_override(state: &AppState, request: &RenderRequest) -> Option<Response> {
-    let override_row = state
-        .db
-        .get_token_override(&request.chain, &request.collection, &request.token_id)
-        .await
-        .ok()
-        .flatten()?;
-    if !override_row.enabled {
+async fn resolve_token_override(
+    state: &AppState,
+    request: &RenderRequest,
+    headers: &HeaderMap,
+) -> Option<Response> {
+    let override_entry = token_override_cached(state, request).await?;
+    if !override_entry.enabled {
         return None;
     }
     fallback_file_response(
-        StdPath::new(&override_row.override_dir),
+        StdPath::new(&override_entry.override_dir),
         &request.format,
         &request.width_param,
         request.og_mode,
@@ -2075,25 +2110,59 @@ async fn resolve_token_override(state: &AppState, request: &RenderRequest) -> Op
         "public, max-age=3600",
         true,
         None,
+        headers,
     )
     .await
+}
+
+async fn token_override_cached(
+    state: &AppState,
+    request: &RenderRequest,
+) -> Option<TokenOverrideEntry> {
+    let cache_key =
+        token_override_cache_key(&request.chain, &request.collection, &request.token_id);
+    if let Some(cached) = state.token_override_cache.get(&cache_key).await {
+        return cached;
+    }
+    let row = state
+        .db
+        .get_token_override(&request.chain, &request.collection, &request.token_id)
+        .await
+        .ok()
+        .flatten();
+    let value = row.and_then(|row| {
+        let dir = PathBuf::from(&row.override_dir);
+        if !dir.starts_with(&state.config.fallbacks_dir) {
+            warn!(
+                path = %dir.display(),
+                "token override path outside fallbacks dir"
+            );
+            return None;
+        }
+        Some(TokenOverrideEntry {
+            enabled: row.enabled,
+            override_dir: row.override_dir,
+        })
+    });
+    state
+        .token_override_cache
+        .insert(cache_key, value.clone())
+        .await;
+    value
 }
 
 async fn fallback_for_render_error(
     state: &AppState,
     request: &RenderRequest,
     placeholder_width: &Option<String>,
+    headers: &HeaderMap,
     error: &anyhow::Error,
 ) -> Option<Response> {
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return match approval_error {
             render::ApprovalCheckError::NotApproved => {
-                if let Some(response) = resolve_unapproved_fallback(state, request).await {
-                    Some(response)
-                } else {
-                    None
-                }
+                resolve_unapproved_fallback(state, request, headers).await
             }
             render::ApprovalCheckError::RateLimited {
                 retry_after_seconds,
@@ -2124,7 +2193,7 @@ async fn fallback_for_render_error(
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return Some(queued_fallback_response(&request.format, width, height, 5).await);
     }
-    resolve_render_failure_fallback(state, request).await
+    resolve_render_failure_fallback(state, request, headers).await
 }
 
 fn fallback_head_response(
@@ -3311,6 +3380,7 @@ mod tests {
             "public, max-age=60",
             false,
             None,
+            &HeaderMap::new(),
         )
         .await
         .expect("fallback response");
@@ -3349,6 +3419,47 @@ mod tests {
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body, "hello");
+    }
+
+    #[tokio::test]
+    async fn fallback_file_response_honors_if_none_match() {
+        let dir = tempdir().unwrap();
+        let meta = FallbackMeta {
+            updated_at_ms: 123,
+            source_sha256: "deadbeef".to_string(),
+            source_width: 10,
+            source_height: 20,
+            variants: vec!["w512.png".to_string()],
+        };
+        let meta_bytes = serde_json::to_vec(&meta).unwrap();
+        std::fs::write(dir.path().join("meta.json"), meta_bytes).unwrap();
+        std::fs::write(dir.path().join("w512.png"), b"hello").unwrap();
+
+        let expected_etag = fallback_etag(&meta, "w512", &OutputFormat::Png);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&expected_etag).unwrap(),
+        );
+
+        let response = fallback_file_response(
+            dir.path(),
+            &OutputFormat::Png,
+            &None,
+            false,
+            "unapproved",
+            "global",
+            "public, max-age=60",
+            false,
+            None,
+            &headers,
+        )
+        .await
+        .expect("fallback response");
+
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.is_empty());
     }
 
     #[tokio::test]
@@ -3654,6 +3765,7 @@ fn classify_render_response(response: &Response) -> &'static str {
                 "render_fallback" => "render_fallback",
                 "queued" => "queue_full",
                 "approval_rate_limited" => "rate_limited",
+                "approval_stale" => "approval_stale",
                 _ => "error",
             };
         }

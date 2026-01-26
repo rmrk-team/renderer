@@ -75,6 +75,9 @@ pub struct Config {
     pub metrics_top_collections: usize,
     pub metrics_ip_label_mode: MetricsIpLabelMode,
     pub metrics_refresh_interval: Duration,
+    pub metrics_expensive_refresh_interval: Duration,
+    pub token_override_cache_ttl: Duration,
+    pub token_override_cache_capacity: usize,
     pub rate_limit_per_minute: u64,
     pub rate_limit_burst: u64,
     pub auth_failure_rate_limit_per_minute: u64,
@@ -322,7 +325,12 @@ impl Config {
         let metrics_top_collections = parse_usize("METRICS_TOP_COLLECTIONS", 50);
         let metrics_ip_label_mode = parse_metrics_ip_label_mode("METRICS_IP_LABEL_MODE");
         let metrics_refresh_interval =
-            Duration::from_secs(parse_u64("METRICS_REFRESH_INTERVAL_SECONDS", 10).max(1));
+            Duration::from_secs(parse_u64("METRICS_REFRESH_INTERVAL_SECONDS", 10));
+        let metrics_expensive_refresh_interval =
+            Duration::from_secs(parse_u64("METRICS_EXPENSIVE_REFRESH_SECONDS", 300));
+        let token_override_cache_ttl =
+            Duration::from_secs(parse_u64("TOKEN_OVERRIDE_CACHE_TTL_SECONDS", 30));
+        let token_override_cache_capacity = parse_usize("TOKEN_OVERRIDE_CACHE_CAPACITY", 100_000);
         let rate_limit_per_minute = parse_u64("RATE_LIMIT_PER_MINUTE", 0);
         let rate_limit_burst = parse_u64("RATE_LIMIT_BURST", 0);
         let auth_failure_rate_limit_per_minute = parse_u64("AUTH_FAILURE_RATE_LIMIT_PER_MINUTE", 0);
@@ -476,6 +484,9 @@ impl Config {
             metrics_top_collections,
             metrics_ip_label_mode,
             metrics_refresh_interval,
+            metrics_expensive_refresh_interval,
+            token_override_cache_ttl,
+            token_override_cache_capacity,
             rate_limit_per_minute,
             rate_limit_burst,
             auth_failure_rate_limit_per_minute,
