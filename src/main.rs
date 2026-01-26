@@ -14,6 +14,7 @@ mod fallbacks;
 mod http;
 mod landing;
 mod local_ipfs;
+mod metrics;
 mod pinning;
 mod rate_limit;
 mod render;
@@ -138,6 +139,7 @@ async fn main() -> anyhow::Result<()> {
     http::init_placeholder_cache(&config);
     let db = Database::new(&config).await?;
     let cache = CacheManager::new(&config)?;
+    let metrics = Arc::new(metrics::Metrics::new(&config));
     let pinned_store = Arc::new(PinnedAssetStore::new(&config)?);
     if config.local_ipfs_enabled && config.pinning_enabled {
         let local_addr = format!("{}:{}", config.local_ipfs_bind, config.local_ipfs_port);
@@ -168,8 +170,9 @@ async fn main() -> anyhow::Result<()> {
         db.clone(),
         Some(pinned_store.clone()),
         ipfs_semaphore.clone(),
+        metrics.clone(),
     )?;
-    let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
+    let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
     let (usage_tx, usage_rx) = if usage_tracking_enabled {
         let capacity = usage_channel_capacity.max(1);
         let (tx, rx) = mpsc::channel(capacity);
@@ -194,6 +197,7 @@ async fn main() -> anyhow::Result<()> {
         cache.clone(),
         assets,
         chain,
+        metrics,
         usage_tx,
         render_queue_tx,
         failure_log,
@@ -235,6 +239,14 @@ async fn main() -> anyhow::Result<()> {
                 warn!(error = ?err, "fresh request cleanup failed");
             }
             tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+        }
+    });
+
+    let metrics_state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            metrics::refresh_metrics(&metrics_state).await;
+            tokio::time::sleep(metrics_state.config.metrics_refresh_interval).await;
         }
     });
 
@@ -350,6 +362,13 @@ mod tests {
             max_admin_body_bytes: 1,
             fallback_upload_max_bytes: 1,
             fallback_upload_max_pixels: 1,
+            metrics_public: false,
+            metrics_require_admin_key: false,
+            metrics_allow_ips: Vec::new(),
+            metrics_top_ips: 0,
+            metrics_top_collections: 0,
+            metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
+            metrics_refresh_interval: Duration::from_secs(1),
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,
@@ -427,6 +446,7 @@ mod tests {
         );
         let db = Database::new(&config).await.unwrap();
         let cache = CacheManager::new(&config).unwrap();
+        let metrics = Arc::new(metrics::Metrics::new(&config));
         let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
         let assets = AssetResolver::new(
@@ -435,11 +455,12 @@ mod tests {
             db.clone(),
             Some(pinned_store),
             ipfs_semaphore,
+            metrics.clone(),
         )
         .unwrap();
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
+        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, None, None, None,
+            config, db, cache, assets, chain, metrics, None, None, None,
         ));
         let app = build_app(state);
         let response = app
@@ -457,6 +478,7 @@ mod tests {
         );
         let db = Database::new(&config).await.unwrap();
         let cache = CacheManager::new(&config).unwrap();
+        let metrics = Arc::new(metrics::Metrics::new(&config));
         let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
         let assets = AssetResolver::new(
@@ -465,11 +487,12 @@ mod tests {
             db.clone(),
             Some(pinned_store),
             ipfs_semaphore,
+            metrics.clone(),
         )
         .unwrap();
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
+        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, None, None, None,
+            config, db, cache, assets, chain, metrics, None, None, None,
         ));
         let app = build_app(state);
         let response = app

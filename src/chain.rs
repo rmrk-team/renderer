@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::db::{Database, RpcEndpoint};
+use crate::metrics::Metrics;
 use anyhow::{Context, Result, anyhow};
 use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -175,6 +176,7 @@ pub struct ChainClient {
     providers: Arc<Mutex<HashMap<String, Arc<Provider<Http>>>>>,
     endpoint_cache: Arc<Mutex<HashMap<String, Vec<RpcEndpoint>>>>,
     endpoint_health: Arc<Mutex<HashMap<String, EndpointHealth>>>,
+    metrics: Arc<Metrics>,
 }
 
 #[derive(Debug, Clone)]
@@ -184,13 +186,14 @@ struct EndpointHealth {
 }
 
 impl ChainClient {
-    pub fn new(config: Arc<Config>, db: Database) -> Self {
+    pub fn new(config: Arc<Config>, db: Database, metrics: Arc<Metrics>) -> Self {
         Self {
             config,
             db,
             providers: Arc::new(Mutex::new(HashMap::new())),
             endpoint_cache: Arc::new(Mutex::new(HashMap::new())),
             endpoint_health: Arc::new(Mutex::new(HashMap::new())),
+            metrics,
         }
     }
 
@@ -582,12 +585,17 @@ impl ChainClient {
                     continue;
                 }
             };
-            match f(provider).await {
+            let started = Instant::now();
+            let result = f(provider).await;
+            self.metrics
+                .observe_fetch_duration("rpc", started.elapsed());
+            match result {
                 Ok(result) => {
                     self.record_endpoint_success(&endpoint.url);
                     return Ok(result);
                 }
                 Err(err) => {
+                    self.metrics.observe_upstream_failure("rpc_call");
                     warn!(endpoint = %endpoint.url, error = ?err, "rpc endpoint call failed");
                     if !should_retry(&err) {
                         return Err(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
@@ -768,6 +776,13 @@ mod tests {
             max_admin_body_bytes: 1,
             fallback_upload_max_bytes: 1,
             fallback_upload_max_pixels: 1,
+            metrics_public: false,
+            metrics_require_admin_key: false,
+            metrics_allow_ips: Vec::new(),
+            metrics_top_ips: 0,
+            metrics_top_collections: 0,
+            metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
+            metrics_refresh_interval: Duration::from_secs(1),
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,
@@ -870,7 +885,8 @@ mod tests {
             rpc_connect_timeout_seconds,
         );
         let db = Database::new(&config).await.unwrap();
-        let client = ChainClient::new(Arc::new(config), db);
+        let metrics = Arc::new(crate::metrics::Metrics::new(&config));
+        let client = ChainClient::new(Arc::new(config), db, metrics);
 
         let asset_id = client
             .get_top_asset_id("base", &collection, &token_id)

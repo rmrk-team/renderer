@@ -760,6 +760,7 @@ pub(crate) async fn render_token_uncached(
     let mut total_raster_pixels = 0u64;
     let mut cache_allowed = true;
     if canvas.is_none() {
+        let fetch_started = Instant::now();
         let (compose, fallback_used) = load_compose_for_request(
             state,
             &request.chain,
@@ -919,9 +920,21 @@ pub(crate) async fn render_token_uncached(
                             .await?
                         {
                             let max_pixels = state.config.max_decoded_raster_pixels;
-                            let image =
-                                task::spawn_blocking(move || decode_raster(&bytes, max_pixels))
-                                    .await??;
+                            let image = match task::spawn_blocking(move || {
+                                decode_raster(&bytes, max_pixels)
+                            })
+                            .await
+                            {
+                                Ok(Ok(image)) => image,
+                                Ok(Err(err)) => {
+                                    state.metrics.observe_upstream_failure("decode");
+                                    return Err(err);
+                                }
+                                Err(err) => {
+                                    state.metrics.observe_upstream_failure("decode");
+                                    return Err(anyhow!("decode raster task failed: {err}"));
+                                }
+                            };
                             composite_from_cache = true;
                             canvas = Some(image);
                         }
@@ -1039,7 +1052,11 @@ pub(crate) async fn render_token_uncached(
                 nonconforming_layers,
                 "layer load summary"
             );
+            state
+                .metrics
+                .observe_render_duration("fetch_assets", fetch_started.elapsed());
 
+            let compose_started = Instant::now();
             let mut base = RgbaImage::from_pixel(
                 canvas_width,
                 canvas_height,
@@ -1048,6 +1065,9 @@ pub(crate) async fn render_token_uncached(
             for layer in layers_to_composite {
                 image::imageops::overlay(&mut base, &layer.image, layer.offset_x, layer.offset_y);
             }
+            state
+                .metrics
+                .observe_render_duration("compose", compose_started.elapsed());
             canvas = Some(base);
         }
     }
@@ -1058,8 +1078,9 @@ pub(crate) async fn render_token_uncached(
     let output_format = request.format;
     let should_store_composite =
         !composite_from_cache && composite_key.is_some() && missing_layers == 0;
+    let encode_started = Instant::now();
     let (bytes, composite_bytes) =
-        task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+        match task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
             let composite_bytes = if should_store_composite {
                 let mut bytes = Vec::new();
                 let encoder = PngEncoder::new_with_quality(
@@ -1088,7 +1109,21 @@ pub(crate) async fn render_token_uncached(
             let bytes = encode_image(final_image, &output_format)?;
             Ok((bytes, composite_bytes))
         })
-        .await??;
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(err)) => {
+                state.metrics.observe_upstream_failure("encode");
+                return Err(err);
+            }
+            Err(err) => {
+                state.metrics.observe_upstream_failure("encode");
+                return Err(anyhow!("encode task failed: {err}"));
+            }
+        };
+    state
+        .metrics
+        .observe_render_duration("encode", encode_started.elapsed());
     if let (Some(key), Some(bytes)) = (composite_key, composite_bytes) {
         let _ = state.cache.store_file(&key.path, &bytes).await;
     }
@@ -2489,6 +2524,7 @@ async fn rasterize_bytes(
             {
                 Ok(Ok(image)) => return Ok((image, false)),
                 Ok(Err(_)) | Err(_) => {
+                    assets.observe_upstream_failure("decode");
                     let _ = assets
                         .remove_raster_cache(&cache_key, canvas_width, canvas_height)
                         .await;
@@ -2496,32 +2532,56 @@ async fn rasterize_bytes(
             }
         }
         let svg_bytes = bytes.to_vec();
-        let (image, png_bytes) = task::spawn_blocking(move || -> Result<(RgbaImage, Vec<u8>)> {
-            let tree = parse_svg(
-                &svg_bytes,
-                max_svg_bytes,
-                max_svg_nodes,
-                max_raster_bytes,
-                max_decoded_raster_pixels,
-            )?;
-            let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
-            let image = RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
-                .ok_or_else(|| anyhow!("failed to build raster image"))?;
-            let mut png_bytes = Vec::new();
-            image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
-            Ok((image, png_bytes))
-        })
-        .await??;
+        let (image, png_bytes) =
+            match task::spawn_blocking(move || -> Result<(RgbaImage, Vec<u8>)> {
+                let tree = parse_svg(
+                    &svg_bytes,
+                    max_svg_bytes,
+                    max_svg_nodes,
+                    max_raster_bytes,
+                    max_decoded_raster_pixels,
+                )?;
+                let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
+                let image =
+                    RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
+                        .ok_or_else(|| anyhow!("failed to build raster image"))?;
+                let mut png_bytes = Vec::new();
+                image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+                Ok((image, png_bytes))
+            })
+            .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(err)) => {
+                    assets.observe_upstream_failure("svg_parse");
+                    return Err(err);
+                }
+                Err(err) => {
+                    assets.observe_upstream_failure("svg_parse");
+                    return Err(anyhow!("svg parse task failed: {err}"));
+                }
+            };
         assets
             .store_raster_cache(&cache_key, canvas_width, canvas_height, &png_bytes)
             .await?;
         return Ok((image, false));
     }
     let bytes = bytes.to_vec();
-    let image = task::spawn_blocking(move || -> Result<RgbaImage> {
+    let image = match task::spawn_blocking(move || -> Result<RgbaImage> {
         decode_raster(&bytes, max_decoded_raster_pixels)
     })
-    .await??;
+    .await
+    {
+        Ok(Ok(image)) => image,
+        Ok(Err(err)) => {
+            assets.observe_upstream_failure("decode");
+            return Err(err);
+        }
+        Err(err) => {
+            assets.observe_upstream_failure("decode");
+            return Err(anyhow!("decode raster task failed: {err}"));
+        }
+    };
     let nonconforming = image.width() != canvas_width || image.height() != canvas_height;
     Ok((image, nonconforming))
 }
@@ -3517,6 +3577,7 @@ mod tests {
         let config = Config::from_env().context("config")?;
         let db = Database::new(&config).await.context("db")?;
         let cache = CacheManager::new(&config).context("cache")?;
+        let metrics = Arc::new(crate::metrics::Metrics::new(&config));
         let pinned_store = Arc::new(PinnedAssetStore::new(&config).context("pinned store")?);
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
         let assets = AssetResolver::new(
@@ -3525,11 +3586,12 @@ mod tests {
             db.clone(),
             Some(pinned_store),
             ipfs_semaphore,
+            metrics.clone(),
         )
         .context("assets")?;
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone());
+        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, None, None, None,
+            config, db, cache, assets, chain, metrics, None, None, None,
         ));
 
         let collection = "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004".to_string();

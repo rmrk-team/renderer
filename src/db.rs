@@ -1053,6 +1053,23 @@ impl Database {
         Ok(configs)
     }
 
+    pub async fn approved_collections_by_chain(&self) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT chain, COUNT(*) as total
+            FROM collection_config
+            WHERE approved = 1
+            GROUP BY chain
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|row| (row.get::<String, _>("chain"), row.get::<i64, _>("total")))
+            .collect())
+    }
+
     pub async fn get_collection_config(
         &self,
         chain: &str,
@@ -3338,6 +3355,13 @@ mod tests {
             max_admin_body_bytes: 1,
             fallback_upload_max_bytes: 1,
             fallback_upload_max_pixels: 1,
+            metrics_public: false,
+            metrics_require_admin_key: false,
+            metrics_allow_ips: Vec::new(),
+            metrics_top_ips: 0,
+            metrics_top_collections: 0,
+            metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
+            metrics_refresh_interval: std::time::Duration::from_secs(1),
             rate_limit_per_minute: 0,
             rate_limit_burst: 0,
             auth_failure_rate_limit_per_minute: 0,

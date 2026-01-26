@@ -1,6 +1,7 @@
 use crate::cache::CacheManager;
 use crate::config::Config;
 use crate::db::Database;
+use crate::metrics::Metrics;
 use crate::pinning::{PinnedAssetStore, content_type_from_path};
 use anyhow::{Context, Result, anyhow};
 use base64::Engine;
@@ -36,6 +37,7 @@ pub struct AssetResolver {
     pin_store: Option<Arc<PinnedAssetStore>>,
     ipfs_semaphore: Arc<Semaphore>,
     nonrenderable_meta_cache: Arc<Mutex<NonRenderableMetaCache>>,
+    metrics: Arc<Metrics>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +111,28 @@ enum FetchKind {
     Asset,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum FetchOrigin {
+    Ipfs,
+    Http,
+}
+
+impl FetchOrigin {
+    fn label(&self) -> &'static str {
+        match self {
+            FetchOrigin::Ipfs => "ipfs",
+            FetchOrigin::Http => "http",
+        }
+    }
+
+    fn failure_label(&self) -> &'static str {
+        match self {
+            FetchOrigin::Ipfs => "ipfs_fetch",
+            FetchOrigin::Http => "http_fetch",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct FetchedBytes {
     bytes: Bytes,
@@ -120,6 +144,22 @@ struct FetchTimer<'a> {
     url: &'a str,
     kind: Option<FetchKind>,
     max_bytes: Option<usize>,
+}
+
+struct FetchMetricsTimer {
+    metrics: Arc<Metrics>,
+    origin: FetchOrigin,
+    started: Instant,
+}
+
+impl FetchMetricsTimer {
+    fn new(metrics: Arc<Metrics>, origin: FetchOrigin) -> Self {
+        Self {
+            metrics,
+            origin,
+            started: Instant::now(),
+        }
+    }
 }
 
 impl<'a> FetchTimer<'a> {
@@ -145,6 +185,13 @@ impl Drop for FetchTimer<'_> {
                 "slow asset fetch"
             );
         }
+    }
+}
+
+impl Drop for FetchMetricsTimer {
+    fn drop(&mut self) {
+        self.metrics
+            .observe_fetch_duration(self.origin.label(), self.started.elapsed());
     }
 }
 
@@ -220,6 +267,7 @@ impl AssetResolver {
         db: Database,
         pin_store: Option<Arc<PinnedAssetStore>>,
         ipfs_semaphore: Arc<Semaphore>,
+        metrics: Arc<Metrics>,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.ipfs_timeout_seconds))
@@ -240,7 +288,16 @@ impl AssetResolver {
             pin_store,
             ipfs_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
+            metrics,
         })
+    }
+
+    pub fn ipfs_semaphore(&self) -> &Semaphore {
+        &self.ipfs_semaphore
+    }
+
+    pub fn observe_upstream_failure(&self, kind: &str) {
+        self.metrics.observe_upstream_failure(kind);
     }
 
     pub fn pinned_store(&self) -> Option<Arc<PinnedAssetStore>> {
@@ -710,15 +767,27 @@ impl AssetResolver {
         kind: FetchKind,
     ) -> Result<FetchedBytes> {
         if !resolved.is_ipfs {
-            return self.fetch_http_bytes(&resolved.url, kind).await;
+            match self
+                .fetch_http_bytes(&resolved.url, kind, FetchOrigin::Http)
+                .await
+            {
+                Ok(fetched) => return Ok(fetched),
+                Err(err) => {
+                    self.metrics
+                        .observe_upstream_failure(FetchOrigin::Http.failure_label());
+                    return Err(err);
+                }
+            }
         }
         let gateways = &self.config.ipfs_gateways;
         let mut last_err = None;
         for (index, gateway) in gateways.iter().enumerate() {
             let url = format!("{}{}{}", gateway, resolved.cid, resolved.path);
-            match self.fetch_http_bytes(&url, kind).await {
+            match self.fetch_http_bytes(&url, kind, FetchOrigin::Ipfs).await {
                 Ok(fetched) => return Ok(fetched),
                 Err(err) => {
+                    self.metrics
+                        .observe_upstream_failure(FetchOrigin::Ipfs.failure_label());
                     last_err = Some(err);
                     warn!(
                         ipfs_url = %url,
@@ -731,7 +800,13 @@ impl AssetResolver {
         Err(last_err.unwrap_or_else(|| anyhow!("ipfs fetch failed")))
     }
 
-    async fn fetch_http_bytes(&self, url: &str, kind: FetchKind) -> Result<FetchedBytes> {
+    async fn fetch_http_bytes(
+        &self,
+        url: &str,
+        kind: FetchKind,
+        origin: FetchOrigin,
+    ) -> Result<FetchedBytes> {
+        let _metrics_timer = FetchMetricsTimer::new(self.metrics.clone(), origin);
         let mut timer = FetchTimer::new(url, Some(kind));
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
@@ -778,7 +853,9 @@ impl AssetResolver {
         &self,
         url: &str,
         max_bytes: usize,
+        origin: FetchOrigin,
     ) -> Result<FetchedBytes> {
+        let _metrics_timer = FetchMetricsTimer::new(self.metrics.clone(), origin);
         let mut timer = FetchTimer::new(url, None);
         timer.max_bytes = Some(max_bytes);
         let resolved = self.validate_http_url(url).await?;
@@ -822,9 +899,22 @@ impl AssetResolver {
         if max_bytes == 0 || max_bytes <= self.config.max_raster_bytes {
             return Ok(None);
         }
-        let fetched = self
-            .fetch_http_bytes_with_limit(&resolved.url, max_bytes)
-            .await?;
+        let origin = if resolved.is_ipfs {
+            FetchOrigin::Ipfs
+        } else {
+            FetchOrigin::Http
+        };
+        let fetched = match self
+            .fetch_http_bytes_with_limit(&resolved.url, max_bytes, origin)
+            .await
+        {
+            Ok(fetched) => fetched,
+            Err(err) => {
+                self.metrics
+                    .observe_upstream_failure(origin.failure_label());
+                return Err(err);
+            }
+        };
         let format = match infer_image_format(fetched.content_type.as_ref(), &fetched.bytes) {
             Some(format) => format,
             None => {

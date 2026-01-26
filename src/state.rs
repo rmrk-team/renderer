@@ -4,6 +4,7 @@ use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
 use crate::failure_log::FailureLog;
+use crate::metrics::Metrics;
 use crate::rate_limit::{IdentityRateLimiter, KeyRateLimiter, RateLimiter};
 use crate::render_queue::RenderJob;
 use crate::usage::UsageEvent;
@@ -24,6 +25,7 @@ pub struct AppState {
     pub cache: CacheManager,
     pub assets: AssetResolver,
     pub chain: ChainClient,
+    pub metrics: Arc<Metrics>,
     pub render_singleflight: RenderSingleflight,
     pub token_state_singleflight: RenderSingleflight,
     pub render_semaphore: Arc<Semaphore>,
@@ -60,6 +62,7 @@ impl AppState {
         cache: CacheManager,
         assets: AssetResolver,
         chain: ChainClient,
+        metrics: Arc<Metrics>,
         usage_tx: Option<mpsc::Sender<UsageEvent>>,
         render_queue_tx: Option<mpsc::Sender<RenderJob>>,
         failure_log: Option<FailureLog>,
@@ -116,6 +119,7 @@ impl AppState {
             cache,
             assets,
             chain,
+            metrics,
             render_singleflight,
             token_state_singleflight,
             render_semaphore,

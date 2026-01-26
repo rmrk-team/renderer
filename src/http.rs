@@ -26,6 +26,7 @@ use dashmap::DashMap;
 use hmac::{Hmac, Mac};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use ipnet::IpNet;
+use prometheus::Encoder;
 use rand::random;
 use serde::Deserialize;
 use serde_json::Value;
@@ -35,7 +36,8 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use subtle::ConstantTimeEq;
 use tokio_util::io::ReaderStream;
 
 const OPENAPI_YAML: &str = include_str!("../openapi.yaml");
@@ -119,6 +121,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/status", get(status))
         .route("/status.json", get(status))
         .route("/openapi.yaml", get(openapi_yaml))
+        .route("/metrics", get(metrics))
         .route(
             "/render/{chain}/{collection}/{token_id}/{asset_id}/{format}",
             get(render_canonical).head(head_render_canonical),
@@ -235,6 +238,34 @@ async fn openapi_yaml() -> impl IntoResponse {
     (headers, OPENAPI_YAML)
 }
 
+async fn metrics(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    connect_info: ConnectInfo<SocketAddr>,
+) -> Result<Response, ApiError> {
+    let ip = client_ip_from_parts(&headers, Some(connect_info.0.ip()), &state);
+    if !metrics_access_allowed(&state, &headers, ip).await {
+        return Err(
+            ApiError::new(StatusCode::UNAUTHORIZED, "metrics access denied")
+                .with_code("metrics_access_denied"),
+        );
+    }
+    state.metrics.flush_topk();
+    let body = state.metrics.gather().map_err(ApiError::from)?;
+    let mut headers = HeaderMap::new();
+    let encoder = prometheus::TextEncoder::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(encoder.format_type())
+            .unwrap_or(HeaderValue::from_static("text/plain; version=0.0.4")),
+    );
+    headers.insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from_str(&body.len().to_string()).unwrap_or(HeaderValue::from_static("0")),
+    );
+    Ok((headers, body).into_response())
+}
+
 async fn render_canonical(
     State(state): State<Arc<AppState>>,
     Path((chain, collection, token_id, asset_id, format)): Path<(
@@ -253,6 +284,7 @@ async fn render_canonical(
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let started = Instant::now();
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
@@ -274,9 +306,17 @@ async fn render_canonical(
                 .map_err(map_render_error_anyhow)?;
             if !limit.allowed {
                 let retry_after = limit.retry_after_seconds.unwrap_or(60);
-                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
-                    retry_after,
-                ))));
+                let response = rate_limit_response(Some(fresh_rate_limit_info(retry_after)));
+                state.metrics.observe_render_result("rate_limited");
+                state
+                    .metrics
+                    .observe_render_duration("total", started.elapsed());
+                state.metrics.observe_top_collection(
+                    &chain,
+                    &collection,
+                    response_bytes(&response),
+                );
+                return Ok(response);
             }
             true
         }
@@ -320,30 +360,71 @@ async fn render_canonical(
             if let Some(response) =
                 fallback_for_render_error(&state, &request, &placeholder_width, &err).await
             {
+                record_render_metrics(
+                    &state,
+                    &response,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                );
                 return Ok(response);
             }
         }
+        record_render_error_metrics(&state, started.elapsed());
         return Err(map_render_error(err));
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request).await {
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
             return Ok(response);
         }
     }
     match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
-        Ok(response) => Ok(to_http_response(response, &headers).await),
+        Ok(response) => {
+            let response = to_http_response(response, &headers).await;
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
+            Ok(response)
+        }
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
                     fallback_for_render_error(&state, &request, &placeholder_width, &err).await
                 {
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
                     return Ok(response);
                 }
                 if query.onerror.as_deref() == Some("placeholder") {
                     let (width, height) = placeholder_dimensions(&state, &placeholder_width, false);
-                    return Ok(placeholder_response(&format, width, height));
+                    let response = placeholder_response(&format, width, height);
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
+                    return Ok(response);
                 }
             }
+            record_render_error_metrics(&state, started.elapsed());
             Err(map_render_error(err))
         }
     }
@@ -367,6 +448,7 @@ async fn render_og(
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let started = Instant::now();
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
@@ -388,9 +470,17 @@ async fn render_og(
                 .map_err(map_render_error_anyhow)?;
             if !limit.allowed {
                 let retry_after = limit.retry_after_seconds.unwrap_or(60);
-                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
-                    retry_after,
-                ))));
+                let response = rate_limit_response(Some(fresh_rate_limit_info(retry_after)));
+                state.metrics.observe_render_result("rate_limited");
+                state
+                    .metrics
+                    .observe_render_duration("total", started.elapsed());
+                state.metrics.observe_top_collection(
+                    &chain,
+                    &collection,
+                    response_bytes(&response),
+                );
+                return Ok(response);
             }
             true
         }
@@ -434,30 +524,71 @@ async fn render_og(
             if let Some(response) =
                 fallback_for_render_error(&state, &request, &placeholder_width, &err).await
             {
+                record_render_metrics(
+                    &state,
+                    &response,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                );
                 return Ok(response);
             }
         }
+        record_render_error_metrics(&state, started.elapsed());
         return Err(map_render_error(err));
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request).await {
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
             return Ok(response);
         }
     }
     match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
-        Ok(response) => Ok(to_http_response(response, &headers).await),
+        Ok(response) => {
+            let response = to_http_response(response, &headers).await;
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
+            Ok(response)
+        }
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
                     fallback_for_render_error(&state, &request, &placeholder_width, &err).await
                 {
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
                     return Ok(response);
                 }
                 if query.onerror.as_deref() == Some("placeholder") {
                     let (width, height) = placeholder_dimensions(&state, &placeholder_width, true);
-                    return Ok(placeholder_response(&format, width, height));
+                    let response = placeholder_response(&format, width, height);
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
+                    return Ok(response);
                 }
             }
+            record_render_error_metrics(&state, started.elapsed());
             Err(map_render_error(err))
         }
     }
@@ -482,6 +613,7 @@ async fn render_legacy(
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let started = Instant::now();
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
@@ -501,9 +633,17 @@ async fn render_legacy(
                 .map_err(map_render_error_anyhow)?;
             if !limit.allowed {
                 let retry_after = limit.retry_after_seconds.unwrap_or(60);
-                return Ok(rate_limit_response(Some(fresh_rate_limit_info(
-                    retry_after,
-                ))));
+                let response = rate_limit_response(Some(fresh_rate_limit_info(retry_after)));
+                state.metrics.observe_render_result("rate_limited");
+                state
+                    .metrics
+                    .observe_render_duration("total", started.elapsed());
+                state.metrics.observe_top_collection(
+                    &chain,
+                    &collection,
+                    response_bytes(&response),
+                );
+                return Ok(response);
             }
             true
         }
@@ -547,23 +687,55 @@ async fn render_legacy(
             if let Some(response) =
                 fallback_for_render_error(&state, &request, &placeholder_width, &err).await
             {
+                record_render_metrics(
+                    &state,
+                    &response,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                );
                 return Ok(response);
             }
         }
+        record_render_error_metrics(&state, started.elapsed());
         return Err(map_render_error(err));
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request).await {
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
             return Ok(response);
         }
     }
     match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
-        Ok(response) => Ok(to_http_response(response, &headers).await),
+        Ok(response) => {
+            let response = to_http_response(response, &headers).await;
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
+            Ok(response)
+        }
         Err(err) => {
             if !prefer_json {
                 if let Some(response) =
                     fallback_for_render_error(&state, &request, &placeholder_width, &err).await
                 {
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
                     return Ok(response);
                 }
                 if query.onerror.as_deref() == Some("placeholder") {
@@ -572,9 +744,18 @@ async fn render_legacy(
                         &placeholder_width,
                         query.og_image.unwrap_or(false),
                     );
-                    return Ok(placeholder_response(&format, width, height));
+                    let response = placeholder_response(&format, width, height);
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                    );
+                    return Ok(response);
                 }
             }
+            record_render_error_metrics(&state, started.elapsed());
             Err(map_render_error(err))
         }
     }
@@ -593,6 +774,7 @@ async fn render_primary(
     render::validate_render_params(&chain, &collection, &token_id, None)
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
+    let started = Instant::now();
     let width_param = query.width.or(query.img_width);
     let placeholder_width = width_param.clone();
     let debug_requested =
@@ -640,13 +822,28 @@ async fn render_primary(
             if let Some(response) =
                 fallback_for_render_error(&state, &request, &placeholder_width, &err).await
             {
+                record_render_metrics(
+                    &state,
+                    &response,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                );
                 return Ok(response);
             }
         }
+        record_render_error_metrics(&state, started.elapsed());
         return Err(map_render_error(err));
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request).await {
+            record_render_metrics(
+                &state,
+                &response,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+            );
             return Ok(response);
         }
     }
@@ -673,6 +870,7 @@ async fn render_primary(
                     .primary_asset_cache
                     .insert_negative(primary_cache_key.clone())
                     .await;
+                record_render_error_metrics(&state, started.elapsed());
                 return Err(ApiError::from(err));
             }
         }
@@ -680,6 +878,7 @@ async fn render_primary(
         match state.primary_asset_cache.get(&primary_cache_key).await {
             Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
             Some(crate::state::PrimaryAssetCacheValue::Negative) => {
+                record_render_error_metrics(&state, started.elapsed());
                 return Err(
                     ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
                         .with_code("primary_asset_lookup_failed"),
@@ -708,6 +907,7 @@ async fn render_primary(
                             .primary_asset_cache
                             .insert_negative(primary_cache_key.clone())
                             .await;
+                        record_render_error_metrics(&state, started.elapsed());
                         return Err(ApiError::from(err));
                     }
                 }
@@ -743,7 +943,15 @@ async fn render_primary(
         "X-Renderer-Primary-AssetId",
         HeaderValue::from_str(&asset_id.to_string()).unwrap_or(HeaderValue::from_static("0")),
     );
-    Ok((headers, Redirect::temporary(&target)).into_response())
+    let response = (headers, Redirect::temporary(&target)).into_response();
+    record_render_metrics(
+        &state,
+        &response,
+        started.elapsed(),
+        &request.chain,
+        &request.collection,
+    );
+    Ok(response)
 }
 
 async fn render_primary_or_legacy_asset(
@@ -2408,6 +2616,50 @@ fn approval_context_from_access(context: Option<&AccessContext>) -> ApprovalChec
     }
 }
 
+async fn metrics_access_allowed(state: &AppState, headers: &HeaderMap, ip: Option<IpAddr>) -> bool {
+    if state.config.metrics_public {
+        return true;
+    }
+    if let Some(ip) = ip {
+        if state
+            .config
+            .metrics_allow_ips
+            .iter()
+            .any(|net| net.contains(&ip))
+        {
+            return true;
+        }
+    }
+    if state.config.metrics_require_admin_key {
+        return is_admin_authorized(&state.config, headers);
+    }
+    let bearer = extract_bearer_token(headers).filter(|token| is_reasonable_token_len(token));
+    let key_info =
+        if let (Some(token), Some(secret)) = (bearer, state.config.api_key_secret.as_deref()) {
+            let hash = hash_api_key(secret, token);
+            if let Some(key) = state.api_key_cache.get(&hash).await {
+                Some(key)
+            } else {
+                let fetched = state.db.find_client_key_by_hash(&hash).await.ok().flatten();
+                if let Some(key) = fetched.as_ref() {
+                    state.api_key_cache.insert(hash, key.clone()).await;
+                }
+                fetched
+            }
+        } else {
+            None
+        };
+    if key_info.as_ref().map(|key| key.active).unwrap_or(false) {
+        return true;
+    }
+    if let Some(ip) = ip {
+        if let Some(rule) = ip_rule_for_ip(state, ip).await {
+            return rule == "allow";
+        }
+    }
+    false
+}
+
 pub async fn access_middleware(
     state: Arc<AppState>,
     mut request: axum::http::Request<Body>,
@@ -2416,10 +2668,12 @@ pub async fn access_middleware(
     let method = request.method().clone();
     let uri = request.uri().clone();
     let path = uri.path();
+    let _inflight = state.metrics.inflight_guard();
     let request_id = generate_request_id();
     if path == "/healthz" {
         let mut response = next.run(request).await;
         attach_request_id(&mut response, &request_id);
+        record_http_metrics(&state, route_group(path), &method, &response, None);
         return response;
     }
     let route_group = route_group(path);
@@ -2428,6 +2682,7 @@ pub async fn access_middleware(
     let is_public_landing = is_public_landing_path(&state, path);
     let is_public_status = is_public_status_path(&state, path);
     let is_public_openapi = is_public_openapi_path(&state, path);
+    let is_public_metrics = is_metrics_path(path);
     let enforce_private = (is_status_path(path) && !state.config.status_public)
         || (is_openapi_path(path) && !state.config.openapi_public);
 
@@ -2447,6 +2702,10 @@ pub async fn access_middleware(
                 Some(&request_id),
             );
             record_usage(&state, route_group, &response, None);
+            if route_group == "render" {
+                state.metrics.observe_render_result("rate_limited");
+            }
+            record_http_metrics(&state, route_group, &method, &response, Some(ip));
             return response;
         }
     }
@@ -2519,6 +2778,7 @@ pub async fn access_middleware(
         && !is_public_landing
         && !is_public_status
         && !is_public_openapi
+        && !is_public_metrics
         && !(if enforce_private {
             is_private_access_allowed(key_info.as_ref(), ip_rule.as_deref())
         } else {
@@ -2541,6 +2801,10 @@ pub async fn access_middleware(
                     Some(&request_id),
                 );
                 record_usage(&state, route_group, &response, identity.clone());
+                if route_group == "render" {
+                    state.metrics.observe_render_result("rate_limited");
+                }
+                record_http_metrics(&state, route_group, &method, &response, Some(ip));
                 return response;
             }
         }
@@ -2563,6 +2827,7 @@ pub async fn access_middleware(
             Some(&request_id),
         );
         record_usage(&state, route_group, &response, identity.clone());
+        record_http_metrics(&state, route_group, &method, &response, ip);
         return response;
     }
 
@@ -2582,6 +2847,10 @@ pub async fn access_middleware(
                 Some(&request_id),
             );
             record_usage(&state, route_group, &response, identity.clone());
+            if route_group == "render" {
+                state.metrics.observe_render_result("rate_limited");
+            }
+            record_http_metrics(&state, route_group, &method, &response, ip);
             return response;
         }
     }
@@ -2603,6 +2872,7 @@ pub async fn access_middleware(
         Some(&request_id),
     );
     record_usage(&state, route_group, &response, identity);
+    record_http_metrics(&state, route_group, &method, &response, ip);
     response
 }
 
@@ -2731,6 +3001,34 @@ pub(crate) fn client_ip(request: &axum::http::Request<Body>, state: &AppState) -
         return Some(peer_ip);
     }
     let mut forwarded = parse_forwarded_chain(request.headers());
+    if forwarded.len() > MAX_FORWARDED_IPS {
+        forwarded.truncate(MAX_FORWARDED_IPS);
+    }
+    Some(select_client_ip(
+        forwarded,
+        &state.config.trusted_proxies,
+        peer_ip,
+    ))
+}
+
+fn client_ip_from_parts(
+    headers: &HeaderMap,
+    peer_ip: Option<IpAddr>,
+    state: &AppState,
+) -> Option<IpAddr> {
+    if state.config.trusted_proxies.is_empty() {
+        return peer_ip;
+    }
+    let peer_ip = peer_ip?;
+    let trusted = state
+        .config
+        .trusted_proxies
+        .iter()
+        .any(|net| net.contains(&peer_ip));
+    if !trusted {
+        return Some(peer_ip);
+    }
+    let mut forwarded = parse_forwarded_chain(headers);
     if forwarded.len() > MAX_FORWARDED_IPS {
         forwarded.truncate(MAX_FORWARDED_IPS);
     }
@@ -2873,6 +3171,31 @@ fn is_public_openapi_path(state: &AppState, path: &str) -> bool {
     state.config.openapi_public && is_openapi_path(path)
 }
 
+fn is_metrics_path(path: &str) -> bool {
+    path == "/metrics"
+}
+
+fn is_admin_authorized(config: &Config, headers: &HeaderMap) -> bool {
+    let password = config.admin_password.as_str();
+    let auth = match headers.get(header::AUTHORIZATION) {
+        Some(value) => value.to_str().unwrap_or(""),
+        None => return false,
+    };
+    let mut parts = auth.split_whitespace();
+    let scheme = match parts.next() {
+        Some(value) => value,
+        None => return false,
+    };
+    let token = match parts.next() {
+        Some(value) => value,
+        None => return false,
+    };
+    if scheme.eq_ignore_ascii_case("bearer") {
+        return bool::from(password.as_bytes().ct_eq(token.as_bytes()));
+    }
+    false
+}
+
 fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let mut parts = value.split_whitespace();
@@ -2893,9 +3216,68 @@ fn is_reasonable_token_len(token: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::AssetResolver;
+    use crate::cache::CacheManager;
+    use crate::chain::ChainClient;
+    use crate::db::Database;
+    use crate::pinning::PinnedAssetStore;
+    use crate::state::AppState;
     use axum::body::to_bytes;
     use axum::http::header;
     use tempfile::tempdir;
+    use tokio::sync::Semaphore;
+
+    struct EnvGuard {
+        keys: Vec<String>,
+    }
+
+    impl EnvGuard {
+        fn new(values: Vec<(&str, String)>) -> Self {
+            let mut keys = Vec::new();
+            for (key, value) in values {
+                unsafe {
+                    std::env::set_var(key, value);
+                }
+                keys.push(key.to_string());
+            }
+            Self { keys }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for key in self.keys.drain(..) {
+                unsafe {
+                    std::env::remove_var(key);
+                }
+            }
+        }
+    }
+
+    async fn build_state(config: Config) -> Arc<AppState> {
+        let db = Database::new(&config).await.unwrap();
+        let cache = CacheManager::new(&config).unwrap();
+        let metrics = Arc::new(crate::metrics::Metrics::new(&config));
+        let pinned_store = if config.pinning_enabled {
+            Some(Arc::new(PinnedAssetStore::new(&config).unwrap()))
+        } else {
+            None
+        };
+        let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
+        let assets = AssetResolver::new(
+            Arc::new(config.clone()),
+            cache.clone(),
+            db.clone(),
+            pinned_store,
+            ipfs_semaphore,
+            metrics.clone(),
+        )
+        .unwrap();
+        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+        Arc::new(AppState::new(
+            config, db, cache, assets, chain, metrics, None, None, None,
+        ))
+    }
 
     #[test]
     fn openapi_yaml_parses() {
@@ -2968,6 +3350,190 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body, "hello");
     }
+
+    #[tokio::test]
+    async fn metrics_requires_auth_by_default() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+            ("METRICS_PUBLIC", "false".to_string()),
+            ("METRICS_ALLOW_IPS", "".to_string()),
+            ("METRICS_REQUIRE_ADMIN_KEY", "false".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let headers = HeaderMap::new();
+        let response = metrics(
+            State(state),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap_err()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn metrics_allows_api_key() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+            ("API_KEY_SECRET", "secret".to_string()),
+            ("METRICS_PUBLIC", "false".to_string()),
+            ("METRICS_ALLOW_IPS", "".to_string()),
+            ("METRICS_REQUIRE_ADMIN_KEY", "false".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let token = "test-token-1234567890-abc";
+        let hash = hash_api_key("secret", token);
+        let client_id = state.db.create_client("metrics", None).await.unwrap();
+        let prefix = &token[..8];
+        state
+            .db
+            .create_client_key(client_id, &hash, prefix, None, None, None, false)
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        let response = metrics(
+            State(state),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_allows_allowlisted_ip() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+            ("METRICS_ALLOW_IPS", "127.0.0.1/32".to_string()),
+            ("METRICS_PUBLIC", "false".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let headers = HeaderMap::new();
+        let response = metrics(
+            State(state),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_require_admin_key_blocks_api_keys() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+            ("API_KEY_SECRET", "secret".to_string()),
+            ("METRICS_REQUIRE_ADMIN_KEY", "true".to_string()),
+            ("METRICS_PUBLIC", "false".to_string()),
+            ("METRICS_ALLOW_IPS", "".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let token = "test-token-1234567890-abc";
+        let hash = hash_api_key("secret", token);
+        let client_id = state.db.create_client("metrics", None).await.unwrap();
+        let prefix = &token[..8];
+        state
+            .db
+            .create_client_key(client_id, &hash, prefix, None, None, None, false)
+            .await
+            .unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+        let response = metrics(
+            State(state.clone()),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap_err()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-admin"),
+        );
+        let response = metrics(
+            State(state),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
 }
 
 fn hash_api_key(secret: &str, token: &str) -> String {
@@ -2979,11 +3545,17 @@ fn hash_api_key(secret: &str, token: &str) -> String {
 }
 
 fn route_group(path: &str) -> &'static str {
+    if is_status_path(path) {
+        return "status";
+    }
+    if is_openapi_path(path) {
+        return "openapi";
+    }
     if path.starts_with("/render/") || path.starts_with("/production/create/") {
         return "render";
     }
     if path.starts_with("/og/") {
-        return "og";
+        return "render";
     }
     if path.starts_with("/admin") {
         return "admin";
@@ -3037,6 +3609,89 @@ fn record_usage(
         cache_hit,
     };
     let _ = sender.try_send(event);
+}
+
+fn response_bytes(response: &Response) -> u64 {
+    response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn record_http_metrics(
+    state: &AppState,
+    route_group: &'static str,
+    method: &axum::http::Method,
+    response: &Response,
+    ip: Option<IpAddr>,
+) {
+    let status = response.status().as_u16().to_string();
+    let bytes = response_bytes(response);
+    state
+        .metrics
+        .observe_http_request(route_group, method.as_str(), &status);
+    state.metrics.add_http_response_bytes(route_group, bytes);
+    if let Some(ip) = ip {
+        state.metrics.observe_top_ip(ip, bytes);
+    }
+}
+
+fn classify_render_response(response: &Response) -> &'static str {
+    if let Some(value) = response.headers().get("X-Renderer-Result") {
+        if let Ok(value) = value.to_str() {
+            if value == "placeholder" {
+                return "placeholder";
+            }
+        }
+    }
+    if let Some(value) = response.headers().get("X-Renderer-Fallback") {
+        if let Ok(value) = value.to_str() {
+            return match value {
+                "token_override" => "token_override",
+                "unapproved" => "unapproved_fallback",
+                "render_fallback" => "render_fallback",
+                "queued" => "queue_full",
+                "approval_rate_limited" => "rate_limited",
+                _ => "error",
+            };
+        }
+    }
+    if let Some(value) = response.headers().get("X-Renderer-Cache-Hit") {
+        if let Ok(value) = value.to_str() {
+            return if value == "true" {
+                "cache_hit"
+            } else {
+                "cache_miss"
+            };
+        }
+    }
+    if response.status().is_success() || response.status().is_redirection() {
+        "ok"
+    } else {
+        "error"
+    }
+}
+
+fn record_render_metrics(
+    state: &AppState,
+    response: &Response,
+    duration: Duration,
+    chain: &str,
+    collection: &str,
+) {
+    let result = classify_render_response(response);
+    state.metrics.observe_render_result(result);
+    state.metrics.observe_render_duration("total", duration);
+    state
+        .metrics
+        .observe_top_collection(chain, collection, response_bytes(response));
+}
+
+fn record_render_error_metrics(state: &AppState, duration: Duration) {
+    state.metrics.observe_render_result("error");
+    state.metrics.observe_render_duration("total", duration);
 }
 
 fn log_failure_if_needed(

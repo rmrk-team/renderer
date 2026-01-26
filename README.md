@@ -12,6 +12,8 @@ SVG-first rendering, deterministic caching, and a minimal admin panel and API.
 - IPFS gateway rotation + asset caching
 - Warmup queue with safe concurrency
 - Embedded admin panel (`/admin`) with JSON API
+- Admin-managed fallback overrides for unapproved collections and token-level fixes
+- Prometheus `/metrics` endpoint with Top-K tracking for IPs/collections
 
 ## Quickstart
 
@@ -87,6 +89,27 @@ Access control:
 - `USAGE_RETENTION_DAYS`: retention for hourly usage aggregates (0 disables cleanup).
 - `TRACK_KEYS_IN_OPEN_MODE`: when `ACCESS_MODE=open` or `denylist_only`, skip DB lookups for bearer tokens unless set to `true`.
 - API keys are accepted via `Authorization: Bearer` only (query-string keys are not supported).
+
+### Observability (Prometheus + Grafana)
+
+The renderer exposes a Prometheus endpoint at `GET /metrics`. It is **private by default** and
+access is granted when any of the following are true:
+
+- `METRICS_PUBLIC=true`
+- request IP is in `METRICS_ALLOW_IPS`
+- a valid API key is presented (unless `METRICS_REQUIRE_ADMIN_KEY=true`)
+- admin bearer auth is presented (`METRICS_REQUIRE_ADMIN_KEY=true`)
+
+See `metrics/README.md` for dashboards, Docker compose, and non-Docker setup guidance.
+Specification details live in `spec-docs/MINI_GRAFANA.md`.
+
+Minimal non-Docker steps:
+
+1. Install Prometheus + Grafana (package manager or upstream binaries).
+2. Configure Prometheus to scrape `http://127.0.0.1:8080/metrics` and either:
+   - allowlist `METRICS_ALLOW_IPS=127.0.0.1/32`, or
+   - use a bearer token in the scrape config.
+3. Add Prometheus as a Grafana datasource and use the panel queries from `metrics/README.md`.
 
 AccessMode semantics:
 
@@ -512,13 +535,14 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 ### Response headers
 
 - `X-Renderer-Complete: true|false`
-- `X-Renderer-Result: rendered|placeholder|cache-miss`
+- `X-Renderer-Result: rendered|placeholder|cache-miss|fallback`
 - `X-Renderer-Cache-Hit: true|false` (cached renders and HEAD probes)
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
-- `X-Renderer-Fallback: unapproved|queued` (when a fallback image is returned)
-- `X-Renderer-Fallback-Reason: approval_required|queue_full`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited`
+- `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
+- `X-Renderer-Fallback-Reason: approval_required|queue_full|rate_limited` (dynamic fallbacks)
 - `X-Renderer-Error-Code: <code>` (JSON errors and fallbacks)
 - `X-Request-Id: <id>` for correlation
 - `Cache-Control: public, max-age=...` when cacheable
@@ -662,6 +686,20 @@ Supported schemes:
 - `ipfs://...`
 - `https://...`
 - `local://filename.svg` (resolved relative to `CACHE_DIR/overlays/`)
+
+## Fallbacks & overrides (mini override)
+
+The admin API supports disk-backed fallback/override images for:
+
+- Global unapproved collections
+- Per-collection unapproved and render-failure fallbacks
+- Per-token overrides (`chain + collection + token_id`)
+
+Images are processed on upload (size limits + re-encoding), stored under `FALLBACKS_DIR`,
+and served directly from disk with consistent `ETag` + cache headers. Authorized clients
+can still bypass fallbacks with `?debug=1`/`?raw=1` to see JSON errors.
+
+See `spec-docs/MINI_OVERRIDE.md` for detailed behavior and endpoints.
 
 ## Build & Deploy
 
@@ -852,6 +890,8 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Warmup renders **only cache** when a `cache_timestamp` is provided.
 - See `PRODUCTION.md` for a deployment checklist and `openapi.yaml` for a minimal API spec.
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.
+- Metrics: see `metrics/README.md` for Prometheus/Grafana setup and panel queries.
+- Fallback overrides are served from `FALLBACKS_DIR` and can replace unapproved/failed renders.
 
 ### Deployment profiles
 

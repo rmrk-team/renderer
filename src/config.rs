@@ -68,6 +68,13 @@ pub struct Config {
     pub max_admin_body_bytes: usize,
     pub fallback_upload_max_bytes: usize,
     pub fallback_upload_max_pixels: u64,
+    pub metrics_public: bool,
+    pub metrics_require_admin_key: bool,
+    pub metrics_allow_ips: Vec<IpNet>,
+    pub metrics_top_ips: usize,
+    pub metrics_top_collections: usize,
+    pub metrics_ip_label_mode: MetricsIpLabelMode,
+    pub metrics_refresh_interval: Duration,
     pub rate_limit_per_minute: u64,
     pub rate_limit_burst: u64,
     pub auth_failure_rate_limit_per_minute: u64,
@@ -168,6 +175,12 @@ pub enum AccessMode {
     Hybrid,
     DenylistOnly,
     AllowlistOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetricsIpLabelMode {
+    Plain,
+    Sha256Prefix,
 }
 
 #[derive(Debug, Clone)]
@@ -302,6 +315,14 @@ impl Config {
         let max_admin_body_bytes = parse_usize("MAX_ADMIN_BODY_BYTES", 1_048_576);
         let fallback_upload_max_bytes = parse_usize("FALLBACK_UPLOAD_MAX_BYTES", 5 * 1024 * 1024);
         let fallback_upload_max_pixels = parse_u64("FALLBACK_UPLOAD_MAX_PIXELS", 16_000_000);
+        let metrics_public = parse_bool("METRICS_PUBLIC", false);
+        let metrics_require_admin_key = parse_bool("METRICS_REQUIRE_ADMIN_KEY", false);
+        let metrics_allow_ips = parse_metrics_allowlist("METRICS_ALLOW_IPS")?;
+        let metrics_top_ips = parse_usize("METRICS_TOP_IPS", 20);
+        let metrics_top_collections = parse_usize("METRICS_TOP_COLLECTIONS", 50);
+        let metrics_ip_label_mode = parse_metrics_ip_label_mode("METRICS_IP_LABEL_MODE");
+        let metrics_refresh_interval =
+            Duration::from_secs(parse_u64("METRICS_REFRESH_INTERVAL_SECONDS", 10).max(1));
         let rate_limit_per_minute = parse_u64("RATE_LIMIT_PER_MINUTE", 0);
         let rate_limit_burst = parse_u64("RATE_LIMIT_BURST", 0);
         let auth_failure_rate_limit_per_minute = parse_u64("AUTH_FAILURE_RATE_LIMIT_PER_MINUTE", 0);
@@ -448,6 +469,13 @@ impl Config {
             max_admin_body_bytes,
             fallback_upload_max_bytes,
             fallback_upload_max_pixels,
+            metrics_public,
+            metrics_require_admin_key,
+            metrics_allow_ips,
+            metrics_top_ips,
+            metrics_top_collections,
+            metrics_ip_label_mode,
+            metrics_refresh_interval,
             rate_limit_per_minute,
             rate_limit_burst,
             auth_failure_rate_limit_per_minute,
@@ -715,6 +743,39 @@ fn parse_trusted_proxies(key: &str) -> Result<Vec<IpNet>> {
         return Err(anyhow::anyhow!("invalid trusted proxy entry: {value}"));
     }
     Ok(parsed)
+}
+
+fn parse_metrics_allowlist(key: &str) -> Result<Vec<IpNet>> {
+    let values = match parse_list_env(key) {
+        Some(values) => values,
+        None => return Ok(Vec::new()),
+    };
+    let mut parsed = Vec::new();
+    for value in values {
+        if let Ok(net) = value.parse::<IpNet>() {
+            parsed.push(net);
+            continue;
+        }
+        if let Ok(addr) = value.parse::<IpAddr>() {
+            parsed.push(IpNet::from(addr));
+            continue;
+        }
+        return Err(anyhow::anyhow!("invalid metrics allowlist entry: {value}"));
+    }
+    Ok(parsed)
+}
+
+fn parse_metrics_ip_label_mode(key: &str) -> MetricsIpLabelMode {
+    match env::var(key)
+        .unwrap_or_else(|_| "sha256_prefix".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "plain" => MetricsIpLabelMode::Plain,
+        "sha256_prefix" | "sha256" | "hash" => MetricsIpLabelMode::Sha256Prefix,
+        _ => MetricsIpLabelMode::Sha256Prefix,
+    }
 }
 
 fn warn_on_broad_proxy_ranges(trusted: &[IpNet]) {
