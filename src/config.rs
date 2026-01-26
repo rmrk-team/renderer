@@ -70,6 +70,7 @@ pub struct Config {
     pub fallback_upload_max_pixels: u64,
     pub metrics_public: bool,
     pub metrics_require_admin_key: bool,
+    pub metrics_bearer_token: Option<String>,
     pub metrics_allow_ips: Vec<IpNet>,
     pub metrics_top_ips: usize,
     pub metrics_top_collections: usize,
@@ -209,6 +210,20 @@ impl Config {
         let fallbacks_dir = PathBuf::from(
             env::var("FALLBACKS_DIR").unwrap_or_else(|_| "/var/lib/renderer/fallbacks".to_string()),
         );
+        let renders_dir = cache_dir.join("renders");
+        let assets_dir = cache_dir.join("assets");
+        let overlays_dir = cache_dir.join("overlays");
+        let composites_dir = cache_dir.join("composites");
+        if fallbacks_dir.starts_with(&renders_dir)
+            || fallbacks_dir.starts_with(&assets_dir)
+            || fallbacks_dir.starts_with(&overlays_dir)
+            || fallbacks_dir.starts_with(&composites_dir)
+        {
+            warn!(
+                fallbacks_dir = %fallbacks_dir.display(),
+                "FALLBACKS_DIR is under a cache subdir; cache purges may delete fallbacks"
+            );
+        }
         let pinning_enabled = parse_bool("PINNING_ENABLED", true);
         let pinned_dir = PathBuf::from(
             env::var("PINNED_DIR").unwrap_or_else(|_| "/var/lib/renderer/pinned".to_string()),
@@ -314,11 +329,14 @@ impl Config {
         let max_overlay_length = parse_usize("MAX_OVERLAY_LENGTH", 64);
         let max_background_length = parse_usize("MAX_BG_LENGTH", 64);
         let max_in_flight_requests = parse_usize("MAX_IN_FLIGHT_REQUESTS", 512);
-        let max_admin_body_bytes = parse_usize("MAX_ADMIN_BODY_BYTES", 1_048_576);
+        let max_admin_body_bytes = parse_usize("MAX_ADMIN_BODY_BYTES", 100 * 1024 * 1024);
         let fallback_upload_max_bytes = parse_usize("FALLBACK_UPLOAD_MAX_BYTES", 5 * 1024 * 1024);
         let fallback_upload_max_pixels = parse_u64("FALLBACK_UPLOAD_MAX_PIXELS", 16_000_000);
         let metrics_public = parse_bool("METRICS_PUBLIC", false);
         let metrics_require_admin_key = parse_bool("METRICS_REQUIRE_ADMIN_KEY", false);
+        let metrics_bearer_token = env::var("METRICS_BEARER_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty());
         let metrics_allow_ips = parse_metrics_allowlist("METRICS_ALLOW_IPS")?;
         let metrics_top_ips = parse_usize("METRICS_TOP_IPS", 20);
         let metrics_top_collections = parse_usize("METRICS_TOP_COLLECTIONS", 50);
@@ -358,7 +376,7 @@ impl Config {
         let render_layer_concurrency = parse_usize("RENDER_LAYER_CONCURRENCY", 8).max(1);
         let composite_cache_enabled = parse_bool("COMPOSITE_CACHE_ENABLED", true);
         let cache_size_refresh_interval =
-            Duration::from_secs(parse_u64("CACHE_SIZE_REFRESH_SECONDS", 60).max(1));
+            Duration::from_secs(parse_u64("CACHE_SIZE_REFRESH_SECONDS", 300).max(1));
         let rpc_timeout_seconds = parse_u64("RPC_TIMEOUT_SECONDS", 30);
         let rpc_connect_timeout_seconds = parse_u64("RPC_CONNECT_TIMEOUT_SECONDS", 5);
         let rpc_failure_threshold =
@@ -478,6 +496,7 @@ impl Config {
             fallback_upload_max_pixels,
             metrics_public,
             metrics_require_admin_key,
+            metrics_bearer_token,
             metrics_allow_ips,
             metrics_top_ips,
             metrics_top_collections,

@@ -24,3 +24,4 @@
 
 ## Metrics guidance
 - If adding Prometheus metrics, bound label cardinality (avoid raw IPs and unbounded collection labels).
+- `/metrics` access is gated by allowlist + dedicated metrics bearer token or admin auth.

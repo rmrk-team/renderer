@@ -27,6 +27,16 @@ paths:
       responses:
         "200":
           description: OK
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      security:
+        - metricsAuth: []
+        - adminAuth: []
+        - {}
+      responses:
+        "200":
+          description: OK
   /render/{chain}/{collection}/{tokenId}/{assetId}/{format}:
     get:
       summary: Render token asset
@@ -391,6 +401,62 @@ paths:
       responses:
         "200":
           description: OK
+  /og/{chain}/{collection}/{tokenId}/{assetId}/{format}:
+    get:
+      summary: Render OpenGraph image (explicit format)
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+      responses:
+        "200":
+          description: OK
+  /og/{chain}/{collection}/{tokenId}/{asset}:
+    get:
+      summary: Render OpenGraph image (legacy format suffix)
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: asset
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
     post:
       summary: Upsert collection
       security:
@@ -748,3 +814,8 @@ components:
       scheme: bearer
       bearerFormat: APIKey
       description: "Use Authorization: Bearer <API key>"
+    metricsAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: MetricsToken
+      description: "Use Authorization: Bearer <metrics bearer token>"

@@ -747,6 +747,7 @@ struct FallbackUploadPayload {
 
 async fn parse_fallback_upload(
     mut multipart: Multipart,
+    max_bytes: usize,
 ) -> Result<FallbackUploadPayload, AdminError> {
     let mut bytes: Option<bytes::Bytes> = None;
     let mut reason: Option<String> = None;
@@ -762,6 +763,9 @@ async fn parse_fallback_upload(
     if bytes.is_empty() {
         return Err(anyhow!("empty upload file").into());
     }
+    if max_bytes > 0 && bytes.len() > max_bytes {
+        return Err(anyhow!("fallback upload too large").into());
+    }
     Ok(FallbackUploadPayload { bytes, reason })
 }
 
@@ -769,7 +773,7 @@ async fn upload_global_unapproved_fallback(
     State(state): State<Arc<AppState>>,
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, AdminError> {
-    let payload = parse_fallback_upload(multipart).await?;
+    let payload = parse_fallback_upload(multipart, state.config.fallback_upload_max_bytes).await?;
     let dir = global_unapproved_dir(&state.config);
     let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
     Ok(Json(serde_json::json!({
@@ -836,7 +840,7 @@ async fn upload_collection_unapproved_fallback(
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-    let payload = parse_fallback_upload(multipart).await?;
+    let payload = parse_fallback_upload(multipart, state.config.fallback_upload_max_bytes).await?;
     let dir = collection_fallback_dir(&state.config, &chain, &collection, "unapproved")?;
     let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
     let config = state
@@ -879,7 +883,7 @@ async fn upload_collection_render_fallback(
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-    let payload = parse_fallback_upload(multipart).await?;
+    let payload = parse_fallback_upload(multipart, state.config.fallback_upload_max_bytes).await?;
     let dir = collection_fallback_dir(&state.config, &chain, &collection, "render")?;
     let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
     let config = state
@@ -940,7 +944,7 @@ async fn upload_token_override(
     multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, AdminError> {
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
-    let payload = parse_fallback_upload(multipart).await?;
+    let payload = parse_fallback_upload(multipart, state.config.fallback_upload_max_bytes).await?;
     let dir = token_override_dir(&state.config, &chain, &collection, &token_id)?;
     let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
     let override_row = state
@@ -1040,6 +1044,18 @@ fn generate_and_write_fallback(
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
+    let parent = dir
+        .parent()
+        .ok_or_else(|| anyhow!("fallback dir has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let dir_name = dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("fallback");
+    let temp_dir = parent.join(format!(".fallback_tmp_{dir_name}_{updated_at_ms}"));
+    if temp_dir.exists() {
+        std::fs::remove_dir_all(&temp_dir)?;
+    }
 
     let formats = [OutputFormat::Webp, OutputFormat::Png, OutputFormat::Jpeg];
     let mut variants: Vec<(String, Vec<u8>)> = Vec::new();
@@ -1061,10 +1077,10 @@ fn generate_and_write_fallback(
         variants.push((name, bytes));
     }
 
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(&temp_dir)?;
     let mut variant_names = Vec::new();
     for (name, data) in variants {
-        let path = dir.join(&name);
+        let path = temp_dir.join(&name);
         write_atomic(&path, &data)?;
         variant_names.push(name);
     }
@@ -1076,7 +1092,22 @@ fn generate_and_write_fallback(
         variants: variant_names,
     };
     let meta_bytes = serde_json::to_vec_pretty(&meta)?;
-    write_atomic(&dir.join("meta.json"), &meta_bytes)?;
+    write_atomic(&temp_dir.join("meta.json"), &meta_bytes)?;
+    if dir.exists() {
+        let backup_dir = parent.join(format!(".fallback_old_{dir_name}_{updated_at_ms}"));
+        if backup_dir.exists() {
+            std::fs::remove_dir_all(&backup_dir)?;
+        }
+        std::fs::rename(&dir, &backup_dir)?;
+        if let Err(err) = std::fs::rename(&temp_dir, &dir) {
+            let _ = std::fs::rename(&backup_dir, &dir);
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return Err(err.into());
+        }
+        let _ = std::fs::remove_dir_all(&backup_dir);
+    } else {
+        std::fs::rename(&temp_dir, &dir)?;
+    }
     Ok(meta)
 }
 
@@ -2196,6 +2227,7 @@ mod tests {
             fallback_upload_max_pixels: 1,
             metrics_public: false,
             metrics_require_admin_key: false,
+            metrics_bearer_token: None,
             metrics_allow_ips: Vec::new(),
             metrics_top_ips: 0,
             metrics_top_collections: 0,

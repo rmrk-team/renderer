@@ -33,7 +33,7 @@ use serde_json::Value;
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path as StdPath, PathBuf};
+use std::path::{Component, Path as StdPath, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1771,6 +1771,14 @@ struct FallbackVariantFile {
 
 async fn read_fallback_meta(dir: &StdPath) -> Option<FallbackMeta> {
     let meta_path = dir.join("meta.json");
+    let metadata = tokio::fs::symlink_metadata(&meta_path).await.ok()?;
+    if metadata.file_type().is_symlink() {
+        warn!(
+            path = %meta_path.display(),
+            "fallback meta.json is a symlink"
+        );
+        return None;
+    }
     let bytes = tokio::fs::read(meta_path).await.ok()?;
     serde_json::from_slice(&bytes).ok()
 }
@@ -1790,7 +1798,14 @@ async fn load_fallback_variant(
     let variant_label = fallback_variant_label(og_mode, width);
     let filename = fallback_variant_filename(&variant_label, format);
     let path = dir.join(filename);
-    let metadata = tokio::fs::metadata(&path).await.ok()?;
+    let metadata = tokio::fs::symlink_metadata(&path).await.ok()?;
+    if metadata.file_type().is_symlink() {
+        warn!(
+            path = %path.display(),
+            "fallback variant is a symlink"
+        );
+        return None;
+    }
     let etag_label = if og_mode {
         format!("og-{}x{}", FALLBACK_OG_WIDTH, FALLBACK_OG_HEIGHT)
     } else {
@@ -1955,7 +1970,7 @@ async fn resolve_unapproved_fallback_head(
         if config.unapproved_fallback_enabled {
             if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
                 let dir_path = PathBuf::from(dir);
-                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                if !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir_path) {
                     warn!(
                         path = %dir_path.display(),
                         "unapproved fallback dir outside fallbacks dir"
@@ -2032,7 +2047,7 @@ async fn resolve_unapproved_fallback(
         if config.unapproved_fallback_enabled {
             if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
                 let dir_path = PathBuf::from(dir);
-                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                if !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir_path) {
                     warn!(
                         path = %dir_path.display(),
                         "unapproved fallback dir outside fallbacks dir"
@@ -2059,7 +2074,7 @@ async fn resolve_unapproved_fallback(
         }
     }
     let dir = global_unapproved_dir(&state.config);
-    fallback_file_response(
+    if let Some(response) = fallback_file_response(
         &dir,
         &request.format,
         &request.width_param,
@@ -2072,6 +2087,28 @@ async fn resolve_unapproved_fallback(
         headers,
     )
     .await
+    {
+        return Some(response);
+    }
+    let (width, height) = placeholder_dimensions(state, &request.width_param, request.og_mode);
+    let lines = vec![
+        "COLLECTION NOT APPROVED".to_string(),
+        "PLEASE REGISTER TO VIEW".to_string(),
+    ];
+    Some(
+        fallback_text_response(
+            &request.format,
+            width,
+            height,
+            &lines,
+            "unapproved",
+            "missing_fallback",
+            "unapproved",
+            StatusCode::OK,
+            None,
+        )
+        .await,
+    )
 }
 
 async fn resolve_render_failure_fallback(
@@ -2089,7 +2126,7 @@ async fn resolve_render_failure_fallback(
         if config.render_fallback_enabled {
             if let Some(dir) = config.render_fallback_dir.as_ref() {
                 let dir_path = PathBuf::from(dir);
-                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                if !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir_path) {
                     warn!(
                         path = %dir_path.display(),
                         "render fallback dir outside fallbacks dir"
@@ -2156,7 +2193,7 @@ async fn token_override_cached(
         .flatten();
     let value = row.and_then(|row| {
         let dir = PathBuf::from(&row.override_dir);
-        if !dir.starts_with(&state.config.fallbacks_dir) {
+        if !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir) {
             warn!(
                 path = %dir.display(),
                 "token override path outside fallbacks dir"
@@ -2723,27 +2760,14 @@ async fn metrics_access_allowed(state: &AppState, headers: &HeaderMap, ip: Optio
             return true;
         }
     }
-    if state.config.metrics_require_admin_key {
-        return is_admin_authorized(&state.config, headers);
-    }
-    let bearer = extract_bearer_token(headers).filter(|token| is_reasonable_token_len(token));
-    let key_info =
-        if let (Some(token), Some(secret)) = (bearer, state.config.api_key_secret.as_deref()) {
-            let hash = hash_api_key(secret, token);
-            if let Some(key) = state.api_key_cache.get(&hash).await {
-                Some(key)
-            } else {
-                let fetched = state.db.find_client_key_by_hash(&hash).await.ok().flatten();
-                if let Some(key) = fetched.as_ref() {
-                    state.api_key_cache.insert(hash, key.clone()).await;
-                }
-                fetched
-            }
-        } else {
-            None
-        };
-    if key_info.as_ref().map(|key| key.active).unwrap_or(false) {
+    if is_metrics_bearer_authorized(&state.config, headers) {
         return true;
+    }
+    if is_admin_authorized(&state.config, headers) {
+        return true;
+    }
+    if state.config.metrics_require_admin_key {
+        return false;
     }
     if let Some(ip) = ip {
         if let Some(rule) = ip_rule_for_ip(state, ip).await {
@@ -3289,6 +3313,31 @@ fn is_admin_authorized(config: &Config, headers: &HeaderMap) -> bool {
     false
 }
 
+fn is_metrics_bearer_authorized(config: &Config, headers: &HeaderMap) -> bool {
+    let token = match config.metrics_bearer_token.as_deref() {
+        Some(token) => token,
+        None => return false,
+    };
+    let bearer = match extract_bearer_token(headers) {
+        Some(bearer) => bearer,
+        None => return false,
+    };
+    bool::from(token.as_bytes().ct_eq(bearer.as_bytes()))
+}
+
+fn is_safe_fallback_dir(root: &StdPath, candidate: &StdPath) -> bool {
+    if !candidate.is_absolute() {
+        return false;
+    }
+    if candidate
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+    {
+        return false;
+    }
+    candidate.starts_with(root)
+}
+
 fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let mut parts = value.split_whitespace();
@@ -3486,6 +3535,109 @@ mod tests {
         assert!(body.is_empty());
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fallback_file_response_rejects_symlink_variant() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        let width = fallback_width_bucket(&None);
+        let variant_label = fallback_variant_label(false, width);
+        let filename = fallback_variant_filename(&variant_label, &OutputFormat::Png);
+        let meta = FallbackMeta {
+            updated_at_ms: 123,
+            source_sha256: "deadbeef".to_string(),
+            source_width: 10,
+            source_height: 10,
+            variants: vec![filename.clone()],
+        };
+        std::fs::write(
+            dir.path().join("meta.json"),
+            serde_json::to_vec_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+        let target = dir.path().join("real.png");
+        std::fs::write(&target, b"hello").unwrap();
+        symlink(&target, dir.path().join(filename)).unwrap();
+
+        let response = fallback_file_response(
+            dir.path(),
+            &OutputFormat::Png,
+            &None,
+            false,
+            "unapproved",
+            "global",
+            "public, max-age=60",
+            false,
+            None,
+            &HeaderMap::new(),
+        )
+        .await;
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn safe_fallback_dir_rejects_dot_components() {
+        let root = StdPath::new("/var/lib/renderer/fallbacks");
+        assert!(!is_safe_fallback_dir(
+            root,
+            StdPath::new("/var/lib/renderer/fallbacks/../secrets")
+        ));
+        assert!(!is_safe_fallback_dir(root, StdPath::new("relative/path")));
+        assert!(is_safe_fallback_dir(
+            root,
+            StdPath::new("/var/lib/renderer/fallbacks/collection")
+        ));
+    }
+
+    #[tokio::test]
+    async fn unapproved_fallback_uses_placeholder_when_missing() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let request = RenderRequest {
+            chain: "base".to_string(),
+            collection: "0xabc".to_string(),
+            token_id: "1".to_string(),
+            asset_id: "1".to_string(),
+            format: OutputFormat::Png,
+            cache_timestamp: None,
+            cache_param_present: false,
+            width_param: None,
+            og_mode: false,
+            overlay: None,
+            background: None,
+            fresh: false,
+            approval_context: ApprovalCheckContext::deny(),
+        };
+        let response = resolve_unapproved_fallback(&state, &request, &HeaderMap::new())
+            .await
+            .expect("fallback response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let reason = response
+            .headers()
+            .get("X-Renderer-Fallback-Reason")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(reason, "missing_fallback");
+    }
+
     #[tokio::test]
     async fn metrics_requires_auth_by_default() {
         let dir = tempdir().unwrap();
@@ -3512,7 +3664,7 @@ mod tests {
         let state = build_state(config).await;
         let headers = HeaderMap::new();
         let response = metrics(
-            State(state),
+            State(state.clone()),
             headers,
             ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
         )
@@ -3523,7 +3675,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn metrics_allows_api_key() {
+    async fn metrics_allows_metrics_bearer_token() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+            ("METRICS_PUBLIC", "false".to_string()),
+            ("METRICS_ALLOW_IPS", "".to_string()),
+            ("METRICS_BEARER_TOKEN", "metrics-token-123".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer metrics-token-123"),
+        );
+        let response = metrics(
+            State(state.clone()),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn metrics_rejects_api_key() {
         let dir = tempdir().unwrap();
         let _env = EnvGuard::new(vec![
             ("ADMIN_PASSWORD", "test-admin".to_string()),
@@ -3562,13 +3753,14 @@ mod tests {
             HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
         );
         let response = metrics(
-            State(state),
+            State(state.clone()),
             headers,
             ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
         )
         .await
-        .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        .unwrap_err()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
@@ -3596,7 +3788,7 @@ mod tests {
         let state = build_state(config).await;
         let headers = HeaderMap::new();
         let response = metrics(
-            State(state),
+            State(state.clone()),
             headers,
             ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
         )
@@ -3627,6 +3819,7 @@ mod tests {
             ("METRICS_REQUIRE_ADMIN_KEY", "true".to_string()),
             ("METRICS_PUBLIC", "false".to_string()),
             ("METRICS_ALLOW_IPS", "".to_string()),
+            ("METRICS_BEARER_TOKEN", "metrics-token-123".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;
@@ -3661,7 +3854,21 @@ mod tests {
             HeaderValue::from_static("Bearer test-admin"),
         );
         let response = metrics(
-            State(state),
+            State(state.clone()),
+            headers,
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer metrics-token-123"),
+        );
+        let response = metrics(
+            State(state.clone()),
             headers,
             ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 4242))),
         )
@@ -3685,6 +3892,9 @@ fn route_group(path: &str) -> &'static str {
     }
     if is_openapi_path(path) {
         return "openapi";
+    }
+    if is_metrics_path(path) {
+        return "metrics";
     }
     if path.starts_with("/render/") || path.starts_with("/production/create/") {
         return "render";

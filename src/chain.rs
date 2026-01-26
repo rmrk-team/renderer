@@ -778,6 +778,7 @@ mod tests {
             fallback_upload_max_pixels: 1,
             metrics_public: false,
             metrics_require_admin_key: false,
+            metrics_bearer_token: None,
             metrics_allow_ips: Vec::new(),
             metrics_top_ips: 0,
             metrics_top_collections: 0,

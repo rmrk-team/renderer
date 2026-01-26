@@ -24,6 +24,7 @@ Performance note:
 
 - `METRICS_REFRESH_INTERVAL_SECONDS` controls the cheap refresh loop (set to `0` to disable).
 - `METRICS_EXPENSIVE_REFRESH_SECONDS` controls disk scans for fallback/render counts (defaults to 300s).
+- For ultra-high RPS, set `METRICS_TOP_IPS=0` and `METRICS_TOP_COLLECTIONS=0` to skip Top‑K work.
 
 Grafana provisioning:
 
@@ -45,7 +46,7 @@ scrape_configs:
 3. Provide access to `/metrics` via one of:
 
 - `METRICS_ALLOW_IPS=127.0.0.1/32` (recommended for local scrape), or
-- a bearer token in the Prometheus config:
+- a dedicated bearer token (set `METRICS_BEARER_TOKEN`) in the Prometheus config:
 
 ```
 scrape_configs:
@@ -53,12 +54,17 @@ scrape_configs:
     metrics_path: /metrics
     authorization:
       type: Bearer
-      credentials: "<api-key-or-admin-password>"
+      credentials: "<metrics-bearer-token>"
     static_configs:
       - targets: ["127.0.0.1:8080"]
 ```
 
 4. Add Prometheus as a Grafana datasource and use the queries below to build panels.
+
+Notes:
+
+- Admin bearer (`ADMIN_PASSWORD`) can access `/metrics`. Set `METRICS_REQUIRE_ADMIN_KEY=true` if
+  you want to require admin auth (allowlisted IPs and `METRICS_BEARER_TOKEN` still work).
 
 ## Dashboards (minimum viable panels)
 

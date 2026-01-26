@@ -97,8 +97,8 @@ access is granted when any of the following are true:
 
 - `METRICS_PUBLIC=true`
 - request IP is in `METRICS_ALLOW_IPS`
-- a valid API key is presented (unless `METRICS_REQUIRE_ADMIN_KEY=true`)
-- admin bearer auth is presented (`METRICS_REQUIRE_ADMIN_KEY=true`)
+- bearer matches `METRICS_BEARER_TOKEN` (recommended)
+- admin bearer auth is presented (`ADMIN_PASSWORD`)
 
 See `metrics/README.md` for dashboards, Docker compose, and non-Docker setup guidance.
 
@@ -107,7 +107,7 @@ Minimal non-Docker steps:
 1. Install Prometheus + Grafana (package manager or upstream binaries).
 2. Configure Prometheus to scrape `http://127.0.0.1:8080/metrics` and either:
    - allowlist `METRICS_ALLOW_IPS=127.0.0.1/32`, or
-   - use a bearer token in the scrape config.
+   - set `METRICS_BEARER_TOKEN` and use it in the scrape config.
 3. Add Prometheus as a Grafana datasource and use the panel queries from `metrics/README.md`.
 
 Security note: `docker-compose.metrics.yml` binds ports to `127.0.0.1` and disables anonymous
