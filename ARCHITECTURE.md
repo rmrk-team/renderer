@@ -5,6 +5,7 @@
 - The render pipeline lives in `src/render.rs` and is responsible for composition, rasterization, and cache keys.
 - Asset resolution + pinning live in `src/assets.rs` with local IPFS support from `src/local_ipfs.rs`.
 - Disk caches and eviction live in `src/cache.rs`.
+- Fallback overrides are stored under `FALLBACKS_DIR` (outside cache) and served from disk via `src/http.rs`.
 - SQLite state is handled in `src/db.rs` (collections, approvals, warmup state, usage).
 
 ## Module boundaries

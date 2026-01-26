@@ -9,7 +9,8 @@ docker compose -f docker-compose.metrics.yml up -d
 ```
 
 By default Prometheus scrapes `host.docker.internal:8080`. If your renderer runs on a different
-port, update `metrics/prometheus.yml`.
+port, update `metrics/prometheus.yml`. On Linux, `host.docker.internal` may not resolve; use
+`172.17.0.1` or run Prometheus on the host and scrape `127.0.0.1`.
 
 Security defaults:
 
@@ -17,6 +18,7 @@ Security defaults:
 - Anonymous Grafana access is disabled.
 - Set `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` before first start.
 - Do not expose these ports publicly; use SSH tunneling or a reverse proxy with auth if needed.
+- Docker images are pinned to versions in `docker-compose.metrics.yml` for reproducibility.
 
 Performance note:
 

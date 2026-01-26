@@ -207,8 +207,7 @@ impl Config {
             env::var("CACHE_DIR").unwrap_or_else(|_| "/var/cache/renderer".to_string()),
         );
         let fallbacks_dir = PathBuf::from(
-            env::var("FALLBACKS_DIR")
-                .unwrap_or_else(|_| cache_dir.join("fallbacks").to_string_lossy().to_string()),
+            env::var("FALLBACKS_DIR").unwrap_or_else(|_| "/var/lib/renderer/fallbacks".to_string()),
         );
         let pinning_enabled = parse_bool("PINNING_ENABLED", true);
         let pinned_dir = PathBuf::from(

@@ -12,7 +12,6 @@ use tracing::{info, warn};
 
 #[derive(Clone)]
 pub struct CacheManager {
-    pub base_dir: PathBuf,
     pub renders_dir: PathBuf,
     pub assets_dir: PathBuf,
     pub asset_meta_dir: PathBuf,
@@ -120,7 +119,6 @@ impl CacheManager {
         std::fs::create_dir_all(&composites_dir)?;
         std::fs::create_dir_all(&overlays_dir)?;
         Ok(Self {
-            base_dir,
             renders_dir,
             assets_dir,
             asset_meta_dir,

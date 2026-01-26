@@ -1954,8 +1954,16 @@ async fn resolve_unapproved_fallback_head(
     if let Some(config) = config {
         if config.unapproved_fallback_enabled {
             if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
+                let dir_path = PathBuf::from(dir);
+                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                    warn!(
+                        path = %dir_path.display(),
+                        "unapproved fallback dir outside fallbacks dir"
+                    );
+                    return None;
+                }
                 if let Some(response) = fallback_head_from_dir(
-                    StdPath::new(dir),
+                    dir_path.as_path(),
                     &request.format,
                     &request.width_param,
                     request.og_mode,
@@ -2023,8 +2031,16 @@ async fn resolve_unapproved_fallback(
     if let Some(config) = config {
         if config.unapproved_fallback_enabled {
             if let Some(dir) = config.unapproved_fallback_dir.as_ref() {
+                let dir_path = PathBuf::from(dir);
+                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                    warn!(
+                        path = %dir_path.display(),
+                        "unapproved fallback dir outside fallbacks dir"
+                    );
+                    return None;
+                }
                 if let Some(response) = fallback_file_response(
-                    StdPath::new(dir),
+                    dir_path.as_path(),
                     &request.format,
                     &request.width_param,
                     request.og_mode,
@@ -2072,8 +2088,16 @@ async fn resolve_render_failure_fallback(
     if let Some(config) = config {
         if config.render_fallback_enabled {
             if let Some(dir) = config.render_fallback_dir.as_ref() {
+                let dir_path = PathBuf::from(dir);
+                if !dir_path.starts_with(&state.config.fallbacks_dir) {
+                    warn!(
+                        path = %dir_path.display(),
+                        "render fallback dir outside fallbacks dir"
+                    );
+                    return None;
+                }
                 return fallback_file_response(
-                    StdPath::new(dir),
+                    dir_path.as_path(),
                     &request.format,
                     &request.width_param,
                     request.og_mode,

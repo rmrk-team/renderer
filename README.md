@@ -704,10 +704,24 @@ Images are processed on upload (size limits + re-encoding), stored under `FALLBA
 and served directly from disk with consistent `ETag` + cache headers. Authorized clients
 can still bypass fallbacks with `?debug=1`/`?raw=1` to see JSON errors.
 
+Fallbacks are not cache. Keep `FALLBACKS_DIR` outside `CACHE_DIR` (default:
+`/var/lib/renderer/fallbacks`). Cache purge operations only remove cache subdirectories.
+
 Token override lookups are cached in memory; tune with
 `TOKEN_OVERRIDE_CACHE_TTL_SECONDS` and `TOKEN_OVERRIDE_CACHE_CAPACITY`.
 
 See `spec-docs/RENDERER_SPEC_v1.2_UPDATED.md` for full behavior and endpoints.
+
+Admin API examples:
+
+- Upload global unapproved fallback:
+  `curl -X POST -H "Authorization: Bearer <admin>" -F file=@fallback.png http://127.0.0.1:8080/admin/api/fallbacks/unapproved`
+- Upload per-collection unapproved fallback:
+  `curl -X POST -H "Authorization: Bearer <admin>" -F file=@fallback.png http://127.0.0.1:8080/admin/api/collections/<chain>/<collection>/fallbacks/unapproved`
+- Upload per-collection render fallback:
+  `curl -X POST -H "Authorization: Bearer <admin>" -F file=@fallback.png http://127.0.0.1:8080/admin/api/collections/<chain>/<collection>/fallbacks/render`
+- Upload token override:
+  `curl -X POST -H "Authorization: Bearer <admin>" -F file=@fallback.png http://127.0.0.1:8080/admin/api/collections/<chain>/<collection>/overrides/<token_id>`
 
 ## Build & Deploy
 

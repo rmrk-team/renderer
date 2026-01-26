@@ -411,7 +411,6 @@ impl PrimaryAssetCache {
                 return None;
             }
             let asset_id = entry.asset_id;
-            touch_key(&mut inner.order, key);
             return match asset_id {
                 Some(asset_id) => Some(PrimaryAssetCacheValue::Hit(asset_id)),
                 None => Some(PrimaryAssetCacheValue::Negative),
@@ -508,7 +507,6 @@ impl ApiKeyCache {
                 return None;
             }
             let key = entry.key.clone();
-            touch_key(&mut inner.order, key_hash);
             return Some(key);
         }
         None
@@ -568,7 +566,6 @@ impl ApprovalNegativeCache {
                 inner.order.retain(|item| item != key);
                 return false;
             }
-            touch_key(&mut inner.order, key);
             return true;
         }
         false
@@ -627,7 +624,6 @@ impl TokenOverrideCache {
             return None;
         }
         if let Some(value) = value {
-            touch_key(&mut inner.order, key);
             return Some(value);
         }
         None
@@ -729,7 +725,6 @@ impl CollectionConfigCache {
                 return None;
             }
             let value = entry.value.clone();
-            touch_key(&mut inner.order, key);
             return Some(value);
         }
         None
@@ -790,7 +785,6 @@ impl CollectionEpochCache {
                 return None;
             }
             let value = entry.value;
-            touch_key(&mut inner.order, key);
             return Some(value);
         }
         None
@@ -851,7 +845,6 @@ impl ThemeSourceCache {
                 return None;
             }
             let sources = entry.sources.clone();
-            touch_key(&mut inner.order, key);
             return Some(sources);
         }
         None
@@ -906,7 +899,6 @@ impl CatalogMetadataCache {
                 return None;
             }
             let value = entry.metadata_uri.clone();
-            touch_key(&mut inner.order, key);
             return Some(value);
         }
         None
@@ -961,7 +953,6 @@ impl CatalogThemeCache {
                 return None;
             }
             let value = entry.themes.clone();
-            touch_key(&mut inner.order, key);
             return Some(value);
         }
         None
@@ -988,13 +979,6 @@ impl CatalogThemeCache {
                 inner.map.remove(&oldest);
             }
         }
-    }
-}
-
-fn touch_key(order: &mut VecDeque<String>, key_hash: &str) {
-    if let Some(pos) = order.iter().position(|item| item == key_hash) {
-        order.remove(pos);
-        order.push_back(key_hash.to_string());
     }
 }
 

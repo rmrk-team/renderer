@@ -40,6 +40,8 @@ pub struct Metrics {
     top_collection_request_last: Mutex<HashMap<String, u64>>,
     top_collection_bytes_last: Mutex<HashMap<String, u64>>,
     ip_label_mode: MetricsIpLabelMode,
+    top_ip_capacity: usize,
+    top_collection_capacity: usize,
     expensive_cache: Mutex<ExpensiveMetricsCache>,
     expensive_interval: Duration,
 }
@@ -238,6 +240,8 @@ impl Metrics {
             top_collection_request_last: Mutex::new(HashMap::new()),
             top_collection_bytes_last: Mutex::new(HashMap::new()),
             ip_label_mode: config.metrics_ip_label_mode,
+            top_ip_capacity: config.metrics_top_ips,
+            top_collection_capacity: config.metrics_top_collections,
             expensive_cache: Mutex::new(ExpensiveMetricsCache::default()),
             expensive_interval: config.metrics_expensive_refresh_interval,
         }
@@ -319,6 +323,9 @@ impl Metrics {
     }
 
     pub fn observe_top_ip(&self, ip: IpAddr, bytes: u64) {
+        if self.top_ip_capacity == 0 {
+            return;
+        }
         let label = self.ip_label(ip);
         {
             let mut tracker = self
@@ -337,6 +344,9 @@ impl Metrics {
     }
 
     pub fn observe_top_collection(&self, chain: &str, collection: &str, bytes: u64) {
+        if self.top_collection_capacity == 0 {
+            return;
+        }
         let key = format!("{chain}|{collection}");
         {
             let mut tracker = self
@@ -355,6 +365,9 @@ impl Metrics {
     }
 
     pub fn flush_topk(&self) {
+        if self.top_ip_capacity == 0 && self.top_collection_capacity == 0 {
+            return;
+        }
         let top_ips = {
             let tracker = self
                 .top_ip_request_tracker
@@ -447,6 +460,8 @@ struct ExpensiveMetricsCache {
     render_entries: u64,
     fallback_entries: u64,
     fallback_bytes: u64,
+    pinned_entries: u64,
+    pinned_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -565,20 +580,16 @@ pub async fn refresh_metrics(state: &AppState) {
         metrics.set_disk_bytes("render_cache", render_bytes);
         metrics.set_disk_bytes("asset_cache", asset_bytes);
     }
-    if let Ok(bytes) = state.db.pinned_asset_bytes().await {
-        metrics.set_disk_bytes("pinned", bytes);
-    }
     if let Ok(metadata) = tokio::fs::metadata(&state.config.db_path).await {
         metrics.set_disk_bytes("db", metadata.len());
     }
 
-    if let Ok(counts) = state.db.pinned_asset_counts().await {
-        metrics.set_cache_entries("pinned_assets", counts.pinned as u64);
-    }
-    let (render_entries, fallback_entries, fallback_bytes) =
+    let (render_entries, fallback_entries, fallback_bytes, pinned_entries, pinned_bytes) =
         refresh_expensive_metrics(state, metrics).await;
     metrics.set_cache_entries("render_cache", render_entries);
     metrics.set_cache_entries("fallback_variants", fallback_entries);
+    metrics.set_cache_entries("pinned_assets", pinned_entries);
+    metrics.set_disk_bytes("pinned", pinned_bytes);
     metrics.set_disk_bytes("fallbacks", fallback_bytes);
 
     metrics.set_semaphore_in_use(
@@ -619,7 +630,10 @@ pub async fn refresh_metrics(state: &AppState) {
     metrics.flush_topk();
 }
 
-async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64, u64, u64) {
+async fn refresh_expensive_metrics(
+    state: &AppState,
+    metrics: &Metrics,
+) -> (u64, u64, u64, u64, u64) {
     if metrics.expensive_interval.is_zero() {
         let cache = metrics
             .expensive_cache
@@ -629,6 +643,8 @@ async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64,
             cache.render_entries,
             cache.fallback_entries,
             cache.fallback_bytes,
+            cache.pinned_entries,
+            cache.pinned_bytes,
         );
     }
     let (should_refresh, cached_values) = {
@@ -646,6 +662,8 @@ async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64,
                 cache.render_entries,
                 cache.fallback_entries,
                 cache.fallback_bytes,
+                cache.pinned_entries,
+                cache.pinned_bytes,
             ),
         )
     };
@@ -659,6 +677,13 @@ async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64,
         .scan_dir_size(&state.config.fallbacks_dir)
         .await
         .unwrap_or(0);
+    let pinned_entries = state
+        .db
+        .pinned_asset_counts()
+        .await
+        .map(|counts| counts.pinned as u64)
+        .unwrap_or(0);
+    let pinned_bytes = state.db.pinned_asset_bytes().await.unwrap_or(0);
     let mut cache = metrics
         .expensive_cache
         .lock()
@@ -666,8 +691,16 @@ async fn refresh_expensive_metrics(state: &AppState, metrics: &Metrics) -> (u64,
     cache.render_entries = render_entries;
     cache.fallback_entries = fallback_entries;
     cache.fallback_bytes = fallback_bytes;
+    cache.pinned_entries = pinned_entries;
+    cache.pinned_bytes = pinned_bytes;
     cache.updated_at = Some(std::time::Instant::now());
-    (render_entries, fallback_entries, fallback_bytes)
+    (
+        render_entries,
+        fallback_entries,
+        fallback_bytes,
+        pinned_entries,
+        pinned_bytes,
+    )
 }
 
 fn semaphore_in_use(max: usize, semaphore: &Semaphore) -> i64 {
@@ -697,13 +730,16 @@ fn count_files_sync(path: &std::path::Path) -> u64 {
             Err(_) => continue,
         };
         for entry in entries.flatten() {
-            let meta = match entry.metadata() {
-                Ok(meta) => meta,
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
                 Err(_) => continue,
             };
-            if meta.is_dir() {
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 stack.push(entry.path());
-            } else if meta.is_file() {
+            } else if file_type.is_file() {
                 total = total.saturating_add(1);
             }
         }

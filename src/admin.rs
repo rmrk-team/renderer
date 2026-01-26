@@ -625,7 +625,19 @@ async fn purge_cache(
     } else if payload.include_assets.unwrap_or(false) {
         state
             .cache
-            .remove_dir_if_exists(&state.cache.base_dir)
+            .remove_dir_if_exists(&state.cache.renders_dir)
+            .await?;
+        state
+            .cache
+            .remove_dir_if_exists(&state.cache.assets_dir)
+            .await?;
+        state
+            .cache
+            .remove_dir_if_exists(&state.cache.composites_dir)
+            .await?;
+        state
+            .cache
+            .remove_dir_if_exists(&state.cache.overlays_dir)
             .await?;
         state.cache.ensure_dirs().await?;
     } else {

@@ -5,6 +5,7 @@
 export ADMIN_PASSWORD="change-me"
 export DB_PATH="./tmp/renderer.db"
 export CACHE_DIR="./tmp/cache"
+export FALLBACKS_DIR="./tmp/fallbacks"
 export PINNED_DIR="./tmp/pinned"
 export ACCESS_MODE="open"
 export REQUIRE_APPROVAL="false"
@@ -17,6 +18,8 @@ Smoke check:
 ```bash
 curl http://127.0.0.1:8080/healthz
 ```
+
+Note: keep `FALLBACKS_DIR` outside `CACHE_DIR` so cache purges never delete fallbacks.
 
 ## Tests
 ```bash
