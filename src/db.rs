@@ -424,6 +424,8 @@ impl Database {
           key TEXT PRIMARY KEY,
           last_refresh_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS fresh_requests_last_refresh_idx
+          ON fresh_requests(last_refresh_at);
         INSERT OR IGNORE INTO warmup_state (id, paused) VALUES (1, 0);
         "#;
         sqlx::query(schema).execute(&self.pool).await?;
@@ -2419,6 +2421,19 @@ impl Database {
         })
     }
 
+    pub async fn prune_fresh_requests(&self, retention_days: u64) -> Result<()> {
+        if retention_days == 0 {
+            return Ok(());
+        }
+        let retention_seconds = retention_days.saturating_mul(24 * 3600);
+        let cutoff = now_epoch().saturating_sub(retention_seconds as i64);
+        sqlx::query("DELETE FROM fresh_requests WHERE last_refresh_at < ?1")
+            .bind(cutoff)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn get_approval_last_block(&self, chain: &str) -> Result<Option<i64>> {
         let row = sqlx::query("SELECT last_block FROM approval_state WHERE chain = ?1")
             .bind(chain)
@@ -3038,6 +3053,8 @@ mod tests {
             approval_sync_interval_seconds: 900,
             approval_negative_cache_seconds: 0,
             approval_negative_cache_capacity: 0,
+            approval_on_demand_rate_limit_per_minute: 0,
+            approval_on_demand_rate_limit_burst: 0,
             approval_enumeration_enabled: true,
             max_approval_staleness_seconds: 0,
             approvals_contract_chain: None,
@@ -3098,6 +3115,7 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             token_state_check_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
+            fresh_request_retention_days: 0,
             primary_asset_cache_ttl: std::time::Duration::from_secs(0),
             primary_asset_negative_ttl: std::time::Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

@@ -65,6 +65,29 @@ pub struct RenderRequest {
     pub overlay: Option<String>,
     pub background: Option<String>,
     pub fresh: bool,
+    pub approval_context: ApprovalCheckContext,
+}
+
+#[derive(Debug, Clone)]
+pub struct ApprovalCheckContext {
+    pub allow_on_demand: bool,
+    pub identity_key: Option<Arc<str>>,
+}
+
+impl ApprovalCheckContext {
+    pub fn deny() -> Self {
+        Self {
+            allow_on_demand: false,
+            identity_key: None,
+        }
+    }
+
+    pub fn allow(identity_key: Option<Arc<str>>) -> Self {
+        Self {
+            allow_on_demand: true,
+            identity_key,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +133,16 @@ pub enum RenderLimitError {
 pub enum RenderQueueError {
     #[error("render queue full")]
     QueueFull,
+}
+
+#[derive(Debug, Error)]
+pub enum ApprovalCheckError {
+    #[error("collection not approved")]
+    NotApproved,
+    #[error("approval check rate limited")]
+    RateLimited { retry_after_seconds: u64 },
+    #[error("collection approval stale")]
+    Stale,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,7 +204,6 @@ struct LayerImage {
 
 struct RenderCacheSelection {
     key: RenderCacheKey,
-    variant_key: String,
     fingerprint: String,
 }
 
@@ -217,7 +249,13 @@ pub async fn render_token_with_limit(
 ) -> Result<RenderResponse> {
     let mut request = request;
     apply_cache_epoch(&state, &mut request).await?;
-    ensure_collection_approved(&state, &request.chain, &request.collection).await?;
+    ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await?;
 
     validate_query_lengths(
         &request,
@@ -229,8 +267,13 @@ pub async fn render_token_with_limit(
     let cache_enabled = request.cache_timestamp.is_some();
 
     let singleflight_key = format!(
-        "{}:{}:{}:{}:{}",
-        request.chain, request.collection, request.token_id, request.asset_id, variant_key
+        "{}:{}:{}:{}:{}:{}",
+        request.chain,
+        request.collection,
+        request.token_id,
+        request.asset_id,
+        variant_key,
+        request.format.extension()
     );
 
     loop {
@@ -274,6 +317,7 @@ pub async fn render_token_with_limit(
                     request: request.clone(),
                     width,
                     variant_key: variant_key.clone(),
+                    base_key: base_key.clone(),
                     singleflight_permit: permit,
                     key_limit,
                     respond_to: tx,
@@ -288,13 +332,13 @@ pub async fn render_token_with_limit(
                 let _singleflight = permit;
                 let _key_permit = acquire_key_permit(&state, key_limit).await?;
                 let _permit = state.render_semaphore.acquire().await?;
-                render_token_uncached(&state, &request, width, &variant_key).await
+                render_token_uncached(&state, &request, width, &variant_key, &base_key).await
             });
             return handle.await?;
         }
         let _key_permit = acquire_key_permit(&state, key_limit).await?;
         let _permit = state.render_semaphore.acquire().await?;
-        let result = render_token_uncached(&state, &request, width, &variant_key).await;
+        let result = render_token_uncached(&state, &request, width, &variant_key, &base_key).await;
         return result;
     }
 }
@@ -369,6 +413,7 @@ pub async fn ensure_collection_approved(
     state: &AppState,
     chain: &str,
     collection: &str,
+    approval_context: &ApprovalCheckContext,
 ) -> Result<()> {
     if !require_approval(state).await? {
         return Ok(());
@@ -380,8 +425,16 @@ pub async fn ensure_collection_approved(
         .as_ref()
         .map(|config| is_approval_stale(config, state.config.max_approval_staleness_seconds))
         .unwrap_or(false);
-    if approved && !stale {
-        return Ok(());
+    if approved {
+        if !stale {
+            return Ok(());
+        }
+        if !approval_context.allow_on_demand {
+            return Err(ApprovalCheckError::Stale.into());
+        }
+    }
+    if !approval_context.allow_on_demand {
+        return Err(ApprovalCheckError::NotApproved.into());
     }
     if !has_config
         && state
@@ -389,12 +442,33 @@ pub async fn ensure_collection_approved(
             .contains(&format!("{chain}:{collection}"))
             .await
     {
-        return Err(anyhow!("collection not approved"));
+        return Err(ApprovalCheckError::NotApproved.into());
     }
     if let Some(config) = config.as_ref() {
         let now = now_epoch();
         if should_skip_on_demand(config, now, state.config.approval_negative_cache_seconds) {
-            return Err(anyhow!("collection not approved"));
+            return Err(ApprovalCheckError::NotApproved.into());
+        }
+    }
+    if !has_config {
+        let identity = approval_context.identity_key.as_deref().unwrap_or("");
+        if identity.is_empty() {
+            return Err(ApprovalCheckError::NotApproved.into());
+        }
+        let limit = state
+            .approval_on_demand_limiter
+            .check(
+                identity,
+                state.config.approval_on_demand_rate_limit_per_minute,
+                state.config.approval_on_demand_rate_limit_burst,
+            )
+            .await;
+        if !limit.allowed {
+            let retry_after = limit.reset_seconds.max(1);
+            return Err(ApprovalCheckError::RateLimited {
+                retry_after_seconds: retry_after,
+            }
+            .into());
         }
     }
     match on_demand_approval_check(state, chain, collection).await? {
@@ -431,7 +505,7 @@ pub async fn ensure_collection_approved(
                     .insert(format!("{chain}:{collection}"))
                     .await;
             }
-            Err(anyhow!("collection not approved"))
+            Err(ApprovalCheckError::NotApproved.into())
         }
     }
 }
@@ -622,6 +696,7 @@ pub(crate) async fn render_token_uncached(
     request: &RenderRequest,
     width: Option<u32>,
     variant_key: &str,
+    base_key: &str,
 ) -> Result<RenderResponse> {
     let _slow_guard = SlowRenderGuard::new(request, width);
     let debug_context = debug_render_context(request);
@@ -1014,12 +1089,13 @@ pub(crate) async fn render_token_uncached(
         if let Some(selection) = cache_selection.as_ref() {
             state.cache.store_file(&selection.key.path, &bytes).await?;
             etag = Some(selection.key.etag.clone());
+            // Base key caps bg/overlay variants to prevent cache explosion.
             let limiter_key = render_cache_variant_key(
                 &request.chain,
                 &request.collection,
                 &request.token_id,
                 &request.asset_id,
-                &selection.variant_key,
+                base_key,
                 request.format.extension(),
             )?;
             let evicted = state.render_cache_limiter.register(
@@ -1039,6 +1115,7 @@ pub(crate) async fn render_token_uncached(
     if cache_control == "no-store" {
         etag = None;
     }
+    let content_length = bytes.len() as u64;
     Ok(RenderResponse {
         bytes,
         content_type: request.format.mime(),
@@ -1049,7 +1126,7 @@ pub(crate) async fn render_token_uncached(
         cache_control,
         etag,
         cached_path: None,
-        content_length: None,
+        content_length: Some(content_length),
     })
 }
 
@@ -1756,7 +1833,6 @@ async fn compute_render_cache_key_for_layers(
     )?;
     Ok(Some(RenderCacheSelection {
         key,
-        variant_key: fingerprinted_variant_key,
         fingerprint,
     }))
 }
@@ -3262,6 +3338,7 @@ mod tests {
             overlay: Some("watermark".to_string()),
             background: Some("#ffffff".to_string()),
             fresh: false,
+            approval_context: ApprovalCheckContext::deny(),
         };
         let (_, base_key) = resolve_width(&request.width_param, request.og_mode).unwrap();
         let key = build_variant_key(&base_key, &request);
@@ -3289,6 +3366,7 @@ mod tests {
             overlay: Some("invalid".to_string()),
             background: Some("not-a-color".to_string()),
             fresh: false,
+            approval_context: ApprovalCheckContext::deny(),
         };
         let (_, base_key) = resolve_width(&request.width_param, request.og_mode).unwrap();
         let key = build_variant_key(&base_key, &request);
@@ -3460,6 +3538,7 @@ mod tests {
                 overlay: None,
                 background: None,
                 fresh: false,
+            approval_context: ApprovalCheckContext::deny(),
             };
 
             let render = render_token(state.clone(), request).await?;

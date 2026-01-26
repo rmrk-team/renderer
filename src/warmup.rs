@@ -1,6 +1,6 @@
 use crate::canonical;
 use crate::db::WarmupJob;
-use crate::render::{OutputFormat, RenderRequest, render_token};
+use crate::render::{ApprovalCheckContext, OutputFormat, RenderRequest, render_token};
 use crate::state::AppState;
 use anyhow::{Result, anyhow};
 use serde::Deserialize;
@@ -183,6 +183,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
         }
     }
     let mut errors = Vec::new();
+    let approval_context = ApprovalCheckContext::allow(Some(Arc::from("internal:warmup")));
 
     for width in widths {
         if state.db.is_warmup_job_canceled(job.id).await? {
@@ -201,6 +202,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
             overlay: None,
             background: None,
             fresh: false,
+            approval_context: approval_context.clone(),
         };
         match render_token(state.clone(), request).await {
             Ok(response) => {
@@ -229,6 +231,7 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
             overlay: None,
             background: None,
             fresh: false,
+            approval_context: approval_context.clone(),
         };
         match render_token(state.clone(), request).await {
             Ok(response) => {

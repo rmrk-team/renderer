@@ -4,10 +4,11 @@ use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
 use crate::failure_log::FailureLog;
-use crate::rate_limit::{KeyRateLimiter, RateLimiter};
+use crate::rate_limit::{IdentityRateLimiter, KeyRateLimiter, RateLimiter};
 use crate::render_queue::RenderJob;
 use crate::usage::UsageEvent;
 use anyhow::Result;
+use dashmap::DashMap;
 use ipnet::IpNet;
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
@@ -34,6 +35,7 @@ pub struct AppState {
     pub rate_limiter: RateLimiter,
     pub key_rate_limiter: KeyRateLimiter,
     pub auth_fail_limiter: RateLimiter,
+    pub approval_on_demand_limiter: IdentityRateLimiter,
     pub key_render_limiter: KeyRenderLimiter,
     pub usage_tx: Option<mpsc::Sender<UsageEvent>>,
     pub render_queue_tx: Option<mpsc::Sender<RenderJob>>,
@@ -81,6 +83,7 @@ impl AppState {
             config.auth_failure_rate_limit_per_minute,
             config.auth_failure_rate_limit_burst,
         );
+        let approval_on_demand_limiter = IdentityRateLimiter::new();
         let key_render_limiter = KeyRenderLimiter::new();
         let api_key_cache =
             ApiKeyCache::new(config.api_key_cache_ttl, config.api_key_cache_capacity);
@@ -124,6 +127,7 @@ impl AppState {
             rate_limiter,
             key_rate_limiter,
             auth_fail_limiter,
+            approval_on_demand_limiter,
             key_render_limiter,
             usage_tx,
             render_queue_tx,
@@ -178,7 +182,7 @@ const CATALOG_THEME_CACHE_CAPACITY: usize = 2048;
 
 #[derive(Clone)]
 pub struct KeyRenderLimiter {
-    inner: Arc<Mutex<HashMap<i64, KeyRenderEntry>>>,
+    inner: Arc<DashMap<i64, KeyRenderEntry>>,
 }
 
 struct KeyRenderEntry {
@@ -189,14 +193,13 @@ struct KeyRenderEntry {
 impl KeyRenderLimiter {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
+            inner: Arc::new(DashMap::new()),
         }
     }
 
     pub async fn acquire(&self, key_id: i64, limit: usize) -> Result<OwnedSemaphorePermit> {
         let semaphore = {
-            let mut guard = self.inner.lock().await;
-            let entry = guard.entry(key_id).or_insert_with(|| KeyRenderEntry {
+            let mut entry = self.inner.entry(key_id).or_insert_with(|| KeyRenderEntry {
                 limit,
                 semaphore: Arc::new(Semaphore::new(limit.max(1))),
             });

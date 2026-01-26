@@ -22,6 +22,7 @@ pub struct FailureLog {
 pub struct FailureLogEntry {
     pub timestamp: String,
     pub timestamp_ms: u64,
+    pub request_id: Option<String>,
     pub method: String,
     pub path: String,
     pub status: u16,
@@ -40,6 +41,7 @@ impl FailureLogEntry {
         ip: Option<String>,
         identity: Option<String>,
         reason: Option<String>,
+        request_id: Option<String>,
     ) -> Self {
         let timestamp = OffsetDateTime::now_utc()
             .format(&Rfc3339)
@@ -51,6 +53,7 @@ impl FailureLogEntry {
         Self {
             timestamp,
             timestamp_ms,
+            request_id,
             method,
             path,
             status,

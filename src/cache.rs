@@ -1,6 +1,8 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
 use filetime::FileTime;
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -320,24 +322,27 @@ impl CacheManager {
 
 #[derive(Clone)]
 pub struct RenderSingleflight {
-    inner: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    inner: Arc<DashMap<String, Arc<Notify>>>,
 }
 
 impl RenderSingleflight {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
+            inner: Arc::new(DashMap::new()),
         }
     }
 
     pub async fn acquire(&self, key: &str) -> SingleflightPermit {
-        let mut map = self.inner.lock().unwrap_or_else(|err| err.into_inner());
-        if let Some(notify) = map.get(key) {
-            return SingleflightPermit::waiter(self.inner.clone(), notify.clone(), key.to_string());
+        match self.inner.entry(key.to_string()) {
+            Entry::Occupied(entry) => {
+                SingleflightPermit::waiter(self.inner.clone(), entry.get().clone(), key.to_string())
+            }
+            Entry::Vacant(entry) => {
+                let notify = Arc::new(Notify::new());
+                entry.insert(notify.clone());
+                SingleflightPermit::leader(self.inner.clone(), notify, key.to_string())
+            }
         }
-        let notify = Arc::new(Notify::new());
-        map.insert(key.to_string(), notify.clone());
-        SingleflightPermit::leader(self.inner.clone(), notify, key.to_string())
     }
 }
 
@@ -345,12 +350,12 @@ pub struct SingleflightPermit {
     key: String,
     notify: Arc<Notify>,
     is_leader: bool,
-    inner: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+    inner: Arc<DashMap<String, Arc<Notify>>>,
 }
 
 impl SingleflightPermit {
     fn leader(
-        inner: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+        inner: Arc<DashMap<String, Arc<Notify>>>,
         notify: Arc<Notify>,
         key: String,
     ) -> Self {
@@ -363,7 +368,7 @@ impl SingleflightPermit {
     }
 
     fn waiter(
-        inner: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
+        inner: Arc<DashMap<String, Arc<Notify>>>,
         notify: Arc<Notify>,
         key: String,
     ) -> Self {
@@ -393,8 +398,7 @@ impl Drop for SingleflightPermit {
         if !self.is_leader {
             return;
         }
-        let mut map = self.inner.lock().unwrap_or_else(|err| err.into_inner());
-        if let Some(notify) = map.remove(&self.key) {
+        if let Some((_, notify)) = self.inner.remove(&self.key) {
             notify.notify_waiters();
         }
     }

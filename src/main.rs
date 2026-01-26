@@ -223,6 +223,20 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let fresh_db = state.db.clone();
+    let fresh_retention_days = state.config.fresh_request_retention_days;
+    tokio::spawn(async move {
+        if fresh_retention_days == 0 {
+            return;
+        }
+        loop {
+            if let Err(err) = fresh_db.prune_fresh_requests(fresh_retention_days).await {
+                warn!(error = ?err, "fresh request cleanup failed");
+            }
+            tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+        }
+    });
+
     if let Some(usage_rx) = usage_rx {
         let usage_db = state.db.clone();
         let flush_interval = state.config.usage_flush_interval;
@@ -310,6 +324,8 @@ mod tests {
             approval_sync_interval_seconds: 0,
             approval_negative_cache_seconds: 0,
             approval_negative_cache_capacity: 0,
+            approval_on_demand_rate_limit_per_minute: 0,
+            approval_on_demand_rate_limit_burst: 0,
             approval_enumeration_enabled: true,
             max_approval_staleness_seconds: 0,
             approvals_contract_chain: None,
@@ -370,6 +386,7 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             token_state_check_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
+            fresh_request_retention_days: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,

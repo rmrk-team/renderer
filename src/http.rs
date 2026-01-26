@@ -5,8 +5,8 @@ use crate::failure_log::FailureLogEntry;
 use crate::landing;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
-    OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError, RenderRequest,
-    render_token_with_limit,
+    ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
+    RenderRequest, render_token_with_limit,
 };
 use crate::state::AppState;
 use crate::usage::UsageEvent;
@@ -18,6 +18,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use dashmap::DashMap;
 use hmac::{Hmac, Mac};
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use ipnet::IpNet;
@@ -45,8 +46,19 @@ struct PlaceholderKey {
     height: u32,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FallbackCacheKey {
+    format: OutputFormat,
+    width: u32,
+    height: u32,
+    kind: String,
+    lines: String,
+}
+
 static PLACEHOLDER_CACHE: OnceLock<HashMap<PlaceholderKey, Arc<Vec<u8>>>> = OnceLock::new();
 const PLACEHOLDER_PRESET_WIDTHS: [u32; 6] = [64u32, 128u32, 256u32, 512u32, 1024u32, 2048u32];
+static FALLBACK_CACHE: OnceLock<DashMap<FallbackCacheKey, Arc<Vec<u8>>>> = OnceLock::new();
+const FALLBACK_CACHE_MAX_ENTRIES: usize = 64;
 
 pub fn init_placeholder_cache(config: &Config) {
     let mut cache = HashMap::new();
@@ -76,6 +88,10 @@ pub fn init_placeholder_cache(config: &Config) {
     let _ = PLACEHOLDER_CACHE.set(cache);
 }
 
+fn fallback_cache() -> &'static DashMap<FallbackCacheKey, Arc<Vec<u8>>> {
+    FALLBACK_CACHE.get_or_init(DashMap::new)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RenderQuery {
     pub cache: Option<String>,
@@ -88,6 +104,8 @@ pub struct RenderQuery {
     pub bg: Option<String>,
     pub onerror: Option<String>,
     pub fresh: Option<String>,
+    pub debug: Option<String>,
+    pub raw: Option<String>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -260,6 +278,9 @@ async fn render_canonical(
     } else {
         false
     };
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let prefer_json = raw_mode || wants_json_response(&headers);
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -273,14 +294,22 @@ async fn render_canonical(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request, render_limit).await {
+    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
-            if query.onerror.as_deref() == Some("placeholder") {
-                let (width, height) = placeholder_dimensions(&state, &placeholder_width, false);
-                return Ok(placeholder_response(&format, width, height));
+            if !prefer_json {
+                if let Some(response) =
+                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                {
+                    return Ok(response);
+                }
+                if query.onerror.as_deref() == Some("placeholder") {
+                    let (width, height) = placeholder_dimensions(&state, &placeholder_width, false);
+                    return Ok(placeholder_response(&format, width, height));
+                }
             }
             Err(map_render_error(err))
         }
@@ -335,6 +364,9 @@ async fn render_og(
     } else {
         false
     };
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let prefer_json = raw_mode || wants_json_response(&headers);
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -348,14 +380,22 @@ async fn render_og(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request, render_limit).await {
+    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
-            if query.onerror.as_deref() == Some("placeholder") {
-                let (width, height) = placeholder_dimensions(&state, &placeholder_width, true);
-                return Ok(placeholder_response(&format, width, height));
+            if !prefer_json {
+                if let Some(response) =
+                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                {
+                    return Ok(response);
+                }
+                if query.onerror.as_deref() == Some("placeholder") {
+                    let (width, height) = placeholder_dimensions(&state, &placeholder_width, true);
+                    return Ok(placeholder_response(&format, width, height));
+                }
             }
             Err(map_render_error(err))
         }
@@ -409,6 +449,9 @@ async fn render_legacy(
     } else {
         false
     };
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let prefer_json = raw_mode || wants_json_response(&headers);
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -422,18 +465,26 @@ async fn render_legacy(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
-    match render_token_with_limit(state.clone(), request, render_limit).await {
+    match render_token_with_limit(state.clone(), request.clone(), render_limit).await {
         Ok(response) => Ok(to_http_response(response, &headers).await),
         Err(err) => {
-            if query.onerror.as_deref() == Some("placeholder") {
-                let (width, height) = placeholder_dimensions(
-                    &state,
-                    &placeholder_width,
-                    query.og_image.unwrap_or(false),
-                );
-                return Ok(placeholder_response(&format, width, height));
+            if !prefer_json {
+                if let Some(response) =
+                    fallback_for_render_error(&state, &request, &placeholder_width, &err).await
+                {
+                    return Ok(response);
+                }
+                if query.onerror.as_deref() == Some("placeholder") {
+                    let (width, height) = placeholder_dimensions(
+                        &state,
+                        &placeholder_width,
+                        query.og_image.unwrap_or(false),
+                    );
+                    return Ok(placeholder_response(&format, width, height));
+                }
             }
             Err(map_render_error(err))
         }
@@ -490,10 +541,10 @@ async fn render_primary(
         match state.primary_asset_cache.get(&primary_cache_key).await {
             Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
             Some(crate::state::PrimaryAssetCacheValue::Negative) => {
-                return Err(ApiError::new(
-                    StatusCode::BAD_GATEWAY,
-                    "primary asset lookup failed",
-                ));
+                return Err(
+                    ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
+                        .with_code("primary_asset_lookup_failed"),
+                );
             }
             None => {
                 let _permit = state
@@ -665,6 +716,7 @@ async fn head_render_canonical(
         String,
     )>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
@@ -672,6 +724,8 @@ async fn head_render_canonical(
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -685,8 +739,9 @@ async fn head_render_canonical(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
-    head_cached_response(state, request).await
+    head_cached_response(state, request, raw_mode).await
 }
 
 async fn head_render_og(
@@ -699,6 +754,7 @@ async fn head_render_og(
         String,
     )>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
@@ -706,6 +762,8 @@ async fn head_render_og(
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -719,8 +777,9 @@ async fn head_render_og(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
-    head_cached_response(state, request).await
+    head_cached_response(state, request, raw_mode).await
 }
 
 async fn head_render_legacy(
@@ -734,11 +793,14 @@ async fn head_render_legacy(
         String,
     )>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
     let fresh = parse_fresh_flag(query.fresh.as_deref());
+    let raw_mode = parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
+    let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
     let request = RenderRequest {
         chain,
         collection,
@@ -752,14 +814,16 @@ async fn head_render_legacy(
         overlay: query.overlay,
         background: query.bg,
         fresh,
+        approval_context,
     };
-    head_cached_response(state, request).await
+    head_cached_response(state, request, raw_mode).await
 }
 
 async fn head_render_primary_or_legacy_asset(
     State(state): State<Arc<AppState>>,
     Path((chain, collection, token_id, tail)): Path<(String, String, String, String)>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     if let Some((asset_id, format)) = tail.rsplit_once('.') {
         head_render_canonical(
@@ -772,13 +836,14 @@ async fn head_render_primary_or_legacy_asset(
                 format.to_string(),
             )),
             Query(query),
+            context,
         )
         .await
     } else {
-        Err(ApiError::new(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "head not supported for primary renders",
-        ))
+        Err(
+            ApiError::new(StatusCode::METHOD_NOT_ALLOWED, "head not supported for primary renders")
+                .with_code("method_not_allowed"),
+        )
     }
 }
 
@@ -792,6 +857,7 @@ async fn head_render_legacy_compat(
         String,
     )>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let (asset_id, format) = split_dotted_segment(&asset)?;
     head_render_legacy(
@@ -805,6 +871,7 @@ async fn head_render_legacy_compat(
             format,
         )),
         Query(query),
+        context,
     )
     .await
 }
@@ -813,12 +880,14 @@ async fn head_render_og_compat(
     State(state): State<Arc<AppState>>,
     Path((chain, collection, token_id, asset)): Path<(String, String, String, String)>,
     Query(query): Query<RenderQuery>,
+    context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
     let (asset_id, format) = split_dotted_segment(&asset)?;
     head_render_og(
         State(state),
         Path((chain, collection, token_id, asset_id, format)),
         Query(query),
+        context,
     )
     .await
 }
@@ -826,6 +895,7 @@ async fn head_render_og_compat(
 async fn head_cached_response(
     state: Arc<AppState>,
     request: RenderRequest,
+    raw_mode: bool,
 ) -> Result<Response, ApiError> {
     render::validate_render_params(
         &request.chain,
@@ -851,9 +921,21 @@ async fn head_cached_response(
         state.config.max_background_length,
     )
     .map_err(map_render_error_anyhow)?;
-    render::ensure_collection_approved(&state, &request.chain, &request.collection)
-        .await
-        .map_err(map_render_error_anyhow)?;
+    if let Err(err) = render::ensure_collection_approved(
+        &state,
+        &request.chain,
+        &request.collection,
+        &request.approval_context,
+    )
+    .await
+    {
+        if !raw_mode {
+            if let Some(response) = fallback_head_for_render_error(&request, &err) {
+                return Ok(response);
+            }
+        }
+        return Err(map_render_error(err));
+    }
     let cache_ts = match request.cache_timestamp.as_ref() {
         Some(value) => value,
         None => return Ok(head_cache_miss_response(&request)),
@@ -1006,12 +1088,12 @@ async fn to_http_response(
             );
         }
     }
-    if let Some(path) = response.cached_path.as_ref() {
-        if let Some(length) = response.content_length {
-            if let Ok(value) = HeaderValue::from_str(&length.to_string()) {
-                headers.insert(header::CONTENT_LENGTH, value);
-            }
+    if let Some(length) = response.content_length {
+        if let Ok(value) = HeaderValue::from_str(&length.to_string()) {
+            headers.insert(header::CONTENT_LENGTH, value);
         }
+    }
+    if let Some(path) = response.cached_path.as_ref() {
         match tokio::fs::File::open(path).await {
             Ok(file) => {
                 let stream = ReaderStream::new(file);
@@ -1039,6 +1121,9 @@ fn placeholder_response(format: &OutputFormat, width: u32, height: u32) -> Respo
     headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
     headers.insert("X-Renderer-Result", HeaderValue::from_static("placeholder"));
     headers.insert("X-Renderer-Error", HeaderValue::from_static("true"));
+    if let Ok(value) = HeaderValue::from_str(&bytes.len().to_string()) {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
     (headers, bytes).into_response()
 }
 
@@ -1090,6 +1175,535 @@ fn placeholder_bytes_cached(format: &OutputFormat, width: u32, height: u32) -> V
         }
     }
     placeholder_bytes(format, width, height)
+}
+
+async fn unapproved_fallback_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    chain: &str,
+    collection: &str,
+) -> Response {
+    let mut lines = vec![
+        "COLLECTION NOT APPROVED".to_string(),
+        "REGISTER AT RENDERER.RMRK.APP".to_string(),
+    ];
+    if width >= 512 {
+        lines.push(format!("CHAIN: {}", chain.to_ascii_uppercase()));
+        lines.push(format!(
+            "COLLECTION: {}",
+            format_collection_label(collection)
+        ));
+    }
+    fallback_text_response(
+        format,
+        width,
+        height,
+        &lines,
+        "unapproved",
+        "approval_required",
+        "collection_not_approved",
+        StatusCode::OK,
+        None,
+    )
+    .await
+}
+
+async fn queued_fallback_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    retry_after_seconds: u64,
+) -> Response {
+    let lines = vec![
+        "RENDER QUEUED".to_string(),
+        "RETRY IN A MOMENT".to_string(),
+    ];
+    fallback_text_response(
+        format,
+        width,
+        height,
+        &lines,
+        "queued",
+        "queue_full",
+        "render_queue_full",
+        StatusCode::OK,
+        Some(retry_after_seconds),
+    )
+    .await
+}
+
+async fn approval_rate_limited_fallback_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    chain: &str,
+    collection: &str,
+    retry_after_seconds: u64,
+) -> Response {
+    let mut lines = vec![
+        "APPROVAL CHECK LIMITED".to_string(),
+        "RETRY IN A MOMENT".to_string(),
+    ];
+    if width >= 512 {
+        lines.push(format!("CHAIN: {}", chain.to_ascii_uppercase()));
+        lines.push(format!(
+            "COLLECTION: {}",
+            format_collection_label(collection)
+        ));
+    }
+    fallback_text_response(
+        format,
+        width,
+        height,
+        &lines,
+        "approval_rate_limited",
+        "approval_rate_limited",
+        "approval_check_rate_limited",
+        StatusCode::OK,
+        Some(retry_after_seconds),
+    )
+    .await
+}
+
+async fn approval_stale_fallback_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    chain: &str,
+    collection: &str,
+) -> Response {
+    let mut lines = vec!["APPROVAL STALE".to_string(), "RETRY LATER".to_string()];
+    if width >= 512 {
+        lines.push(format!("CHAIN: {}", chain.to_ascii_uppercase()));
+        lines.push(format!(
+            "COLLECTION: {}",
+            format_collection_label(collection)
+        ));
+    }
+    fallback_text_response(
+        format,
+        width,
+        height,
+        &lines,
+        "approval_stale",
+        "approval_stale",
+        "approval_stale",
+        StatusCode::OK,
+        None,
+    )
+    .await
+}
+
+async fn fallback_bytes(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    lines: &[String],
+    fallback_kind: &str,
+) -> Vec<u8> {
+    let lines_key = lines.join("\n");
+    let key = FallbackCacheKey {
+        format: *format,
+        width,
+        height,
+        kind: fallback_kind.to_string(),
+        lines: lines_key,
+    };
+    if let Some(entry) = fallback_cache().get(&key) {
+        return entry.as_ref().clone();
+    }
+    let format_copy = *format;
+    let lines_owned = lines.to_vec();
+    let lines_for_task = lines_owned.clone();
+    let bytes = tokio::task::spawn_blocking(move || {
+        render_fallback_image(&format_copy, width, height, &lines_for_task)
+    })
+    .await
+    .unwrap_or_else(|_| render_fallback_image(&format_copy, width, height, &lines_owned));
+    let cache = fallback_cache();
+    if cache.len() >= FALLBACK_CACHE_MAX_ENTRIES {
+        cache.clear();
+    }
+    cache.insert(key, Arc::new(bytes.clone()));
+    bytes
+}
+
+async fn fallback_text_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    lines: &[String],
+    fallback_kind: &str,
+    reason: &str,
+    error_code: &str,
+    status: StatusCode,
+    retry_after_seconds: Option<u64>,
+) -> Response {
+    let bytes = fallback_bytes(format, width, height, lines, fallback_kind).await;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(format.mime().as_ref())
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert(
+        "X-Renderer-Fallback",
+        HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    headers.insert(
+        "X-Renderer-Fallback-Reason",
+        HeaderValue::from_str(reason).unwrap_or(HeaderValue::from_static("unknown")),
+    );
+    headers.insert(
+        "X-Renderer-Error-Code",
+        HeaderValue::from_str(error_code).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    if let Ok(value) = HeaderValue::from_str(&bytes.len().to_string()) {
+        headers.insert(header::CONTENT_LENGTH, value);
+    }
+    if let Some(retry_after) = retry_after_seconds {
+        let value = HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static("5"));
+        headers.insert(header::RETRY_AFTER, value);
+    }
+    (status, headers, bytes).into_response()
+}
+
+fn render_fallback_image(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    lines: &[String],
+) -> Vec<u8> {
+    let mut image = RgbaImage::from_pixel(width, height, Rgba([255, 255, 255, 255]));
+    let scale = fallback_text_scale(width);
+    let line_spacing = scale;
+    let line_height = 7 * scale + line_spacing;
+    let total_height = line_height.saturating_mul(lines.len() as u32).saturating_sub(line_spacing);
+    let start_y = if height > total_height {
+        (height - total_height) / 2
+    } else {
+        0
+    };
+    let margin = scale.saturating_mul(4);
+    for (idx, line) in lines.iter().enumerate() {
+        let line = line.to_ascii_uppercase();
+        let max_chars = max_line_chars(width, margin, scale);
+        let line = truncate_line(&line, max_chars);
+        let line_width = text_width(&line, scale);
+        let x = if width > line_width {
+            ((width - line_width) / 2).max(margin)
+        } else {
+            margin
+        };
+        let y = start_y + idx as u32 * line_height;
+        draw_text(&mut image, x, y, scale, &line, Rgba([24, 24, 24, 255]));
+    }
+    encode_image_bytes(format, image)
+}
+
+async fn fallback_for_render_error(
+    state: &AppState,
+    request: &RenderRequest,
+    placeholder_width: &Option<String>,
+    error: &anyhow::Error,
+) -> Option<Response> {
+    if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return match approval_error {
+            render::ApprovalCheckError::NotApproved => Some(
+                unapproved_fallback_response(
+                    &request.format,
+                    width,
+                    height,
+                    &request.chain,
+                    &request.collection,
+                )
+                .await,
+            ),
+            render::ApprovalCheckError::RateLimited { retry_after_seconds } => Some(
+                approval_rate_limited_fallback_response(
+                    &request.format,
+                    width,
+                    height,
+                    &request.chain,
+                    &request.collection,
+                    *retry_after_seconds,
+                )
+                .await,
+            ),
+            render::ApprovalCheckError::Stale => Some(
+                approval_stale_fallback_response(
+                    &request.format,
+                    width,
+                    height,
+                    &request.chain,
+                    &request.collection,
+                )
+                .await,
+            ),
+        };
+    }
+    if error.downcast_ref::<render::RenderQueueError>().is_some() {
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(queued_fallback_response(&request.format, width, height, 5).await);
+    }
+    None
+}
+
+fn fallback_head_response(
+    format: &OutputFormat,
+    fallback_kind: &str,
+    reason: &str,
+    error_code: &str,
+    retry_after_seconds: Option<u64>,
+) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(format.mime().as_ref())
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
+    headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert(
+        "X-Renderer-Fallback",
+        HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    headers.insert(
+        "X-Renderer-Fallback-Reason",
+        HeaderValue::from_str(reason).unwrap_or(HeaderValue::from_static("unknown")),
+    );
+    headers.insert(
+        "X-Renderer-Error-Code",
+        HeaderValue::from_str(error_code).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    if let Some(retry_after) = retry_after_seconds {
+        let value = HeaderValue::from_str(&retry_after.to_string())
+            .unwrap_or(HeaderValue::from_static("5"));
+        headers.insert(header::RETRY_AFTER, value);
+    }
+    (StatusCode::OK, headers).into_response()
+}
+
+fn fallback_head_for_render_error(
+    request: &RenderRequest,
+    error: &anyhow::Error,
+) -> Option<Response> {
+    if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
+        return match approval_error {
+            render::ApprovalCheckError::NotApproved => Some(fallback_head_response(
+                &request.format,
+                "unapproved",
+                "approval_required",
+                "collection_not_approved",
+                None,
+            )),
+            render::ApprovalCheckError::RateLimited { retry_after_seconds } => {
+                Some(fallback_head_response(
+                    &request.format,
+                    "approval_rate_limited",
+                    "approval_rate_limited",
+                    "approval_check_rate_limited",
+                    Some(*retry_after_seconds),
+                ))
+            }
+            render::ApprovalCheckError::Stale => Some(fallback_head_response(
+                &request.format,
+                "approval_stale",
+                "approval_stale",
+                "approval_stale",
+                None,
+            )),
+        };
+    }
+    if error.downcast_ref::<render::RenderQueueError>().is_some() {
+        return Some(fallback_head_response(
+            &request.format,
+            "queued",
+            "queue_full",
+            "render_queue_full",
+            Some(5),
+        ));
+    }
+    None
+}
+
+fn fallback_text_scale(width: u32) -> u32 {
+    if width >= 1200 {
+        4
+    } else if width >= 800 {
+        3
+    } else if width >= 400 {
+        2
+    } else {
+        1
+    }
+}
+
+fn max_line_chars(width: u32, margin: u32, scale: u32) -> usize {
+    let glyph_width = 5 * scale;
+    let spacing = scale;
+    let available = width.saturating_sub(margin.saturating_mul(2));
+    let per_char = glyph_width.saturating_add(spacing);
+    if per_char == 0 {
+        return 0;
+    }
+    (available / per_char).max(1) as usize
+}
+
+fn truncate_line(line: &str, max_chars: usize) -> String {
+    if line.len() <= max_chars {
+        return line.to_string();
+    }
+    if max_chars <= 3 {
+        return line.chars().take(max_chars).collect();
+    }
+    let mut out: String = line.chars().take(max_chars - 3).collect();
+    out.push_str("...");
+    out
+}
+
+fn text_width(text: &str, scale: u32) -> u32 {
+    if text.is_empty() {
+        return 0;
+    }
+    let glyph_width = 5 * scale;
+    let spacing = scale;
+    let len = text.chars().count() as u32;
+    glyph_width.saturating_mul(len).saturating_add(spacing.saturating_mul(len.saturating_sub(1)))
+}
+
+fn draw_text(image: &mut RgbaImage, x: u32, y: u32, scale: u32, text: &str, color: Rgba<u8>) {
+    let mut cursor_x = x;
+    let spacing = scale;
+    for ch in text.chars() {
+        draw_glyph(image, cursor_x, y, scale, ch, color);
+        cursor_x = cursor_x.saturating_add(5 * scale + spacing);
+    }
+}
+
+fn draw_glyph(
+    image: &mut RgbaImage,
+    x: u32,
+    y: u32,
+    scale: u32,
+    ch: char,
+    color: Rgba<u8>,
+) {
+    let rows = glyph_rows(ch);
+    for (row_idx, row) in rows.iter().enumerate() {
+        for col in 0..5 {
+            if (row >> (4 - col)) & 1 == 1 {
+                let px = x.saturating_add(col * scale);
+                let py = y.saturating_add(row_idx as u32 * scale);
+                for dy in 0..scale {
+                    for dx in 0..scale {
+                        let tx = px.saturating_add(dx);
+                        let ty = py.saturating_add(dy);
+                        if tx < image.width() && ty < image.height() {
+                            image.put_pixel(tx, ty, color);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn glyph_rows(ch: char) -> [u8; 7] {
+    match ch.to_ascii_uppercase() {
+        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'B' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110],
+        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
+        'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
+        'E' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111],
+        'F' => [0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000],
+        'G' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10011, 0b10001, 0b01110],
+        'H' => [0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        'J' => [0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100],
+        'K' => [0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001],
+        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        'M' => [0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001],
+        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
+        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+        'Q' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101],
+        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001],
+        'S' => [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
+        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'V' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100],
+        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010],
+        'X' => [0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001],
+        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+        'Z' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111],
+        '0' => [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],
+        '1' => [0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        '2' => [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111],
+        '3' => [0b01110, 0b10001, 0b00001, 0b00110, 0b00001, 0b10001, 0b01110],
+        '4' => [0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010],
+        '5' => [0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110],
+        '6' => [0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110],
+        '7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000],
+        '8' => [0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110],
+        '9' => [0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b11100],
+        '-' => [0b00000, 0b00000, 0b00000, 0b11111, 0b00000, 0b00000, 0b00000],
+        '.' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00100, 0b00100],
+        ':' => [0b00000, 0b00100, 0b00100, 0b00000, 0b00100, 0b00100, 0b00000],
+        '/' => [0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b00000, 0b00000],
+        ' ' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
+        _ => [0b01110, 0b10001, 0b00010, 0b00100, 0b00000, 0b00100, 0b00100],
+    }
+}
+
+fn encode_image_bytes(format: &OutputFormat, image: RgbaImage) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    match format {
+        OutputFormat::Webp => {
+            let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
+            let _ = encoder.encode(
+                image.as_raw(),
+                image.width(),
+                image.height(),
+                image::ExtendedColorType::Rgba8,
+            );
+        }
+        OutputFormat::Png => {
+            let _ = image.write_to(&mut std::io::Cursor::new(&mut bytes), ImageFormat::Png);
+        }
+        OutputFormat::Jpeg => {
+            let rgb = DynamicImage::ImageRgba8(image).to_rgb8();
+            let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
+            let _ = encoder.encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ColorType::Rgb8.into(),
+            );
+        }
+    }
+    bytes
+}
+
+fn format_collection_label(collection: &str) -> String {
+    let value = collection.trim();
+    if value.len() <= 14 {
+        return value.to_ascii_uppercase();
+    }
+    let start = value.chars().take(6).collect::<String>();
+    let end = value.chars().rev().take(4).collect::<String>();
+    format!(
+        "{}...{}",
+        start.to_ascii_uppercase(),
+        end.chars().rev().collect::<String>().to_ascii_uppercase()
+    )
 }
 
 fn matches_etag(headers: &HeaderMap, etag: &str) -> bool {
@@ -1173,10 +1787,23 @@ fn canonicalize_chain_collection(
 }
 
 fn parse_fresh_flag(raw: Option<&str>) -> bool {
+    parse_bool_flag(raw)
+}
+
+fn parse_bool_flag(raw: Option<&str>) -> bool {
     raw.map(|value| value.trim())
         .filter(|value| !value.is_empty())
         .map(|value| value.to_ascii_lowercase())
         .map(|value| value == "1" || value == "true" || value == "yes")
+        .unwrap_or(false)
+}
+
+fn wants_json_response(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_ascii_lowercase())
+        .map(|value| value.contains("application/json") || value.contains("+json"))
         .unwrap_or(false)
 }
 
@@ -1199,6 +1826,7 @@ struct AccessContext {
     client_key_id: Option<i64>,
     max_concurrent_renders_override: Option<usize>,
     allow_fresh: bool,
+    allow_on_demand_approval: bool,
 }
 
 impl AccessContext {
@@ -1215,6 +1843,30 @@ impl AccessContext {
     }
 }
 
+fn generate_request_id() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    let rand: u64 = random();
+    format!("{now:016x}-{rand:016x}")
+}
+
+fn attach_request_id(response: &mut Response, request_id: &str) {
+    if let Ok(value) = HeaderValue::from_str(request_id) {
+        response.headers_mut().insert("X-Request-Id", value);
+    }
+}
+
+fn approval_context_from_access(context: Option<&AccessContext>) -> ApprovalCheckContext {
+    match context {
+        Some(ctx) if ctx.allow_on_demand_approval => {
+            ApprovalCheckContext::allow(Some(Arc::clone(&ctx.identity_key)))
+        }
+        _ => ApprovalCheckContext::deny(),
+    }
+}
+
 pub async fn access_middleware(
     state: Arc<AppState>,
     mut request: axum::http::Request<Body>,
@@ -1223,27 +1875,26 @@ pub async fn access_middleware(
     let method = request.method().clone();
     let uri = request.uri().clone();
     let path = uri.path();
+    let request_id = generate_request_id();
     if path == "/healthz" {
-        return next.run(request).await;
+        let mut response = next.run(request).await;
+        attach_request_id(&mut response, &request_id);
+        return response;
     }
     let route_group = route_group(path);
     let ip = client_ip(&request, &state);
-    let ip_identity = ip.map(|ip| AccessContext {
-        identity_key: Arc::from(format!("ip:{ip}")),
-        client_key_id: None,
-        max_concurrent_renders_override: None,
-        allow_fresh: false,
-    });
     let is_admin = path == "/admin" || path.starts_with("/admin/");
     let is_public_landing = is_public_landing_path(&state, path);
     let is_public_status = is_public_status_path(&state, path);
     let is_public_openapi = is_public_openapi_path(&state, path);
+    let enforce_private = (is_status_path(path) && !state.config.status_public)
+        || (is_openapi_path(path) && !state.config.openapi_public);
 
     if let Some(ip) = ip {
         let info = apply_ip_rate_limit(&state, ip).await;
         if !info.allowed {
-            let response = rate_limit_response(Some(info));
-            let identity = ip_identity.clone();
+            let mut response = rate_limit_response(Some(info));
+            attach_request_id(&mut response, &request_id);
             log_failure_if_needed(
                 &state,
                 &response,
@@ -1251,16 +1902,21 @@ pub async fn access_middleware(
                 &uri,
                 route_group,
                 Some(ip),
-                identity.as_ref(),
+                None,
+                Some(&request_id),
             );
-            record_usage(&state, route_group, &response, identity);
+            record_usage(&state, route_group, &response, None);
             return response;
         }
     }
 
-    let should_check_key = match state.config.access_mode {
-        AccessMode::Open | AccessMode::DenylistOnly => state.config.track_keys_in_open_mode,
-        _ => true,
+    let should_check_key = if enforce_private {
+        true
+    } else {
+        match state.config.access_mode {
+            AccessMode::Open | AccessMode::DenylistOnly => state.config.track_keys_in_open_mode,
+            _ => true,
+        }
     };
     let bearer = if should_check_key {
         extract_bearer_token(request.headers()).filter(|token| is_reasonable_token_len(token))
@@ -1283,6 +1939,23 @@ pub async fn access_middleware(
             None
         };
 
+    let ip_rule = if let Some(ip) = ip {
+        ip_rule_for_ip(&state, ip).await
+    } else {
+        None
+    };
+    let key_active = key_info.as_ref().map(|key| key.active).unwrap_or(false);
+    let allow_on_demand_approval =
+        key_active || matches!(ip_rule.as_deref(), Some("allow"));
+
+    let ip_identity = ip.map(|ip| AccessContext {
+        identity_key: Arc::from(format!("ip:{ip}")),
+        client_key_id: None,
+        max_concurrent_renders_override: None,
+        allow_fresh: false,
+        allow_on_demand_approval,
+    });
+
     let identity = if let Some(key) = key_info.as_ref() {
         Some(AccessContext {
             identity_key: Arc::from(format!("client:{}", key.client_id)),
@@ -1291,6 +1964,7 @@ pub async fn access_middleware(
                 .max_concurrent_renders_override
                 .and_then(|value| value.try_into().ok()),
             allow_fresh: key.allow_fresh,
+            allow_on_demand_approval,
         })
     } else if ip_identity.is_some() {
         ip_identity.clone()
@@ -1302,12 +1976,17 @@ pub async fn access_middleware(
         && !is_public_landing
         && !is_public_status
         && !is_public_openapi
-        && !is_access_allowed(&state, ip, key_info.as_ref()).await
+        && !(if enforce_private {
+            is_private_access_allowed(key_info.as_ref(), ip_rule.as_deref())
+        } else {
+            is_access_allowed(&state, key_info.as_ref(), ip_rule.as_deref()).await
+        })
     {
         if let Some(ip) = ip {
             let info = apply_auth_fail_limit(&state, ip).await;
             if !info.allowed {
-                let response = rate_limit_response(Some(info));
+                let mut response = rate_limit_response(Some(info));
+                attach_request_id(&mut response, &request_id);
                 log_failure_if_needed(
                     &state,
                     &response,
@@ -1316,17 +1995,20 @@ pub async fn access_middleware(
                     route_group,
                     Some(ip),
                     identity.as_ref(),
+                    Some(&request_id),
                 );
                 record_usage(&state, route_group, &response, identity.clone());
                 return response;
             }
         }
-        let response = ApiError::new(StatusCode::UNAUTHORIZED, "access denied")
+        let mut response = ApiError::new(StatusCode::UNAUTHORIZED, "access denied")
+            .with_code("access_denied")
             .with_header(
                 header::WWW_AUTHENTICATE,
                 HeaderValue::from_static("Bearer realm=\"renderer\""),
             )
             .into_response();
+        attach_request_id(&mut response, &request_id);
         log_failure_if_needed(
             &state,
             &response,
@@ -1335,6 +2017,7 @@ pub async fn access_middleware(
             route_group,
             ip,
             identity.as_ref(),
+            Some(&request_id),
         );
         record_usage(&state, route_group, &response, identity.clone());
         return response;
@@ -1343,7 +2026,8 @@ pub async fn access_middleware(
     if let Some(key) = key_info.as_ref() {
         let info = apply_key_rate_limit(&state, key).await;
         if !info.allowed {
-            let response = rate_limit_response(Some(info));
+            let mut response = rate_limit_response(Some(info));
+            attach_request_id(&mut response, &request_id);
             log_failure_if_needed(
                 &state,
                 &response,
@@ -1352,6 +2036,7 @@ pub async fn access_middleware(
                 route_group,
                 ip,
                 identity.as_ref(),
+                Some(&request_id),
             );
             record_usage(&state, route_group, &response, identity.clone());
             return response;
@@ -1362,7 +2047,8 @@ pub async fn access_middleware(
         request.extensions_mut().insert(context);
     }
 
-    let response = next.run(request).await;
+    let mut response = next.run(request).await;
+    attach_request_id(&mut response, &request_id);
     log_failure_if_needed(
         &state,
         &response,
@@ -1371,6 +2057,7 @@ pub async fn access_middleware(
         route_group,
         ip,
         identity.as_ref(),
+        Some(&request_id),
     );
     record_usage(&state, route_group, &response, identity);
     response
@@ -1378,8 +2065,8 @@ pub async fn access_middleware(
 
 async fn is_access_allowed(
     state: &AppState,
-    ip: Option<std::net::IpAddr>,
     key: Option<&crate::db::ClientKey>,
+    ip_rule: Option<&str>,
 ) -> bool {
     use crate::config::AccessMode;
     match state.config.access_mode {
@@ -1389,12 +2076,7 @@ async fn is_access_allowed(
             if let Some(key) = key {
                 return key.active;
             }
-            let ip_rule = if let Some(ip) = ip {
-                ip_rule_for_ip(state, ip).await
-            } else {
-                None
-            };
-            !matches!(ip_rule.as_deref(), Some("deny"))
+            !matches!(ip_rule, Some("deny"))
         }
         AccessMode::DenylistOnly => {
             if let Some(key) = key {
@@ -1402,25 +2084,27 @@ async fn is_access_allowed(
                     return false;
                 }
             }
-            let ip_rule = if let Some(ip) = ip {
-                ip_rule_for_ip(state, ip).await
-            } else {
-                None
-            };
-            !matches!(ip_rule.as_deref(), Some("deny"))
+            !matches!(ip_rule, Some("deny"))
         }
         AccessMode::AllowlistOnly => {
             if let Some(key) = key {
                 return key.active;
             }
-            let ip_rule = if let Some(ip) = ip {
-                ip_rule_for_ip(state, ip).await
-            } else {
-                None
-            };
-            matches!(ip_rule.as_deref(), Some("allow"))
+            matches!(ip_rule, Some("allow"))
         }
     }
+}
+
+fn is_private_access_allowed(
+    key: Option<&crate::db::ClientKey>,
+    ip_rule: Option<&str>,
+) -> bool {
+    if let Some(key) = key {
+        if key.active {
+            return true;
+        }
+    }
+    matches!(ip_rule, Some("allow"))
 }
 
 async fn apply_ip_rate_limit(state: &AppState, ip: std::net::IpAddr) -> RateLimitInfo {
@@ -1452,13 +2136,15 @@ async fn apply_key_rate_limit(state: &AppState, key: &crate::db::ClientKey) -> R
 }
 
 fn rate_limit_response(info: Option<RateLimitInfo>) -> Response {
-    let mut response =
-        ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
     let retry_after = info
         .as_ref()
         .map(|info| info.reset_seconds)
         .filter(|value| *value > 0)
         .unwrap_or_else(|| RATE_LIMIT_RETRY_AFTER_SECONDS.parse().unwrap_or(60));
+    let mut response = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded")
+        .with_code("rate_limited")
+        .with_field("retry_after_seconds", serde_json::json!(retry_after))
+        .into_response();
     let _ = response.headers_mut().insert(
         header::RETRY_AFTER,
         HeaderValue::from_str(&retry_after.to_string())
@@ -1628,15 +2314,23 @@ fn is_public_landing_path(state: &AppState, path: &str) -> bool {
     landing::is_landing_asset_path(path)
 }
 
+fn is_status_path(path: &str) -> bool {
+    matches!(path, "/status" | "/status.json")
+}
+
+fn is_openapi_path(path: &str) -> bool {
+    path == "/openapi.yaml"
+}
+
 fn is_public_status_path(state: &AppState, path: &str) -> bool {
     if !state.config.status_public {
         return false;
     }
-    matches!(path, "/status" | "/status.json")
+    is_status_path(path)
 }
 
 fn is_public_openapi_path(state: &AppState, path: &str) -> bool {
-    state.config.openapi_public && path == "/openapi.yaml"
+    state.config.openapi_public && is_openapi_path(path)
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -1746,6 +2440,7 @@ fn log_failure_if_needed(
     route_group: &'static str,
     ip: Option<IpAddr>,
     identity: Option<&AccessContext>,
+    request_id: Option<&str>,
 ) {
     let Some(failure_log) = state.failure_log.as_ref() else {
         return;
@@ -1778,6 +2473,7 @@ fn log_failure_if_needed(
         ip.map(|ip| ip.to_string()),
         identity.map(|ctx| ctx.identity_key.as_ref().to_string()),
         reason,
+        request_id.map(|value| value.to_string()),
     );
     let failure_log = failure_log.clone();
     tokio::spawn(async move {
@@ -1799,24 +2495,30 @@ pub struct ApiError {
     pub body: Value,
     pub headers: HeaderMap,
     pub log_detail: Option<String>,
+    pub code: Option<String>,
 }
 
 impl ApiError {
     pub fn new(status: StatusCode, message: &str) -> Self {
         Self {
             status,
-            body: serde_json::json!({ "error": message }),
+            body: serde_json::json!({ "code": "error", "message": message, "error": message }),
             headers: HeaderMap::new(),
             log_detail: None,
+            code: Some("error".to_string()),
         }
     }
 
     pub fn bad_request(message: &str) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, message)
+        Self::new(StatusCode::BAD_REQUEST, message).with_code("bad_request")
     }
 
-    pub fn forbidden(message: &str) -> Self {
-        Self::new(StatusCode::FORBIDDEN, message)
+    pub fn with_code(mut self, code: &str) -> Self {
+        self.code = Some(code.to_string());
+        if let Value::Object(map) = &mut self.body {
+            map.insert("code".to_string(), Value::String(code.to_string()));
+        }
+        self
     }
 
     pub fn with_header(mut self, name: header::HeaderName, value: HeaderValue) -> Self {
@@ -1850,9 +2552,17 @@ impl From<anyhow::Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let error_message = extract_error_message(&self.body);
+        let error_code = extract_error_code(&self.body).or_else(|| self.code.clone());
         let body = Json(self.body);
         let mut response = (self.status, body).into_response();
         response.headers_mut().extend(self.headers);
+        if let Some(code) = error_code.as_ref() {
+            if let Ok(value) = HeaderValue::from_str(code) {
+                response
+                    .headers_mut()
+                    .insert("X-Renderer-Error-Code", value);
+            }
+        }
         if let Some(message) = error_message.as_ref() {
             let sanitized = sanitize_error_header(message);
             if let Ok(value) = HeaderValue::from_str(&sanitized) {
@@ -1878,7 +2588,19 @@ fn extract_error_message(body: &Value) -> Option<String> {
     let Value::Object(map) = body else {
         return None;
     };
+    if let Some(message) = map.get("message").and_then(|value| value.as_str()) {
+        return Some(message.to_string());
+    }
     map.get("error")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
+fn extract_error_code(body: &Value) -> Option<String> {
+    let Value::Object(map) = body else {
+        return None;
+    };
+    map.get("code")
         .and_then(|value| value.as_str())
         .map(|value| value.to_string())
 }
@@ -1899,43 +2621,81 @@ fn map_render_error_anyhow<E: Into<anyhow::Error>>(error: E) -> ApiError {
 fn map_render_error(error: anyhow::Error) -> ApiError {
     let detail = error.to_string();
     if error.downcast_ref::<RenderInputError>().is_some() {
-        return ApiError::bad_request("invalid render request").with_log_detail(detail);
+        return ApiError::bad_request("invalid render request")
+            .with_code("invalid_request")
+            .with_log_detail(detail);
     }
     if error.downcast_ref::<RenderLimitError>().is_some() {
         return ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "render exceeds limits")
+            .with_code("render_limit_exceeded")
             .with_log_detail(detail);
     }
     if error.downcast_ref::<render::RenderQueueError>().is_some() {
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "render queue full")
+            .with_code("render_queue_full")
             .with_field("queue_full", Value::Bool(true))
             .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
             .with_log_detail(detail);
     }
+    if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
+        return match approval_error {
+            render::ApprovalCheckError::NotApproved => ApiError::new(
+                StatusCode::FORBIDDEN,
+                "collection not approved",
+            )
+            .with_code("collection_not_approved")
+            .with_log_detail(detail),
+            render::ApprovalCheckError::RateLimited { retry_after_seconds } => ApiError::new(
+                StatusCode::TOO_MANY_REQUESTS,
+                "approval check rate limited",
+            )
+            .with_code("approval_check_rate_limited")
+            .with_field("retry_after_seconds", Value::Number((*retry_after_seconds).into()))
+            .with_header(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(&retry_after_seconds.to_string())
+                    .unwrap_or(HeaderValue::from_static("60")),
+            )
+            .with_log_detail(detail),
+            render::ApprovalCheckError::Stale => ApiError::new(
+                StatusCode::FORBIDDEN,
+                "approval stale",
+            )
+            .with_code("approval_stale")
+            .with_log_detail(detail),
+        };
+    }
     if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
         return match fetch_error {
             AssetFetchError::InvalidUri => {
-                ApiError::bad_request("invalid asset uri").with_log_detail(detail)
+                ApiError::bad_request("invalid asset uri")
+                    .with_code("invalid_asset_uri")
+                    .with_log_detail(detail)
             }
             AssetFetchError::Blocked => {
-                ApiError::bad_request("asset uri not allowed").with_log_detail(detail)
+                ApiError::bad_request("asset uri not allowed")
+                    .with_code("asset_uri_blocked")
+                    .with_log_detail(detail)
             }
             AssetFetchError::TooLarge => {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
+                    .with_code("asset_too_large")
                     .with_log_detail(detail)
             }
             AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream { .. } => {
-                ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed").with_log_detail(detail)
+                ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")
+                    .with_code("asset_fetch_failed")
+                    .with_log_detail(detail)
             }
         };
     }
     if error.downcast_ref::<reqwest::Error>().is_some() {
         return ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")
+            .with_code("asset_fetch_failed")
             .with_log_detail(detail);
     }
-    let message = error.to_string();
-    if message.contains("collection not approved") {
-        return ApiError::forbidden("collection not approved").with_log_detail(detail);
-    }
     tracing::warn!(error = ?error, "render failed");
-    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "render failed").with_log_detail(detail)
+    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "render failed")
+        .with_code("render_failed")
+        .with_log_detail(detail)
 }

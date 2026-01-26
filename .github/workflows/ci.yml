@@ -28,20 +28,23 @@ jobs:
         run: cargo clippy --all-targets --all-features
       - name: Tests
         run: cargo test
-
-  audit:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "."
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Cargo audit
         run: cargo audit
+      - name: Smoke test
+        run: |
+          mkdir -p ./tmp/cache ./tmp/pinned
+          ADMIN_PASSWORD=ci \
+          DB_PATH=./tmp/renderer.db \
+          CACHE_DIR=./tmp/cache \
+          PINNED_DIR=./tmp/pinned \
+          PINNING_ENABLED=false \
+          LOCAL_IPFS_ENABLED=false \
+          ACCESS_MODE=open \
+          REQUIRE_APPROVAL=false \
+          PORT=18080 \
+          cargo run --quiet &
+          sleep 2
+          curl --fail http://127.0.0.1:18080/healthz
+

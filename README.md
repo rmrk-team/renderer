@@ -56,6 +56,7 @@ HTTP safety caps:
 
 - `MAX_IN_FLIGHT_REQUESTS` limits total concurrent HTTP requests.
 - `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` enable per-IP rate limiting (0 disables).
+- `APPROVAL_ON_DEMAND_RATE_LIMIT_PER_MINUTE` / `APPROVAL_ON_DEMAND_RATE_LIMIT_BURST` throttle on-demand approval checks for unknown collections (per identity).
 - `MAX_ADMIN_BODY_BYTES` caps admin API request bodies.
 - Asset/metadata fetches resolve DNS once per request and pin the connection to the resolved IPs to reduce DNS rebinding risk.
 - `CACHE_SIZE_REFRESH_SECONDS` controls how often cache size stats are refreshed for `/status` and admin dashboard.
@@ -85,6 +86,7 @@ Access control:
 - `AUTH_FAILURE_RATE_LIMIT_PER_MINUTE` / `AUTH_FAILURE_RATE_LIMIT_BURST`: rate limit for unauthorized requests.
 - `USAGE_RETENTION_DAYS`: retention for hourly usage aggregates (0 disables cleanup).
 - `TRACK_KEYS_IN_OPEN_MODE`: when `ACCESS_MODE=open` or `denylist_only`, skip DB lookups for bearer tokens unless set to `true`.
+- API keys are accepted via `Authorization: Bearer` only (query-string keys are not supported).
 
 AccessMode semantics:
 
@@ -95,6 +97,9 @@ AccessMode semantics:
 - `allowlist_only`: allow if API key is active; otherwise allow only if IP rule matches `allow`.
 
 IP rule precedence: longest CIDR prefix wins; on ties, `deny` beats `allow`.
+
+On-demand approval checks for unknown collections only run when the request is
+authenticated with a valid API key or comes from an allowlisted IP.
 
 ### Security invariants
 
@@ -159,10 +164,12 @@ renders. When `cache=` is omitted, the renderer prefers a collection `cache_epoc
 ```env
 TOKEN_STATE_CHECK_TTL_SECONDS=86400
 FRESH_RATE_LIMIT_SECONDS=300
+FRESH_REQUEST_RETENTION_DAYS=7
 ```
 
 - `TOKEN_STATE_CHECK_TTL_SECONDS` controls how long token state is considered fresh.
 - `FRESH_RATE_LIMIT_SECONDS` enforces the per-NFT cooldown for `?fresh=1`.
+- `FRESH_REQUEST_RETENTION_DAYS` prunes old `fresh=1` limiter rows (0 disables cleanup).
 - `?fresh=1` forces an on-chain state refresh, returns `Cache-Control: no-store`, and
   still updates the canonical cache for subsequent non-fresh requests.
 - Client keys can bypass the fresh limiter by setting `allow_fresh=true` in the admin UI.
@@ -213,6 +220,9 @@ note that the primary route is slower (RPC lookup) while canonical is cache-firs
 Set `STATUS_PUBLIC=true` to expose `/status` and `/status.json` for a lightweight
 status widget (cache size, warmup queue, approvals, access mode). Avoid polling
 these endpoints at high frequency.
+
+If `STATUS_PUBLIC=false` or `OPENAPI_PUBLIC=false`, those endpoints require an
+API key or an allowlisted IP even in `ACCESS_MODE=open`.
 
 Set `OPENAPI_PUBLIC=true` to expose `/openapi.yaml` without access gating.
 
@@ -507,6 +517,10 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
+- `X-Renderer-Fallback: unapproved|queued` (when a fallback image is returned)
+- `X-Renderer-Fallback-Reason: approval_required|queue_full`
+- `X-Renderer-Error-Code: <code>` (JSON errors and fallbacks)
+- `X-Request-Id: <id>` for correlation
 - `Cache-Control: public, max-age=...` when cacheable
 - `ETag` for conditional GET on cached renders
 

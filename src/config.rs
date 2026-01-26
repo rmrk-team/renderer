@@ -43,6 +43,8 @@ pub struct Config {
     pub approval_sync_interval_seconds: u64,
     pub approval_negative_cache_seconds: u64,
     pub approval_negative_cache_capacity: usize,
+    pub approval_on_demand_rate_limit_per_minute: u64,
+    pub approval_on_demand_rate_limit_burst: u64,
     pub approval_enumeration_enabled: bool,
     pub max_approval_staleness_seconds: u64,
     pub approvals_contract_chain: Option<String>,
@@ -103,6 +105,7 @@ pub struct Config {
     pub warmup_max_concurrent_asset_pins: usize,
     pub token_state_check_ttl_seconds: u64,
     pub fresh_rate_limit_seconds: u64,
+    pub fresh_request_retention_days: u64,
     pub primary_asset_cache_ttl: Duration,
     pub primary_asset_negative_ttl: Duration,
     pub primary_asset_cache_capacity: usize,
@@ -238,9 +241,13 @@ impl Config {
         let approval_confirmations = parse_u64("APPROVAL_CONFIRMATIONS", 6);
         let chain_id_map = parse_chain_id_map("CHAIN_ID_MAP")?;
         let approval_sync_interval_seconds = parse_u64("APPROVAL_SYNC_INTERVAL_SECONDS", 900);
-        let approval_negative_cache_seconds = parse_u64("APPROVAL_NEGATIVE_CACHE_SECONDS", 600);
+        let approval_negative_cache_seconds = parse_u64("APPROVAL_NEGATIVE_CACHE_SECONDS", 3600);
         let approval_negative_cache_capacity =
-            parse_usize("APPROVAL_NEGATIVE_CACHE_CAPACITY", 10_000);
+            parse_usize("APPROVAL_NEGATIVE_CACHE_CAPACITY", 50_000);
+        let approval_on_demand_rate_limit_per_minute =
+            parse_u64("APPROVAL_ON_DEMAND_RATE_LIMIT_PER_MINUTE", 30);
+        let approval_on_demand_rate_limit_burst =
+            parse_u64("APPROVAL_ON_DEMAND_RATE_LIMIT_BURST", 10);
         let approval_enumeration_enabled = parse_bool("APPROVAL_ENUMERATION_ENABLED", true);
         let max_approval_staleness_seconds = parse_u64("MAX_APPROVAL_STALENESS_SECONDS", 0);
         let approvals_contract_chain = env::var("APPROVALS_CONTRACT_CHAIN")
@@ -348,6 +355,7 @@ impl Config {
         let warmup_max_concurrent_asset_pins = parse_usize("WARMUP_MAX_CONCURRENT_ASSET_PINS", 4);
         let token_state_check_ttl_seconds = parse_u64("TOKEN_STATE_CHECK_TTL_SECONDS", 86400);
         let fresh_rate_limit_seconds = parse_u64("FRESH_RATE_LIMIT_SECONDS", 300);
+        let fresh_request_retention_days = parse_u64("FRESH_REQUEST_RETENTION_DAYS", 7);
         let primary_asset_cache_ttl =
             Duration::from_secs(parse_u64("PRIMARY_ASSET_CACHE_TTL_SECONDS", 60));
         let primary_asset_negative_ttl =
@@ -406,6 +414,8 @@ impl Config {
             approval_sync_interval_seconds,
             approval_negative_cache_seconds,
             approval_negative_cache_capacity,
+            approval_on_demand_rate_limit_per_minute,
+            approval_on_demand_rate_limit_burst,
             approval_enumeration_enabled,
             max_approval_staleness_seconds,
             approvals_contract_chain,
@@ -466,6 +476,7 @@ impl Config {
             warmup_max_concurrent_asset_pins,
             token_state_check_ttl_seconds,
             fresh_rate_limit_seconds,
+            fresh_request_retention_days,
             primary_asset_cache_ttl,
             primary_asset_negative_ttl,
             primary_asset_cache_capacity,

@@ -11,6 +11,7 @@ pub struct RenderJob {
     pub request: RenderRequest,
     pub width: Option<u32>,
     pub variant_key: String,
+    pub base_key: String,
     pub singleflight_permit: SingleflightPermit,
     pub key_limit: Option<RenderKeyLimit>,
     pub respond_to: oneshot::Sender<Result<RenderResponse>>,
@@ -33,6 +34,7 @@ pub fn spawn_workers(state: Arc<AppState>, receiver: mpsc::Receiver<RenderJob>, 
                     request,
                     width,
                     variant_key,
+                    base_key,
                     singleflight_permit,
                     key_limit,
                     respond_to,
@@ -42,6 +44,7 @@ pub fn spawn_workers(state: Arc<AppState>, receiver: mpsc::Receiver<RenderJob>, 
                     request,
                     width,
                     variant_key,
+                    base_key,
                     singleflight_permit,
                     key_limit,
                 )
@@ -57,6 +60,7 @@ async fn run_job(
     request: RenderRequest,
     width: Option<u32>,
     variant_key: String,
+    base_key: String,
     singleflight_permit: SingleflightPermit,
     key_limit: Option<RenderKeyLimit>,
 ) -> Result<RenderResponse> {
@@ -72,7 +76,7 @@ async fn run_job(
         None
     };
     let _permit = state.render_semaphore.acquire().await?;
-    render_token_uncached(&state, &request, width, &variant_key).await
+    render_token_uncached(&state, &request, width, &variant_key, &base_key).await
 }
 
 pub fn try_enqueue(

@@ -115,8 +115,26 @@ async fn admin_security_headers(request: Request<Body>, next: Next) -> Response 
     );
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
     headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        "Permissions-Policy",
+        HeaderValue::from_static(
+            "camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=()",
+        ),
+    );
+    headers.insert(
+        "Cross-Origin-Opener-Policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(
+        "Cross-Origin-Resource-Policy",
+        HeaderValue::from_static("same-origin"),
     );
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     response
@@ -1684,6 +1702,8 @@ mod tests {
             approval_sync_interval_seconds: 900,
             approval_negative_cache_seconds: 0,
             approval_negative_cache_capacity: 0,
+            approval_on_demand_rate_limit_per_minute: 0,
+            approval_on_demand_rate_limit_burst: 0,
             approval_enumeration_enabled: true,
             max_approval_staleness_seconds: 0,
             approvals_contract_chain: None,
@@ -1744,6 +1764,7 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             token_state_check_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
+            fresh_request_retention_days: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
             primary_asset_negative_ttl: Duration::from_secs(0),
             primary_asset_cache_capacity: 0,
