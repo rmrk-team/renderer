@@ -548,6 +548,7 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Reason: approval_required|queue_full|rate_limited` (dynamic fallbacks)
+- `X-Renderer-Fallback-Action: register_collection|retry|none`
 - `X-Renderer-Error-Code: <code>` (JSON errors and fallbacks)
 - `X-Request-Id: <id>` for correlation
 - `Cache-Control: public, max-age=...` when cacheable

@@ -1734,6 +1734,10 @@ async fn fallback_text_response(
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
     );
     headers.insert(
+        "X-Renderer-Fallback-Action",
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
+    );
+    headers.insert(
         "X-Renderer-Fallback-Reason",
         HeaderValue::from_str(reason).unwrap_or(HeaderValue::from_static("unknown")),
     );
@@ -1750,6 +1754,14 @@ async fn fallback_text_response(
         headers.insert(header::RETRY_AFTER, value);
     }
     (status, headers, bytes).into_response()
+}
+
+fn fallback_action_for_kind(fallback_kind: &str) -> &'static str {
+    match fallback_kind {
+        "unapproved" => "register_collection",
+        "queued" | "approval_rate_limited" | "approval_stale" => "retry",
+        _ => "none",
+    }
 }
 
 async fn unapproved_fallback_lines(state: &AppState) -> Vec<String> {
@@ -1951,6 +1963,10 @@ async fn fallback_file_response(
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
     );
     headers.insert(
+        "X-Renderer-Fallback-Action",
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
+    );
+    headers.insert(
         "X-Renderer-Fallback-Source",
         HeaderValue::from_str(fallback_source).unwrap_or(HeaderValue::from_static("unknown")),
     );
@@ -2033,6 +2049,10 @@ async fn fallback_head_from_dir(
     headers.insert(
         "X-Renderer-Fallback",
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
+    );
+    headers.insert(
+        "X-Renderer-Fallback-Action",
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
     );
     headers.insert(
         "X-Renderer-Fallback-Source",
@@ -3560,6 +3580,12 @@ mod tests {
         );
         assert_eq!(
             headers
+                .get("X-Renderer-Fallback-Action")
+                .and_then(|value| value.to_str().ok()),
+            Some("register_collection")
+        );
+        assert_eq!(
+            headers
                 .get(header::CACHE_CONTROL)
                 .and_then(|value| value.to_str().ok()),
             Some("public, max-age=60")
@@ -3753,6 +3779,12 @@ mod tests {
             .await
             .expect("fallback response");
         assert_eq!(response.status(), StatusCode::OK);
+        let action = response
+            .headers()
+            .get("X-Renderer-Fallback-Action")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(action, "register_collection");
         let reason = response
             .headers()
             .get("X-Renderer-Fallback-Reason")
