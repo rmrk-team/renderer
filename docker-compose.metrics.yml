@@ -18,7 +18,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-change-me}"
     volumes:
       - ./metrics/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./metrics/dashboards:/var/lib/grafana/dashboards:ro
+      - ./metrics/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
       - "127.0.0.1:3000:3000"

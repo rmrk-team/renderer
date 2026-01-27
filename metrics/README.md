@@ -12,6 +12,29 @@ By default Prometheus scrapes `host.docker.internal:8080`. If your renderer runs
 port, update `metrics/prometheus.yml`. On Linux, `host.docker.internal` may not resolve; use
 `172.17.0.1` or run Prometheus on the host and scrape `127.0.0.1`.
 
+## Copy/paste quickstart (auth)
+
+1. Set a dedicated metrics token in the renderer:
+
+```
+METRICS_BEARER_TOKEN=change-me
+```
+
+2. Add authorization to the Prometheus scrape job:
+
+```
+scrape_configs:
+  - job_name: renderer
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials: "change-me"
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+```
+
+On Linux, replace `host.docker.internal` with `172.17.0.1` (or scrape `127.0.0.1` if Prometheus runs on the host).
+
 Security defaults:
 
 - The compose file binds Prometheus, Grafana, and node_exporter to `127.0.0.1`.
@@ -28,7 +51,7 @@ Performance note:
 
 Grafana provisioning:
 
-- The compose file mounts `metrics/dashboards/renderer-overview.json` and auto-provisions it.
+- The compose file mounts `metrics/grafana/dashboards/renderer.json` and auto-provisions it.
 
 ## Non-Docker setup (production-friendly)
 
