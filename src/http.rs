@@ -3976,10 +3976,11 @@ mod tests {
                 dir.path().join("fallbacks").to_string_lossy().to_string(),
             ),
             ("PINNING_ENABLED", "false".to_string()),
-            ("METRICS_ALLOW_IPS", "127.0.0.1/32".to_string()),
-            ("METRICS_PUBLIC", "false".to_string()),
         ]);
-        let config = Config::from_env().unwrap();
+        let mut config = Config::from_env().unwrap();
+        config.metrics_allow_ips = vec!["127.0.0.1/32".parse().unwrap()];
+        config.metrics_public = false;
+        config.metrics_require_admin_key = false;
         let state = build_state(config).await;
         let headers = HeaderMap::new();
         let response = metrics(

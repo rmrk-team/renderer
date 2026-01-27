@@ -835,7 +835,9 @@ pub(crate) async fn render_token_uncached(
         let slot_part_layers = compose
             .slot_parts
             .iter()
-            .filter(|part| !part.part_metadata.trim().is_empty())
+            .filter(|part| {
+                !part.part_metadata.trim().is_empty() && part.child_asset_metadata.trim().is_empty()
+            })
             .count();
         let slot_child_layers = compose
             .slot_parts
@@ -1195,7 +1197,8 @@ fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
         });
     }
     for part in &compose.slot_parts {
-        if !part.part_metadata.trim().is_empty() {
+        let has_child = !part.child_asset_metadata.trim().is_empty();
+        if !has_child && !part.part_metadata.trim().is_empty() {
             layers.push(Layer {
                 z: part.z,
                 required: false,
@@ -1203,7 +1206,7 @@ fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
                 metadata_uri: part.part_metadata.clone(),
             });
         }
-        if !part.child_asset_metadata.trim().is_empty() {
+        if has_child {
             layers.push(Layer {
                 z: part.z,
                 required: false,
@@ -3460,6 +3463,69 @@ mod tests {
         .unwrap();
         let key = build_variant_key(&base_key, &transparent_request);
         assert!(!key.contains("bg-"));
+    }
+
+    #[test]
+    fn slot_fallback_only_when_no_child_equipped() {
+        let compose_with_child = ComposeResult {
+            metadata_uri: "ipfs://parent".to_string(),
+            catalog_address: "0x0".to_string(),
+            fixed_parts: Vec::new(),
+            slot_parts: vec![SlotPart {
+                part_id: 1,
+                child_asset_id: 1,
+                z: 1,
+                child_address: "0x0".to_string(),
+                child_id: "1".to_string(),
+                child_asset_metadata: "ipfs://child".to_string(),
+                part_metadata: "ipfs://fallback".to_string(),
+            }],
+        };
+        let layers = build_layers(&compose_with_child);
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::SlotPart))
+                .count(),
+            0
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::SlotChild))
+                .count(),
+            1
+        );
+
+        let compose_without_child = ComposeResult {
+            metadata_uri: "ipfs://parent".to_string(),
+            catalog_address: "0x0".to_string(),
+            fixed_parts: Vec::new(),
+            slot_parts: vec![SlotPart {
+                part_id: 1,
+                child_asset_id: 0,
+                z: 1,
+                child_address: "0x0".to_string(),
+                child_id: "0".to_string(),
+                child_asset_metadata: "".to_string(),
+                part_metadata: "ipfs://fallback".to_string(),
+            }],
+        };
+        let layers = build_layers(&compose_without_child);
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::SlotPart))
+                .count(),
+            1
+        );
+        assert_eq!(
+            layers
+                .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::SlotChild))
+                .count(),
+            0
+        );
     }
 
     #[test]

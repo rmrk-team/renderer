@@ -201,7 +201,7 @@ For each layer (fixed or equipped slot):
 ### 4.4 Composition
 
 - Sort all resolved layers by `z_index` ascending.
-- Slot children render at the slot part’s `z`; slot fallback metadata (if any) is drawn before the child at the same `z`.
+- Slot children render at the slot part’s `z`; slot fallback metadata is only used when no child is equipped.
 - Composite using standard alpha-over.
 - Canvas is initialized transparent.
 - If output is JPEG (no alpha), either:

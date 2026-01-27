@@ -70,7 +70,7 @@ HTTP safety caps:
 
 ### Render policy
 
-- Child assets render at the slot part’s `z`. If slot fallback metadata exists, it is drawn before the child at the same `z`.
+- Child assets render at the slot part’s `z`. Slot fallback metadata is only used when no child is equipped.
 - `RASTER_MISMATCH_FIXED`: `error`, `scale_to_canvas`, `center_no_scale`, or `top_left_no_scale`.
 - `RASTER_MISMATCH_CHILD`: same values as `RASTER_MISMATCH_FIXED`, applied to equipped child layers.
 - `COLLECTION_RENDER_OVERRIDES`: JSON map `"chain:collection" => { raster_mismatch_fixed, raster_mismatch_child }`.
