@@ -12,7 +12,6 @@
 *.tmp
 .idea/
 .vscode/
-spec-docs/
 dist/
 
 cache/
