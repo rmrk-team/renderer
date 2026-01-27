@@ -1996,15 +1996,15 @@ async fn compute_render_fingerprint(
         let kind = layer.kind;
         join_set.spawn(async move {
             let _permit = permit;
-            let resolved = assets.resolve_metadata(&metadata_uri, false).await?;
-            Ok::<_, anyhow::Error>((idx, metadata_uri, required, kind, resolved))
+            let resolved = assets.resolve_metadata(&metadata_uri, false).await;
+            (idx, metadata_uri, required, kind, resolved)
         });
     }
     while let Some(result) = join_set.join_next().await {
-        let (idx, metadata_uri, required, kind, resolved) = result??;
+        let (idx, metadata_uri, required, kind, resolved) = result?;
         match resolved {
-            Some(resolved) => results[idx] = Some(resolved),
-            None => {
+            Ok(Some(resolved)) => results[idx] = Some(resolved),
+            Ok(None) => {
                 if required {
                     warn!(
                         metadata_uri = %metadata_uri,
@@ -2013,6 +2013,23 @@ async fn compute_render_fingerprint(
                     );
                     return Err(anyhow!("missing required layer metadata"));
                 }
+            }
+            Err(err) => {
+                if required {
+                    warn!(
+                        error = ?err,
+                        metadata_uri = %metadata_uri,
+                        kind = ?kind,
+                        "render fingerprint required metadata fetch failed"
+                    );
+                    return Err(err);
+                }
+                warn!(
+                    error = ?err,
+                    metadata_uri = %metadata_uri,
+                    kind = ?kind,
+                    "render fingerprint optional metadata fetch failed, skipping"
+                );
             }
         }
     }
@@ -2348,6 +2365,8 @@ async fn load_layer(
             "debug layer start"
         );
     }
+    let is_optional_layer =
+        !layer.required && matches!(layer.kind, LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay);
     debug!(
         metadata_uri = %layer.metadata_uri,
         required = layer.required,
@@ -2420,12 +2439,39 @@ async fn load_layer(
                                 );
                                 resolved = thumb;
                                 assets.fetch_asset(&resolved.art_uri).await?
+                            } else if is_optional_layer {
+                                warn!(
+                                    error = ?err,
+                                    metadata_uri = %layer.metadata_uri,
+                                    art_uri = %resolved.art_uri,
+                                    kind = ?layer.kind,
+                                    "optional layer asset too large and thumbnail missing, skipping"
+                                );
+                                return Ok(None);
                             } else {
                                 return Err(err);
                             }
+                        } else if is_optional_layer {
+                            warn!(
+                                error = ?err,
+                                metadata_uri = %layer.metadata_uri,
+                                art_uri = %resolved.art_uri,
+                                kind = ?layer.kind,
+                                "optional layer asset too large and thumbnail missing, skipping"
+                            );
+                            return Ok(None);
                         } else {
                             return Err(err);
                         }
+                    } else if is_optional_layer {
+                        warn!(
+                            error = ?err,
+                            metadata_uri = %layer.metadata_uri,
+                            art_uri = %resolved.art_uri,
+                            kind = ?layer.kind,
+                            "optional layer asset fetch failed, skipping"
+                        );
+                        return Ok(None);
                     } else {
                         return Err(err);
                     }
@@ -2433,10 +2479,7 @@ async fn load_layer(
             }
         }
         Ok(None) => {
-            if matches!(
-                layer.kind,
-                LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay
-            ) {
+            if is_optional_layer {
                 debug!(
                     metadata_uri = %layer.metadata_uri,
                     kind = ?layer.kind,
@@ -2447,6 +2490,15 @@ async fn load_layer(
             return Err(anyhow!("metadata has no renderable media"));
         }
         Err(err) => {
+            if is_optional_layer {
+                warn!(
+                    error = ?err,
+                    metadata_uri = %layer.metadata_uri,
+                    kind = ?layer.kind,
+                    "optional layer metadata resolve failed, skipping"
+                );
+                return Ok(None);
+            }
             debug!(
                 error = ?err,
                 metadata_uri = %layer.metadata_uri,
