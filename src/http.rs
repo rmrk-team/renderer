@@ -3,7 +3,8 @@ use crate::canonical;
 use crate::config::{AccessMode, Config};
 use crate::failure_log::FailureLogEntry;
 use crate::fallbacks::{
-    FALLBACK_OG_HEIGHT, FALLBACK_OG_WIDTH, FallbackMeta, fallback_etag, fallback_variant_filename,
+    DEFAULT_UNAPPROVED_FALLBACK_LINE1, DEFAULT_UNAPPROVED_FALLBACK_LINE2, FALLBACK_OG_HEIGHT,
+    FALLBACK_OG_WIDTH, FallbackMeta, fallback_etag, fallback_variant_filename,
     fallback_variant_label, fallback_width_bucket, global_unapproved_dir,
 };
 use crate::landing;
@@ -63,10 +64,29 @@ struct FallbackCacheKey {
     lines: String,
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct FallbackFileCacheKey {
+    dir: PathBuf,
+    variant_label: String,
+    format: OutputFormat,
+}
+
+#[derive(Clone)]
+struct FallbackFileCacheEntry {
+    path: PathBuf,
+    etag: String,
+    content_length: u64,
+    expires_at: Instant,
+}
+
 static PLACEHOLDER_CACHE: OnceLock<HashMap<PlaceholderKey, Arc<Vec<u8>>>> = OnceLock::new();
 const PLACEHOLDER_PRESET_WIDTHS: [u32; 6] = [64u32, 128u32, 256u32, 512u32, 1024u32, 2048u32];
 static FALLBACK_CACHE: OnceLock<DashMap<FallbackCacheKey, Arc<Vec<u8>>>> = OnceLock::new();
 const FALLBACK_CACHE_MAX_ENTRIES: usize = 64;
+static FALLBACK_FILE_CACHE: OnceLock<DashMap<FallbackFileCacheKey, FallbackFileCacheEntry>> =
+    OnceLock::new();
+const FALLBACK_FILE_CACHE_MAX_ENTRIES: usize = 256;
+const FALLBACK_FILE_CACHE_TTL: Duration = Duration::from_secs(60);
 
 pub fn init_placeholder_cache(config: &Config) {
     let mut cache = HashMap::new();
@@ -98,6 +118,10 @@ pub fn init_placeholder_cache(config: &Config) {
 
 fn fallback_cache() -> &'static DashMap<FallbackCacheKey, Arc<Vec<u8>>> {
     FALLBACK_CACHE.get_or_init(DashMap::new)
+}
+
+fn fallback_file_cache() -> &'static DashMap<FallbackFileCacheKey, FallbackFileCacheEntry> {
+    FALLBACK_FILE_CACHE.get_or_init(DashMap::new)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1728,6 +1752,46 @@ async fn fallback_text_response(
     (status, headers, bytes).into_response()
 }
 
+async fn unapproved_fallback_lines(state: &AppState) -> Vec<String> {
+    if let Some(lines) = state.unapproved_fallback_cache.get().await {
+        return lines;
+    }
+    let line1_override = match state.db.get_setting("unapproved_fallback_line1").await {
+        Ok(value) => value.and_then(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+        Err(err) => {
+            warn!(error = ?err, "failed to load unapproved fallback line1");
+            None
+        }
+    };
+    let line2_override = match state.db.get_setting("unapproved_fallback_line2").await {
+        Ok(value) => value.and_then(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }),
+        Err(err) => {
+            warn!(error = ?err, "failed to load unapproved fallback line2");
+            None
+        }
+    };
+    let lines = vec![
+        line1_override.unwrap_or_else(|| DEFAULT_UNAPPROVED_FALLBACK_LINE1.to_string()),
+        line2_override.unwrap_or_else(|| DEFAULT_UNAPPROVED_FALLBACK_LINE2.to_string()),
+    ];
+    state.unapproved_fallback_cache.set(lines.clone()).await;
+    lines
+}
+
 fn render_fallback_image(
     format: &OutputFormat,
     width: u32,
@@ -1789,13 +1853,28 @@ async fn load_fallback_variant(
     width_param: &Option<String>,
     og_mode: bool,
 ) -> Option<FallbackVariantFile> {
-    let meta = read_fallback_meta(dir).await?;
     let width = if og_mode {
         FALLBACK_OG_WIDTH
     } else {
         fallback_width_bucket(width_param)
     };
     let variant_label = fallback_variant_label(og_mode, width);
+    let key = FallbackFileCacheKey {
+        dir: dir.to_path_buf(),
+        variant_label: variant_label.clone(),
+        format: *format,
+    };
+    if let Some(entry) = fallback_file_cache().get(&key) {
+        if entry.expires_at > Instant::now() {
+            return Some(FallbackVariantFile {
+                path: entry.path.clone(),
+                content_length: entry.content_length,
+                etag: entry.etag.clone(),
+            });
+        }
+        fallback_file_cache().remove(&key);
+    }
+    let meta = read_fallback_meta(dir).await?;
     let filename = fallback_variant_filename(&variant_label, format);
     let path = dir.join(filename);
     let metadata = tokio::fs::symlink_metadata(&path).await.ok()?;
@@ -1812,6 +1891,17 @@ async fn load_fallback_variant(
         variant_label.clone()
     };
     let etag = fallback_etag(&meta, &etag_label, format);
+    let entry = FallbackFileCacheEntry {
+        path: path.clone(),
+        content_length: metadata.len(),
+        etag: etag.clone(),
+        expires_at: Instant::now() + FALLBACK_FILE_CACHE_TTL,
+    };
+    let cache = fallback_file_cache();
+    if cache.len() >= FALLBACK_FILE_CACHE_MAX_ENTRIES {
+        cache.clear();
+    }
+    cache.insert(key, entry);
     Some(FallbackVariantFile {
         path,
         content_length: metadata.len(),
@@ -2091,10 +2181,7 @@ async fn resolve_unapproved_fallback(
         return Some(response);
     }
     let (width, height) = placeholder_dimensions(state, &request.width_param, request.og_mode);
-    let lines = vec![
-        "COLLECTION NOT APPROVED".to_string(),
-        "PLEASE REGISTER TO VIEW".to_string(),
-    ];
+    let lines = unapproved_fallback_lines(state).await;
     Some(
         fallback_text_response(
             &request.format,
@@ -3535,6 +3622,39 @@ mod tests {
         assert!(body.is_empty());
     }
 
+    #[tokio::test]
+    async fn fallback_variant_cache_avoids_meta_read() {
+        let dir = tempdir().unwrap();
+        let width = fallback_width_bucket(&None);
+        let variant_label = fallback_variant_label(false, width);
+        let filename = fallback_variant_filename(&variant_label, &OutputFormat::Png);
+        let meta = FallbackMeta {
+            updated_at_ms: 123,
+            source_sha256: "deadbeef".to_string(),
+            source_width: 10,
+            source_height: 10,
+            variants: vec![filename.clone()],
+        };
+        std::fs::write(
+            dir.path().join("meta.json"),
+            serde_json::to_vec_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(&filename), b"hello").unwrap();
+
+        let first = load_fallback_variant(dir.path(), &OutputFormat::Png, &None, false)
+            .await
+            .expect("first fallback variant");
+        assert_eq!(first.content_length, 5);
+
+        std::fs::remove_file(dir.path().join("meta.json")).unwrap();
+
+        let second = load_fallback_variant(dir.path(), &OutputFormat::Png, &None, false)
+            .await
+            .expect("cached fallback variant");
+        assert_eq!(second.content_length, 5);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn fallback_file_response_rejects_symlink_variant() {
@@ -3609,7 +3729,10 @@ mod tests {
             ),
             ("PINNING_ENABLED", "false".to_string()),
         ]);
-        let config = Config::from_env().unwrap();
+        let mut config = Config::from_env().unwrap();
+        config.metrics_allow_ips = vec!["127.0.0.1/32".parse().unwrap()];
+        config.metrics_public = false;
+        config.metrics_require_admin_key = false;
         let state = build_state(config).await;
         let request = RenderRequest {
             chain: "base".to_string(),
@@ -3636,6 +3759,46 @@ mod tests {
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
         assert_eq!(reason, "missing_fallback");
+    }
+
+    #[tokio::test]
+    async fn unapproved_fallback_lines_use_admin_settings() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::new(vec![
+            ("ADMIN_PASSWORD", "test-admin".to_string()),
+            (
+                "DB_PATH",
+                dir.path().join("renderer.db").to_string_lossy().to_string(),
+            ),
+            (
+                "CACHE_DIR",
+                dir.path().join("cache").to_string_lossy().to_string(),
+            ),
+            (
+                "FALLBACKS_DIR",
+                dir.path().join("fallbacks").to_string_lossy().to_string(),
+            ),
+            ("PINNING_ENABLED", "false".to_string()),
+        ]);
+        let config = Config::from_env().unwrap();
+        let state = build_state(config).await;
+        state
+            .db
+            .set_setting("unapproved_fallback_line1", Some("REGISTER HERE"))
+            .await
+            .unwrap();
+        state
+            .db
+            .set_setting(
+                "unapproved_fallback_line2",
+                Some("https://example.test/register"),
+            )
+            .await
+            .unwrap();
+        state.clear_unapproved_fallback_cache().await;
+        let lines = unapproved_fallback_lines(&state).await;
+        assert_eq!(lines[0], "REGISTER HERE");
+        assert_eq!(lines[1], "https://example.test/register");
     }
 
     #[tokio::test]

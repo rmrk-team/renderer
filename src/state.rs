@@ -47,6 +47,7 @@ pub struct AppState {
     pub token_override_cache: TokenOverrideCache,
     pub ip_rules: IpRuleCache,
     pub require_approval_cache: RequireApprovalCache,
+    pub unapproved_fallback_cache: UnapprovedFallbackCache,
     pub collection_config_cache: CollectionConfigCache,
     pub collection_epoch_cache: CollectionEpochCache,
     pub theme_source_cache: ThemeSourceCache,
@@ -106,6 +107,7 @@ impl AppState {
         );
         let ip_rules = IpRuleCache::new();
         let require_approval_cache = RequireApprovalCache::new(REQUIRE_APPROVAL_CACHE_TTL);
+        let unapproved_fallback_cache = UnapprovedFallbackCache::new(UNAPPROVED_FALLBACK_CACHE_TTL);
         let collection_config_cache = CollectionConfigCache::new(
             COLLECTION_CONFIG_CACHE_TTL,
             COLLECTION_CONFIG_CACHE_CAPACITY,
@@ -146,6 +148,7 @@ impl AppState {
             token_override_cache,
             ip_rules,
             require_approval_cache,
+            unapproved_fallback_cache,
             collection_config_cache,
             collection_epoch_cache,
             theme_source_cache,
@@ -171,6 +174,10 @@ impl AppState {
         self.require_approval_cache.clear().await;
     }
 
+    pub async fn clear_unapproved_fallback_cache(&self) {
+        self.unapproved_fallback_cache.clear().await;
+    }
+
     pub async fn invalidate_collection_cache(&self, chain: &str, collection: &str) {
         let key = collection_cache_key(chain, collection);
         self.collection_config_cache.invalidate(&key).await;
@@ -179,6 +186,7 @@ impl AppState {
 }
 
 const REQUIRE_APPROVAL_CACHE_TTL: Duration = Duration::from_secs(10);
+const UNAPPROVED_FALLBACK_CACHE_TTL: Duration = Duration::from_secs(60);
 const COLLECTION_CONFIG_CACHE_TTL: Duration = Duration::from_secs(60);
 const COLLECTION_CONFIG_CACHE_CAPACITY: usize = 2048;
 const COLLECTION_EPOCH_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -258,8 +266,19 @@ pub struct RequireApprovalCache {
     inner: Arc<Mutex<Option<CachedBool>>>,
 }
 
+#[derive(Clone)]
+pub struct UnapprovedFallbackCache {
+    ttl: Duration,
+    inner: Arc<Mutex<Option<CachedFallbackLines>>>,
+}
+
 struct CachedBool {
     value: bool,
+    expires_at: Instant,
+}
+
+struct CachedFallbackLines {
+    lines: Vec<String>,
     expires_at: Instant,
 }
 
@@ -690,6 +709,46 @@ impl RequireApprovalCache {
         let mut guard = self.inner.lock().await;
         *guard = Some(CachedBool {
             value,
+            expires_at: Instant::now() + self.ttl,
+        });
+    }
+
+    pub async fn clear(&self) {
+        let mut guard = self.inner.lock().await;
+        *guard = None;
+    }
+}
+
+impl UnapprovedFallbackCache {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            inner: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub async fn get(&self) -> Option<Vec<String>> {
+        if self.ttl.is_zero() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut guard = self.inner.lock().await;
+        if let Some(entry) = guard.as_ref() {
+            if entry.expires_at > now {
+                return Some(entry.lines.clone());
+            }
+        }
+        *guard = None;
+        None
+    }
+
+    pub async fn set(&self, lines: Vec<String>) {
+        if self.ttl.is_zero() {
+            return;
+        }
+        let mut guard = self.inner.lock().await;
+        *guard = Some(CachedFallbackLines {
+            lines,
             expires_at: Instant::now() + self.ttl,
         });
     }

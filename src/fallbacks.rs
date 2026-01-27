@@ -16,6 +16,8 @@ pub const FALLBACK_WIDTH_PRESETS: [(&str, u32); 6] = [
 pub const FALLBACK_DEFAULT_WIDTH: u32 = 512;
 pub const FALLBACK_OG_WIDTH: u32 = 1200;
 pub const FALLBACK_OG_HEIGHT: u32 = 630;
+pub const DEFAULT_UNAPPROVED_FALLBACK_LINE1: &str = "COLLECTION NOT APPROVED";
+pub const DEFAULT_UNAPPROVED_FALLBACK_LINE2: &str = "PLEASE REGISTER TO VIEW";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FallbackMeta {

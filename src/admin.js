@@ -410,13 +410,29 @@ async function loadSettings() {
   } else {
     select.value = data.require_approval_override ? 'true' : 'false';
   }
-  document.getElementById('settingsStatus').textContent = `Effective: ${data.require_approval}`;
+  const line1Input = document.getElementById('unapprovedFallbackLine1');
+  const line2Input = document.getElementById('unapprovedFallbackLine2');
+  line1Input.value = data.unapproved_fallback_line1_override ?? '';
+  line2Input.value = data.unapproved_fallback_line2_override ?? '';
+  document.getElementById('settingsStatus').textContent =
+    `Effective: ${data.require_approval} | CTA: ${data.unapproved_fallback_line1} / ${data.unapproved_fallback_line2}`;
 }
 
 async function updateRequireApproval() {
   const value = document.getElementById('requireApproval').value;
   const payload = value === 'inherit' ? { require_approval: null } : { require_approval: value === 'true' };
   await apiFetch('/admin/api/settings/require-approval', { method: 'PUT', body: JSON.stringify(payload) });
+  await loadSettings();
+}
+
+async function updateUnapprovedFallbackCta() {
+  const line1 = document.getElementById('unapprovedFallbackLine1').value.trim();
+  const line2 = document.getElementById('unapprovedFallbackLine2').value.trim();
+  const payload = {
+    line1: line1.length > 0 ? line1 : null,
+    line2: line2.length > 0 ? line2 : null
+  };
+  await apiFetch('/admin/api/settings/unapproved-fallback-cta', { method: 'PUT', body: JSON.stringify(payload) });
   await loadSettings();
 }
 
@@ -595,6 +611,7 @@ function bindClick(id, handler) {
 
 bindClick('saveTokenBtn', saveToken);
 bindClick('updateRequireApprovalBtn', updateRequireApproval);
+bindClick('updateUnapprovedFallbackBtn', updateUnapprovedFallbackCta);
 bindClick('saveCollectionBtn', saveCollection);
 bindClick('updateCacheEpochBtn', updateCacheEpoch);
 bindClick('refreshCanvasBtn', refreshCanvas);

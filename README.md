@@ -703,6 +703,10 @@ The admin API supports disk-backed fallback/override images for:
 Images are processed on upload (size limits + re-encoding), stored under `FALLBACKS_DIR`,
 and served directly from disk with consistent `ETag` + cache headers. Authorized clients
 can still bypass fallbacks with `?debug=1`/`?raw=1` to see JSON errors.
+If no unapproved fallback is uploaded, the renderer returns a generated CTA image; the
+two CTA lines are configurable via the admin settings (line 1 + line 2, often a URL).
+These inputs are intentionally unvalidated and treated as trusted admin content to maximize
+conversion control; this is an accepted risk, so protect admin access accordingly.
 
 Fallbacks are not cache. Keep `FALLBACKS_DIR` outside `CACHE_DIR` (default:
 `/var/lib/renderer/fallbacks`). Cache purge operations only remove cache subdirectories.

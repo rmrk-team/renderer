@@ -15,6 +15,7 @@ shipping a public instance.
 - `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` enabled for public traffic.
 - `MAX_ADMIN_BODY_BYTES` set to a sane cap for uploads (e.g., 100MB).
 - `METRICS_BEARER_TOKEN` set (or `METRICS_REQUIRE_ADMIN_KEY=true`) if `/metrics` is reachable.
+- Unapproved fallback CTA text is admin-controlled and intentionally unvalidated; treat admin access as trusted.
 - `MAX_DECODED_RASTER_PIXELS` aligned with `MAX_CANVAS_PIXELS`.
 - `MAX_LAYERS_PER_RENDER` / `MAX_TOTAL_RASTER_PIXELS` tuned to your hardware.
 - `MAX_CONCURRENT_RPC_CALLS` set to protect RPC providers.

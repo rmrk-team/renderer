@@ -626,8 +626,6 @@ pub async fn refresh_metrics(state: &AppState) {
             metrics.set_approved_collections(&chain, total);
         }
     }
-
-    metrics.flush_topk();
 }
 
 async fn refresh_expensive_metrics(

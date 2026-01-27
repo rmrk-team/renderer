@@ -21,6 +21,7 @@ curl http://127.0.0.1:8080/healthz
 
 Note: keep `FALLBACKS_DIR` outside `CACHE_DIR` so cache purges never delete fallbacks.
 Note: admin uploads are capped by `MAX_ADMIN_BODY_BYTES` and `FALLBACK_UPLOAD_MAX_BYTES`.
+Note: unapproved fallback CTA lines are admin-controlled and intentionally unvalidated.
 
 ## Tests
 ```bash

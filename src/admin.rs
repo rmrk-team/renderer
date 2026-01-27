@@ -6,8 +6,9 @@ use crate::db::{
     TokenOverride, UsageRow, WarmupJob,
 };
 use crate::fallbacks::{
-    FALLBACK_OG_HEIGHT, FALLBACK_OG_WIDTH, FALLBACK_WIDTH_PRESETS, FallbackMeta,
-    collection_fallback_dir, global_unapproved_dir, token_override_dir,
+    DEFAULT_UNAPPROVED_FALLBACK_LINE1, DEFAULT_UNAPPROVED_FALLBACK_LINE2, FALLBACK_OG_HEIGHT,
+    FALLBACK_OG_WIDTH, FALLBACK_WIDTH_PRESETS, FallbackMeta, collection_fallback_dir,
+    global_unapproved_dir, token_override_dir,
 };
 use crate::http::client_ip;
 use crate::rate_limit::RateLimitInfo;
@@ -133,6 +134,10 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/usage", get(list_usage))
         .route("/api/settings", get(get_settings))
         .route("/api/settings/require-approval", put(set_require_approval))
+        .route(
+            "/api/settings/unapproved-fallback-cta",
+            put(set_unapproved_fallback_cta),
+        )
         .layer(middleware::from_fn_with_state(state, require_admin))
         .layer(RequestBodyLimitLayer::new(max_body));
     Router::new()
@@ -1429,6 +1434,10 @@ async fn replace_rpc(
 struct SettingsResponse {
     require_approval: bool,
     require_approval_override: Option<bool>,
+    unapproved_fallback_line1: String,
+    unapproved_fallback_line2: String,
+    unapproved_fallback_line1_override: Option<String>,
+    unapproved_fallback_line2_override: Option<String>,
 }
 
 async fn get_settings(
@@ -1436,9 +1445,21 @@ async fn get_settings(
 ) -> Result<Json<SettingsResponse>, AdminError> {
     let override_value = state.db.get_setting_bool("require_approval").await?;
     let effective = override_value.unwrap_or(state.config.require_approval);
+    let line1_override = state.db.get_setting("unapproved_fallback_line1").await?;
+    let line2_override = state.db.get_setting("unapproved_fallback_line2").await?;
+    let line1 = line1_override
+        .clone()
+        .unwrap_or_else(|| DEFAULT_UNAPPROVED_FALLBACK_LINE1.to_string());
+    let line2 = line2_override
+        .clone()
+        .unwrap_or_else(|| DEFAULT_UNAPPROVED_FALLBACK_LINE2.to_string());
     Ok(Json(SettingsResponse {
         require_approval: effective,
         require_approval_override: override_value,
+        unapproved_fallback_line1: line1,
+        unapproved_fallback_line2: line2,
+        unapproved_fallback_line1_override: line1_override,
+        unapproved_fallback_line2_override: line2_override,
     }))
 }
 
@@ -1464,6 +1485,36 @@ async fn set_require_approval(
         None => state.db.set_setting("require_approval", None).await?,
     }
     state.clear_require_approval_cache().await;
+    Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+#[derive(Debug, Deserialize)]
+struct UnapprovedFallbackCtaRequest {
+    line1: Option<String>,
+    line2: Option<String>,
+}
+
+fn normalize_setting_line(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn set_unapproved_fallback_cta(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<UnapprovedFallbackCtaRequest>,
+) -> Result<Json<serde_json::Value>, AdminError> {
+    let line1 = normalize_setting_line(payload.line1);
+    let line2 = normalize_setting_line(payload.line2);
+    state
+        .db
+        .set_setting("unapproved_fallback_line1", line1.as_deref())
+        .await?;
+    state
+        .db
+        .set_setting("unapproved_fallback_line2", line2.as_deref())
+        .await?;
+    state.clear_unapproved_fallback_cache().await;
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
 
@@ -1649,6 +1700,20 @@ const ADMIN_HTML: &str = r#"<!doctype html>
       </select>
       <button id="updateRequireApprovalBtn">Update Setting</button>
       <div class="small" id="settingsStatus"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Unapproved fallback CTA</legend>
+      <div class="small">
+        These lines render into the generated fallback image when no unapproved asset is uploaded.
+        Inputs are intentionally unvalidated to give admins full control over messaging (including
+        URLs). This is an accepted risk; keep admin access tightly controlled.
+      </div>
+      <label>CTA line 1</label>
+      <input id="unapprovedFallbackLine1" placeholder="COLLECTION NOT APPROVED" />
+      <label>CTA line 2</label>
+      <input id="unapprovedFallbackLine2" placeholder="https://renderer.example/register" />
+      <button id="updateUnapprovedFallbackBtn">Update CTA</button>
     </fieldset>
 
     <fieldset>
