@@ -24,3 +24,4 @@ pinned-test*/
 
 *.code-workspace
 node_modules/*
+AUDIT_*.md
