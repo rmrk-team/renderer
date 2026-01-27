@@ -31,17 +31,42 @@ pub struct Metrics {
     top_ip_bytes: IntCounterVec,
     top_collection_requests: IntCounterVec,
     top_collection_bytes: IntCounterVec,
+    top_collection_failures: IntCounterVec,
+    top_source_failures: IntCounterVec,
+    top_source_bytes: IntCounterVec,
+    top_failure_reasons: IntCounterVec,
+    top_source_cache_hit_bytes: IntCounterVec,
+    top_source_cache_miss_bytes: IntCounterVec,
+    top_source_failure_reasons: IntCounterVec,
     top_ip_request_tracker: Mutex<SpaceSaving>,
     top_ip_bytes_tracker: Mutex<SpaceSaving>,
     top_collection_request_tracker: Mutex<SpaceSaving>,
     top_collection_bytes_tracker: Mutex<SpaceSaving>,
+    top_collection_failure_tracker: Mutex<SpaceSaving>,
+    top_source_failure_tracker: Mutex<SpaceSaving>,
+    top_source_bytes_tracker: Mutex<SpaceSaving>,
+    top_failure_reason_tracker: Mutex<SpaceSaving>,
+    top_source_cache_hit_bytes_tracker: Mutex<SpaceSaving>,
+    top_source_cache_miss_bytes_tracker: Mutex<SpaceSaving>,
+    top_source_failure_reason_tracker: Mutex<SpaceSaving>,
     top_ip_request_last: Mutex<HashMap<String, u64>>,
     top_ip_bytes_last: Mutex<HashMap<String, u64>>,
     top_collection_request_last: Mutex<HashMap<String, u64>>,
     top_collection_bytes_last: Mutex<HashMap<String, u64>>,
+    top_collection_failure_last: Mutex<HashMap<String, u64>>,
+    top_source_failure_last: Mutex<HashMap<String, u64>>,
+    top_source_bytes_last: Mutex<HashMap<String, u64>>,
+    top_failure_reason_last: Mutex<HashMap<String, u64>>,
+    top_source_cache_hit_bytes_last: Mutex<HashMap<String, u64>>,
+    top_source_cache_miss_bytes_last: Mutex<HashMap<String, u64>>,
+    top_source_failure_reason_last: Mutex<HashMap<String, u64>>,
     ip_label_mode: MetricsIpLabelMode,
     top_ip_capacity: usize,
     top_collection_capacity: usize,
+    top_failure_collection_capacity: usize,
+    top_source_capacity: usize,
+    top_failure_reason_capacity: usize,
+    top_source_failure_reason_capacity: usize,
     expensive_cache: Mutex<ExpensiveMetricsCache>,
     expensive_interval: Duration,
 }
@@ -156,6 +181,62 @@ impl Metrics {
             &["chain", "collection"],
         )
         .expect("top_collection_bytes");
+        let top_collection_failures = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_collection_failures_total",
+                "Top collection failures (bounded)",
+            ),
+            &["chain", "collection"],
+        )
+        .expect("top_collection_failures");
+        let top_source_failures = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_source_failures_total",
+                "Top source failures (bounded)",
+            ),
+            &["source"],
+        )
+        .expect("top_source_failures");
+        let top_source_bytes = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_source_bytes_total",
+                "Top source bytes (bounded)",
+            ),
+            &["source"],
+        )
+        .expect("top_source_bytes");
+        let top_failure_reasons = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_failure_reasons_total",
+                "Top failure reasons (bounded)",
+            ),
+            &["reason"],
+        )
+        .expect("top_failure_reasons");
+        let top_source_cache_hit_bytes = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_source_cache_hit_bytes_total",
+                "Top source bytes from cache hits (bounded)",
+            ),
+            &["source"],
+        )
+        .expect("top_source_cache_hit_bytes");
+        let top_source_cache_miss_bytes = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_source_cache_miss_bytes_total",
+                "Top source bytes from cache misses (bounded)",
+            ),
+            &["source"],
+        )
+        .expect("top_source_cache_miss_bytes");
+        let top_source_failure_reasons = IntCounterVec::new(
+            Opts::new(
+                "renderer_top_source_failure_reasons_total",
+                "Top failure reasons by source (bounded)",
+            ),
+            &["source", "reason"],
+        )
+        .expect("top_source_failure_reasons");
         registry
             .register(Box::new(http_requests.clone()))
             .expect("register http_requests");
@@ -207,6 +288,27 @@ impl Metrics {
         registry
             .register(Box::new(top_collection_bytes.clone()))
             .expect("register top_collection_bytes");
+        registry
+            .register(Box::new(top_collection_failures.clone()))
+            .expect("register top_collection_failures");
+        registry
+            .register(Box::new(top_source_failures.clone()))
+            .expect("register top_source_failures");
+        registry
+            .register(Box::new(top_source_bytes.clone()))
+            .expect("register top_source_bytes");
+        registry
+            .register(Box::new(top_failure_reasons.clone()))
+            .expect("register top_failure_reasons");
+        registry
+            .register(Box::new(top_source_cache_hit_bytes.clone()))
+            .expect("register top_source_cache_hit_bytes");
+        registry
+            .register(Box::new(top_source_cache_miss_bytes.clone()))
+            .expect("register top_source_cache_miss_bytes");
+        registry
+            .register(Box::new(top_source_failure_reasons.clone()))
+            .expect("register top_source_failure_reasons");
 
         Self {
             registry,
@@ -227,6 +329,13 @@ impl Metrics {
             top_ip_bytes,
             top_collection_requests,
             top_collection_bytes,
+            top_collection_failures,
+            top_source_failures,
+            top_source_bytes,
+            top_failure_reasons,
+            top_source_cache_hit_bytes,
+            top_source_cache_miss_bytes,
+            top_source_failure_reasons,
             top_ip_request_tracker: Mutex::new(SpaceSaving::new(config.metrics_top_ips)),
             top_ip_bytes_tracker: Mutex::new(SpaceSaving::new(config.metrics_top_ips)),
             top_collection_request_tracker: Mutex::new(SpaceSaving::new(
@@ -235,13 +344,41 @@ impl Metrics {
             top_collection_bytes_tracker: Mutex::new(SpaceSaving::new(
                 config.metrics_top_collections,
             )),
+            top_collection_failure_tracker: Mutex::new(SpaceSaving::new(
+                config.metrics_top_failure_collections,
+            )),
+            top_source_failure_tracker: Mutex::new(SpaceSaving::new(config.metrics_top_sources)),
+            top_source_bytes_tracker: Mutex::new(SpaceSaving::new(config.metrics_top_sources)),
+            top_failure_reason_tracker: Mutex::new(SpaceSaving::new(
+                config.metrics_top_failure_reasons,
+            )),
+            top_source_cache_hit_bytes_tracker: Mutex::new(SpaceSaving::new(
+                config.metrics_top_sources,
+            )),
+            top_source_cache_miss_bytes_tracker: Mutex::new(SpaceSaving::new(
+                config.metrics_top_sources,
+            )),
+            top_source_failure_reason_tracker: Mutex::new(SpaceSaving::new(
+                config.metrics_top_source_failure_reasons,
+            )),
             top_ip_request_last: Mutex::new(HashMap::new()),
             top_ip_bytes_last: Mutex::new(HashMap::new()),
             top_collection_request_last: Mutex::new(HashMap::new()),
             top_collection_bytes_last: Mutex::new(HashMap::new()),
+            top_collection_failure_last: Mutex::new(HashMap::new()),
+            top_source_failure_last: Mutex::new(HashMap::new()),
+            top_source_bytes_last: Mutex::new(HashMap::new()),
+            top_failure_reason_last: Mutex::new(HashMap::new()),
+            top_source_cache_hit_bytes_last: Mutex::new(HashMap::new()),
+            top_source_cache_miss_bytes_last: Mutex::new(HashMap::new()),
+            top_source_failure_reason_last: Mutex::new(HashMap::new()),
             ip_label_mode: config.metrics_ip_label_mode,
             top_ip_capacity: config.metrics_top_ips,
             top_collection_capacity: config.metrics_top_collections,
+            top_failure_collection_capacity: config.metrics_top_failure_collections,
+            top_source_capacity: config.metrics_top_sources,
+            top_failure_reason_capacity: config.metrics_top_failure_reasons,
+            top_source_failure_reason_capacity: config.metrics_top_source_failure_reasons,
             expensive_cache: Mutex::new(ExpensiveMetricsCache::default()),
             expensive_interval: config.metrics_expensive_refresh_interval,
         }
@@ -364,8 +501,84 @@ impl Metrics {
         }
     }
 
+    pub fn observe_failure_collection(&self, chain: &str, collection: &str) {
+        if self.top_failure_collection_capacity == 0 {
+            return;
+        }
+        let key = format!("{chain}|{collection}");
+        let mut tracker = self
+            .top_collection_failure_tracker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        tracker.update(&key, 1);
+    }
+
+    pub fn observe_failure_source(&self, source: &str) {
+        if self.top_source_capacity == 0 {
+            return;
+        }
+        let mut tracker = self
+            .top_source_failure_tracker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        tracker.update(source, 1);
+    }
+
+    pub fn observe_source_bytes(&self, source: &str, bytes: u64) {
+        if self.top_source_capacity == 0 {
+            return;
+        }
+        let mut tracker = self
+            .top_source_bytes_tracker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        tracker.update(source, bytes);
+    }
+
+    pub fn observe_failure_reason(&self, reason: &str) {
+        if self.top_failure_reason_capacity == 0 {
+            return;
+        }
+        let mut tracker = self
+            .top_failure_reason_tracker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        tracker.update(reason, 1);
+    }
+
+    pub fn observe_failure_source_reason(&self, source: &str, reason: &str) {
+        if self.top_source_failure_reason_capacity == 0 {
+            return;
+        }
+        let key = format!("{source}|{reason}");
+        let mut tracker = self
+            .top_source_failure_reason_tracker
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        tracker.update(&key, 1);
+    }
+
+    pub fn observe_source_cache_bytes(&self, source: &str, bytes: u64, cache_hit: bool) {
+        if self.top_source_capacity == 0 {
+            return;
+        }
+        let tracker = if cache_hit {
+            &self.top_source_cache_hit_bytes_tracker
+        } else {
+            &self.top_source_cache_miss_bytes_tracker
+        };
+        let mut tracker = tracker.lock().unwrap_or_else(|err| err.into_inner());
+        tracker.update(source, bytes);
+    }
+
     pub fn flush_topk(&self) {
-        if self.top_ip_capacity == 0 && self.top_collection_capacity == 0 {
+        if self.top_ip_capacity == 0
+            && self.top_collection_capacity == 0
+            && self.top_failure_collection_capacity == 0
+            && self.top_source_capacity == 0
+            && self.top_failure_reason_capacity == 0
+            && self.top_source_failure_reason_capacity == 0
+        {
             return;
         }
         let top_ips = {
@@ -392,6 +605,55 @@ impl Metrics {
         let top_collection_bytes = {
             let tracker = self
                 .top_collection_bytes_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_collection_failures = {
+            let tracker = self
+                .top_collection_failure_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_source_failures = {
+            let tracker = self
+                .top_source_failure_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_source_bytes = {
+            let tracker = self
+                .top_source_bytes_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_failure_reasons = {
+            let tracker = self
+                .top_failure_reason_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_source_cache_hit_bytes = {
+            let tracker = self
+                .top_source_cache_hit_bytes_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_source_cache_miss_bytes = {
+            let tracker = self
+                .top_source_cache_miss_bytes_tracker
+                .lock()
+                .unwrap_or_else(|err| err.into_inner());
+            tracker.snapshot()
+        };
+        let top_source_failure_reasons = {
+            let tracker = self
+                .top_source_failure_reason_tracker
                 .lock()
                 .unwrap_or_else(|err| err.into_inner());
             tracker.snapshot()
@@ -428,6 +690,62 @@ impl Metrics {
                 .lock()
                 .unwrap_or_else(|err| err.into_inner()),
             top_collection_bytes,
+        );
+        flush_counter_pair(
+            &self.top_collection_failures,
+            &mut self
+                .top_collection_failure_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_collection_failures,
+        );
+        flush_counter_single(
+            &self.top_source_failures,
+            &mut self
+                .top_source_failure_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_source_failures,
+        );
+        flush_counter_single(
+            &self.top_source_bytes,
+            &mut self
+                .top_source_bytes_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_source_bytes,
+        );
+        flush_counter_single(
+            &self.top_failure_reasons,
+            &mut self
+                .top_failure_reason_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_failure_reasons,
+        );
+        flush_counter_single(
+            &self.top_source_cache_hit_bytes,
+            &mut self
+                .top_source_cache_hit_bytes_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_source_cache_hit_bytes,
+        );
+        flush_counter_single(
+            &self.top_source_cache_miss_bytes,
+            &mut self
+                .top_source_cache_miss_bytes_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_source_cache_miss_bytes,
+        );
+        flush_counter_pair(
+            &self.top_source_failure_reasons,
+            &mut self
+                .top_source_failure_reason_last
+                .lock()
+                .unwrap_or_else(|err| err.into_inner()),
+            top_source_failure_reasons,
         );
     }
 

@@ -13,7 +13,7 @@ SVG-first rendering, deterministic caching, and a minimal admin panel and API.
 - Warmup queue with safe concurrency
 - Embedded admin panel (`/admin`) with JSON API
 - Admin-managed fallback overrides for unapproved collections and token-level fixes
-- Prometheus `/metrics` endpoint with Top-K tracking for IPs/collections
+- Prometheus `/metrics` endpoint with Top-K tracking for IPs/collections/sources
 
 ## Quickstart
 
@@ -109,6 +109,10 @@ Minimal non-Docker steps:
    - allowlist `METRICS_ALLOW_IPS=127.0.0.1/32`, or
    - set `METRICS_BEARER_TOKEN` and use it in the scrape config.
 3. Add Prometheus as a Grafana datasource and use the panel queries from `metrics/README.md`.
+
+Retention note: Prometheus retention is global (applies to **all** metrics), so a 7‑day cap will
+drop all time series beyond that window. See `metrics/README.md` for the retention flag and options
+if you want to keep failures longer.
 
 Security note: `docker-compose.metrics.yml` binds ports to `127.0.0.1` and disables anonymous
 Grafana access by default. Avoid public exposure without an authenticated proxy.

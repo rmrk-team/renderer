@@ -1,0 +1,332 @@
+{
+  "title": "Renderer Full",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests/sec",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(renderer_http_requests_total[1m]))", "refId": "A" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Response bytes/sec",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "sum(rate(renderer_http_response_bytes_total[1m]))", "refId": "A" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Error rate",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_render_requests_total{result=\"error\"}[5m])) / sum(rate(renderer_render_requests_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Render results/sec (by result)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_render_requests_total[5m])) by (result)",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "p95/p99 render duration",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(renderer_render_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(renderer_render_duration_seconds_bucket{stage=\"total\"}[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Fetch duration p95 (by kind)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(renderer_fetch_duration_seconds_bucket[5m])) by (le, kind))",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Cache hit rate",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_render_requests_total{result=\"cache_hit\"}[5m])) / sum(rate(renderer_render_requests_total[5m]))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Cache entries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "renderer_cache_entries",
+          "legendFormat": "{{cache}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Disk bytes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "renderer_disk_bytes",
+          "legendFormat": "{{path}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Render queue depth",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "renderer_render_queue_depth", "refId": "A" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Inflight requests",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "renderer_inflight_requests", "refId": "A" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Approved collections",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "renderer_approved_collections_total",
+          "legendFormat": "{{chain}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Upstream failures/sec (by kind)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_upstream_failures_total[5m])) by (kind)",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Warmup queue size",
+      "datasource": "Prometheus",
+      "targets": [
+        { "expr": "renderer_warmup_queue_size", "refId": "A" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "Top collections by bytes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_collection_bytes_total[5m]))",
+          "legendFormat": "{{chain}}/{{collection}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 56 }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Top IPs by bytes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_ip_bytes_total[5m]))",
+          "legendFormat": "{{ip}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 56 }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Top failing collections",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_collection_failures_total[5m]))",
+          "legendFormat": "{{chain}}/{{collection}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 64 }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Top failing sources",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_source_failures_total[5m]))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 64 }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Top sources by bytes",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_source_bytes_total[5m]))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 72 }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Top failure reasons",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_failure_reasons_total[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 72 }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Top source bytes (cache hit)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_source_cache_hit_bytes_total[5m]))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 80 }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Top source bytes (cache miss)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_source_cache_miss_bytes_total[5m]))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 80 }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Cache hit ratio by source",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(renderer_top_source_cache_hit_bytes_total[5m])) / (sum by (source) (rate(renderer_top_source_cache_hit_bytes_total[5m])) + sum by (source) (rate(renderer_top_source_cache_miss_bytes_total[5m])))",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 88 }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Top failure reasons by source",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "topk(10, rate(renderer_top_source_failure_reasons_total[5m]))",
+          "legendFormat": "{{source}} / {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 }
+    }
+  ]
+}

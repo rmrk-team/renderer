@@ -41,6 +41,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use subtle::ConstantTimeEq;
 use tokio_util::io::ReaderStream;
 use tracing::warn;
+use url::Url;
 
 const OPENAPI_YAML: &str = include_str!("../openapi.yaml");
 const MAX_FORWARDED_IPS: usize = 20;
@@ -377,6 +378,7 @@ async fn render_canonical(
         fresh,
         approval_context,
     };
+    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -397,11 +399,18 @@ async fn render_canonical(
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
+                    source_label.as_deref(),
                 );
                 return Ok(response);
             }
         }
-        record_render_error_metrics(&state, started.elapsed());
+        record_render_error_metrics(
+            &state,
+            started.elapsed(),
+            &request.chain,
+            &request.collection,
+            source_label.as_deref(),
+        );
         return Err(map_render_error(err));
     }
     if !prefer_json {
@@ -412,6 +421,7 @@ async fn render_canonical(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             return Ok(response);
         }
@@ -425,6 +435,7 @@ async fn render_canonical(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             Ok(response)
         }
@@ -440,6 +451,7 @@ async fn render_canonical(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
@@ -452,11 +464,18 @@ async fn render_canonical(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
             }
-            record_render_error_metrics(&state, started.elapsed());
+            record_render_error_metrics(
+                &state,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+                source_label.as_deref(),
+            );
             Err(map_render_error(err))
         }
     }
@@ -543,6 +562,7 @@ async fn render_og(
         fresh,
         approval_context,
     };
+    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -563,11 +583,18 @@ async fn render_og(
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
+                    source_label.as_deref(),
                 );
                 return Ok(response);
             }
         }
-        record_render_error_metrics(&state, started.elapsed());
+        record_render_error_metrics(
+            &state,
+            started.elapsed(),
+            &request.chain,
+            &request.collection,
+            source_label.as_deref(),
+        );
         return Err(map_render_error(err));
     }
     if !prefer_json {
@@ -578,6 +605,7 @@ async fn render_og(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             return Ok(response);
         }
@@ -591,6 +619,7 @@ async fn render_og(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             Ok(response)
         }
@@ -606,6 +635,7 @@ async fn render_og(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
@@ -618,11 +648,18 @@ async fn render_og(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
             }
-            record_render_error_metrics(&state, started.elapsed());
+            record_render_error_metrics(
+                &state,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+                source_label.as_deref(),
+            );
             Err(map_render_error(err))
         }
     }
@@ -708,6 +745,7 @@ async fn render_legacy(
         fresh,
         approval_context,
     };
+    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -728,11 +766,18 @@ async fn render_legacy(
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
+                    source_label.as_deref(),
                 );
                 return Ok(response);
             }
         }
-        record_render_error_metrics(&state, started.elapsed());
+        record_render_error_metrics(
+            &state,
+            started.elapsed(),
+            &request.chain,
+            &request.collection,
+            source_label.as_deref(),
+        );
         return Err(map_render_error(err));
     }
     if !prefer_json {
@@ -743,6 +788,7 @@ async fn render_legacy(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             return Ok(response);
         }
@@ -756,6 +802,7 @@ async fn render_legacy(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             Ok(response)
         }
@@ -771,6 +818,7 @@ async fn render_legacy(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
@@ -787,11 +835,18 @@ async fn render_legacy(
                         started.elapsed(),
                         &request.chain,
                         &request.collection,
+                        source_label.as_deref(),
                     );
                     return Ok(response);
                 }
             }
-            record_render_error_metrics(&state, started.elapsed());
+            record_render_error_metrics(
+                &state,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+                source_label.as_deref(),
+            );
             Err(map_render_error(err))
         }
     }
@@ -846,6 +901,7 @@ async fn render_primary(
         fresh: fresh_requested,
         approval_context,
     };
+    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
     if let Err(err) = render::ensure_collection_approved(
         &state,
         &request.chain,
@@ -865,11 +921,18 @@ async fn render_primary(
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
+                    source_label.as_deref(),
                 );
                 return Ok(response);
             }
         }
-        record_render_error_metrics(&state, started.elapsed());
+        record_render_error_metrics(
+            &state,
+            started.elapsed(),
+            &request.chain,
+            &request.collection,
+            source_label.as_deref(),
+        );
         return Err(map_render_error(err));
     }
     if !prefer_json {
@@ -880,6 +943,7 @@ async fn render_primary(
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
+                source_label.as_deref(),
             );
             return Ok(response);
         }
@@ -907,7 +971,13 @@ async fn render_primary(
                     .primary_asset_cache
                     .insert_negative(primary_cache_key.clone())
                     .await;
-                record_render_error_metrics(&state, started.elapsed());
+                record_render_error_metrics(
+                    &state,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                    source_label.as_deref(),
+                );
                 return Err(ApiError::from(err));
             }
         }
@@ -915,7 +985,13 @@ async fn render_primary(
         match state.primary_asset_cache.get(&primary_cache_key).await {
             Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
             Some(crate::state::PrimaryAssetCacheValue::Negative) => {
-                record_render_error_metrics(&state, started.elapsed());
+                record_render_error_metrics(
+                    &state,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                    source_label.as_deref(),
+                );
                 return Err(
                     ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
                         .with_code("primary_asset_lookup_failed"),
@@ -944,7 +1020,13 @@ async fn render_primary(
                             .primary_asset_cache
                             .insert_negative(primary_cache_key.clone())
                             .await;
-                        record_render_error_metrics(&state, started.elapsed());
+                        record_render_error_metrics(
+                            &state,
+                            started.elapsed(),
+                            &request.chain,
+                            &request.collection,
+                            source_label.as_deref(),
+                        );
                         return Err(ApiError::from(err));
                     }
                 }
@@ -987,6 +1069,7 @@ async fn render_primary(
         started.elapsed(),
         &request.chain,
         &request.collection,
+        source_label.as_deref(),
     );
     Ok(response)
 }
@@ -1762,6 +1845,72 @@ fn fallback_action_for_kind(fallback_kind: &str) -> &'static str {
         "queued" | "approval_rate_limited" | "approval_stale" => "retry",
         _ => "none",
     }
+}
+
+fn normalize_source_label(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut normalized = trimmed.to_ascii_lowercase();
+    normalized = normalized.replace('|', "_");
+    if normalized.len() > 120 {
+        normalized.truncate(120);
+    }
+    Some(normalized)
+}
+
+fn host_from_header_url(value: &HeaderValue) -> Option<String> {
+    let raw = value.to_str().ok()?.trim();
+    if raw.eq_ignore_ascii_case("null") {
+        return None;
+    }
+    let parsed = Url::parse(raw).ok()?;
+    let host = parsed.host_str()?;
+    let label = if let Some(port) = parsed.port() {
+        format!("{host}:{port}")
+    } else {
+        host.to_string()
+    };
+    normalize_source_label(&label)
+}
+
+fn source_label_from_headers(
+    headers: &HeaderMap,
+    identity: Option<&AccessContext>,
+) -> Option<String> {
+    if let Some(value) = headers.get("X-Renderer-Source") {
+        if let Ok(raw) = value.to_str() {
+            if raw.contains("://") {
+                if let Ok(parsed) = Url::parse(raw) {
+                    if let Some(host) = parsed.host_str() {
+                        let label = if let Some(port) = parsed.port() {
+                            format!("{host}:{port}")
+                        } else {
+                            host.to_string()
+                        };
+                        if let Some(label) = normalize_source_label(&label) {
+                            return Some(label);
+                        }
+                    }
+                }
+            }
+            if let Some(label) = normalize_source_label(raw) {
+                return Some(label);
+            }
+        }
+    }
+    if let Some(value) = headers.get(header::ORIGIN) {
+        if let Some(label) = host_from_header_url(value) {
+            return Some(label);
+        }
+    }
+    if let Some(value) = headers.get(header::REFERER) {
+        if let Some(label) = host_from_header_url(value) {
+            return Some(label);
+        }
+    }
+    identity.and_then(|ctx| normalize_source_label(ctx.identity_key.as_ref()))
 }
 
 async fn unapproved_fallback_lines(state: &AppState) -> Vec<String> {
@@ -3833,6 +3982,45 @@ mod tests {
         assert_eq!(lines[1], "https://example.test/register");
     }
 
+    #[test]
+    fn source_label_from_headers_prefers_override() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "X-Renderer-Source",
+            HeaderValue::from_static("https://singular.app/path"),
+        );
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://opensea.io"),
+        );
+        let label = source_label_from_headers(&headers, None).expect("source label");
+        assert_eq!(label, "singular.app");
+    }
+
+    #[test]
+    fn source_label_from_headers_uses_origin_host() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://example.test:8443"),
+        );
+        let label = source_label_from_headers(&headers, None).expect("source label");
+        assert_eq!(label, "example.test:8443");
+    }
+
+    #[test]
+    fn failure_result_detection() {
+        assert!(is_failure_result("error"));
+        assert!(is_failure_result("unapproved_fallback"));
+        assert!(is_failure_result("render_fallback"));
+        assert!(is_failure_result("queue_full"));
+        assert!(is_failure_result("rate_limited"));
+        assert!(!is_failure_result("ok"));
+        assert!(!is_failure_result("cache_hit"));
+        assert!(!is_failure_result("cache_miss"));
+        assert!(!is_failure_result("token_override"));
+    }
+
     #[tokio::test]
     async fn metrics_requires_auth_by_default() {
         let dir = tempdir().unwrap();
@@ -4216,24 +4404,62 @@ fn classify_render_response(response: &Response) -> &'static str {
     }
 }
 
+fn is_failure_result(result: &str) -> bool {
+    !matches!(result, "ok" | "cache_hit" | "cache_miss" | "token_override")
+}
+
 fn record_render_metrics(
     state: &AppState,
     response: &Response,
     duration: Duration,
     chain: &str,
     collection: &str,
+    source_label: Option<&str>,
 ) {
     let result = classify_render_response(response);
+    let bytes = response_bytes(response);
     state.metrics.observe_render_result(result);
     state.metrics.observe_render_duration("total", duration);
     state
         .metrics
-        .observe_top_collection(chain, collection, response_bytes(response));
+        .observe_top_collection(chain, collection, bytes);
+    if let Some(source) = source_label {
+        state.metrics.observe_source_bytes(source, bytes);
+    }
+    if let Some(source) = source_label {
+        match result {
+            "cache_hit" => state
+                .metrics
+                .observe_source_cache_bytes(source, bytes, true),
+            "cache_miss" => state
+                .metrics
+                .observe_source_cache_bytes(source, bytes, false),
+            _ => {}
+        }
+    }
+    if is_failure_result(result) {
+        state.metrics.observe_failure_collection(chain, collection);
+        let source = source_label.unwrap_or("unknown");
+        state.metrics.observe_failure_source(source);
+        state.metrics.observe_failure_reason(result);
+        state.metrics.observe_failure_source_reason(source, result);
+    }
 }
 
-fn record_render_error_metrics(state: &AppState, duration: Duration) {
+fn record_render_error_metrics(
+    state: &AppState,
+    duration: Duration,
+    chain: &str,
+    collection: &str,
+    source_label: Option<&str>,
+) {
     state.metrics.observe_render_result("error");
     state.metrics.observe_render_duration("total", duration);
+    state.metrics.observe_failure_collection(chain, collection);
+    let source = source_label.unwrap_or("unknown");
+    state.metrics.observe_failure_source(source);
+    state.metrics.observe_failure_reason("error");
+    state.metrics.observe_failure_source_reason(source, "error");
 }
 
 fn log_failure_if_needed(

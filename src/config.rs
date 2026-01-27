@@ -74,6 +74,10 @@ pub struct Config {
     pub metrics_allow_ips: Vec<IpNet>,
     pub metrics_top_ips: usize,
     pub metrics_top_collections: usize,
+    pub metrics_top_failure_collections: usize,
+    pub metrics_top_sources: usize,
+    pub metrics_top_failure_reasons: usize,
+    pub metrics_top_source_failure_reasons: usize,
     pub metrics_ip_label_mode: MetricsIpLabelMode,
     pub metrics_refresh_interval: Duration,
     pub metrics_expensive_refresh_interval: Duration,
@@ -340,6 +344,12 @@ impl Config {
         let metrics_allow_ips = parse_metrics_allowlist("METRICS_ALLOW_IPS")?;
         let metrics_top_ips = parse_usize("METRICS_TOP_IPS", 20);
         let metrics_top_collections = parse_usize("METRICS_TOP_COLLECTIONS", 50);
+        let metrics_top_failure_collections =
+            parse_usize("METRICS_TOP_FAILURE_COLLECTIONS", metrics_top_collections);
+        let metrics_top_sources = parse_usize("METRICS_TOP_SOURCES", 50);
+        let metrics_top_failure_reasons = parse_usize("METRICS_TOP_FAILURE_REASONS", 20);
+        let metrics_top_source_failure_reasons =
+            parse_usize("METRICS_TOP_SOURCE_FAILURE_REASONS", 100);
         let metrics_ip_label_mode = parse_metrics_ip_label_mode("METRICS_IP_LABEL_MODE");
         let metrics_refresh_interval =
             Duration::from_secs(parse_u64("METRICS_REFRESH_INTERVAL_SECONDS", 10));
@@ -500,6 +510,10 @@ impl Config {
             metrics_allow_ips,
             metrics_top_ips,
             metrics_top_collections,
+            metrics_top_failure_collections,
+            metrics_top_sources,
+            metrics_top_failure_reasons,
+            metrics_top_source_failure_reasons,
             metrics_ip_label_mode,
             metrics_refresh_interval,
             metrics_expensive_refresh_interval,

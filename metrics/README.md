@@ -47,16 +47,26 @@ Performance note:
 
 - `METRICS_REFRESH_INTERVAL_SECONDS` controls the cheap refresh loop (set to `0` to disable).
 - `METRICS_EXPENSIVE_REFRESH_SECONDS` controls disk scans for fallback/render counts (defaults to 300s).
-- For ultra-high RPS, set `METRICS_TOP_IPS=0` and `METRICS_TOP_COLLECTIONS=0` to skip Top‑K work.
+- For ultra-high RPS, set `METRICS_TOP_IPS=0`, `METRICS_TOP_COLLECTIONS=0`,
+  `METRICS_TOP_FAILURE_COLLECTIONS=0`, `METRICS_TOP_SOURCES=0`,
+  `METRICS_TOP_FAILURE_REASONS=0`, and `METRICS_TOP_SOURCE_FAILURE_REASONS=0`
+  to skip Top‑K work.
 
 Grafana provisioning:
 
-- The compose file mounts `metrics/grafana/dashboards/renderer.json` and auto-provisions it.
+- The compose file mounts `metrics/grafana/dashboards/renderer.json` (overview) and
+  `metrics/grafana/dashboards/full_dash.json` (full) and auto-provisions both.
 
 ## Non-Docker setup (production-friendly)
 
-1. Install Prometheus + Grafana (OS packages or upstream binaries).
-2. Configure Prometheus to scrape the renderer:
+### Prometheus setup
+
+1. Install Prometheus (OS package or upstream binary).
+2. Edit the Prometheus config file:
+   - Debian/Ubuntu: `/etc/prometheus/prometheus.yml`
+   - Homebrew (macOS): `/usr/local/etc/prometheus.yml`
+   - Custom path: run Prometheus with `--config.file=/path/to/prometheus.yml`
+3. Add a scrape job for the renderer:
 
 ```
 scrape_configs:
@@ -66,7 +76,11 @@ scrape_configs:
       - targets: ["127.0.0.1:8080"]
 ```
 
-3. Provide access to `/metrics` via one of:
+4. Restart Prometheus (or re-run the binary) after updating the config.
+
+### Metrics auth (renderer)
+
+Provide access to `/metrics` via one of:
 
 - `METRICS_ALLOW_IPS=127.0.0.1/32` (recommended for local scrape), or
 - a dedicated bearer token (set `METRICS_BEARER_TOKEN`) in the Prometheus config:
@@ -82,12 +96,103 @@ scrape_configs:
       - targets: ["127.0.0.1:8080"]
 ```
 
-4. Add Prometheus as a Grafana datasource and use the queries below to build panels.
+If Prometheus runs on another host, allowlist its IP or use the bearer token.
+
+### Grafana setup
+
+1. Install Grafana (OS package or upstream binary).
+2. Start the service (Ubuntu):
+
+```
+sudo systemctl enable --now grafana-server
+sudo systemctl status grafana-server
+```
+
+If it fails to start, check logs:
+
+```
+journalctl -u grafana-server -n 200 --no-pager
+```
+
+3. Access Grafana:
+   - Local host: `http://127.0.0.1:3000`
+   - Through nginx (recommended): `https://grafana.yourdomain.tld`
+
+Default credentials are `admin` / `admin` (you will be prompted to change them on first login).
+
+4. Add Prometheus as a datasource:
+   - UI: Settings → Data sources → Add data source → Prometheus → URL `http://127.0.0.1:9090`
+   - Or provisioning:
+
+```
+# /etc/grafana/provisioning/datasources/renderer.yml
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:9090
+```
+
+5. Import the dashboard:
+   - UI: Dashboards → Import → upload `metrics/grafana/dashboards/renderer.json`, or
+   - Provisioning:
+
+```
+# /etc/grafana/provisioning/dashboards/renderer.yml
+apiVersion: 1
+providers:
+  - name: renderer
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards
+```
+
+Then copy the dashboard JSON to `/var/lib/grafana/dashboards/renderer.json`.
+
+6. (Optional) nginx reverse proxy example:
+
+```
+server {
+  listen 443 ssl;
+  server_name grafana.yourdomain.tld;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+```
+
+If you serve Grafana under a subpath (e.g. `/grafana/`), set:
+`root_url = %(protocol)s://%(domain)s/grafana/` and `serve_from_sub_path = true`
+in `/etc/grafana/grafana.ini`.
 
 Notes:
 
 - Admin bearer (`ADMIN_PASSWORD`) can access `/metrics`. Set `METRICS_REQUIRE_ADMIN_KEY=true` if
   you want to require admin auth (allowlisted IPs and `METRICS_BEARER_TOKEN` still work).
+- Source attribution for top-source metrics is derived from `Origin`/`Referer` host when available.
+  For server-to-server callers, you can send `X-Renderer-Source: your-domain` to label requests.
+- Failure metrics include non-success render outcomes (errors, fallbacks, queue/rate limits), so you
+  can see which collections or sources are degrading even if a fallback image is returned.
+- Cache hit/miss source bytes let you identify clients with poor cache behavior.
+
+### Data retention (Prometheus)
+
+Grafana does not store time-series data; Prometheus does. Retention applies to **all** metrics
+(not just failures). To cap retention at 7 days:
+
+- Docker: add `--storage.tsdb.retention.time=7d` to the Prometheus command in `docker-compose.metrics.yml`.
+- Linux systemd: set `--storage.tsdb.retention.time=7d` in the Prometheus service unit.
+- If you want to keep failures longer, increase or remove the retention limit (or use remote
+  storage). Prometheus does not support per-metric retention.
+- To wipe data immediately, stop Prometheus and delete its data directory.
 
 ## Dashboards (minimum viable panels)
 
@@ -112,3 +217,14 @@ Notes:
 ### Top Consumers
 - Top collections by bytes: `topk(10, rate(renderer_top_collection_bytes_total[5m]))`
 - Top IPs by bytes: `topk(10, rate(renderer_top_ip_bytes_total[5m]))`
+
+Full dashboard additions:
+
+- Top failing collections: `topk(10, rate(renderer_top_collection_failures_total[5m]))`
+- Top failing sources: `topk(10, rate(renderer_top_source_failures_total[5m]))`
+- Top sources by bytes: `topk(10, rate(renderer_top_source_bytes_total[5m]))`
+- Top failure reasons: `topk(10, rate(renderer_top_failure_reasons_total[5m]))`
+- Top source bytes (cache hit): `topk(10, rate(renderer_top_source_cache_hit_bytes_total[5m]))`
+- Top source bytes (cache miss): `topk(10, rate(renderer_top_source_cache_miss_bytes_total[5m]))`
+- Top failure reasons by source: `topk(10, rate(renderer_top_source_failure_reasons_total[5m]))`
+- Cache hit ratio by source: `sum by (source) (rate(renderer_top_source_cache_hit_bytes_total[5m])) / (sum by (source) (rate(renderer_top_source_cache_hit_bytes_total[5m])) + sum by (source) (rate(renderer_top_source_cache_miss_bytes_total[5m])))`

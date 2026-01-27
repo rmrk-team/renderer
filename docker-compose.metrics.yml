@@ -6,6 +6,9 @@ services:
     container_name: renderer-prometheus
     volumes:
       - ./metrics/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
     ports:
       - "127.0.0.1:9090:9090"
 
