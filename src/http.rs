@@ -8,6 +8,7 @@ use crate::fallbacks::{
     fallback_variant_label, fallback_width_bucket, global_unapproved_dir,
 };
 use crate::landing;
+use crate::metrics;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
@@ -378,7 +379,11 @@ async fn render_canonical(
         fresh,
         approval_context,
     };
-    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
+    let source_label = if source_labels_enabled(&state.config) {
+        source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0))
+    } else {
+        None
+    };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -562,7 +567,11 @@ async fn render_og(
         fresh,
         approval_context,
     };
-    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
+    let source_label = if source_labels_enabled(&state.config) {
+        source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0))
+    } else {
+        None
+    };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -745,7 +754,11 @@ async fn render_legacy(
         fresh,
         approval_context,
     };
-    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
+    let source_label = if source_labels_enabled(&state.config) {
+        source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0))
+    } else {
+        None
+    };
     let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
@@ -901,7 +914,11 @@ async fn render_primary(
         fresh: fresh_requested,
         approval_context,
     };
-    let source_label = source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0));
+    let source_label = if source_labels_enabled(&state.config) {
+        source_label_from_headers(&headers, context.as_ref().map(|ctx| &ctx.0))
+    } else {
+        None
+    };
     if let Err(err) = render::ensure_collection_approved(
         &state,
         &request.chain,
@@ -1860,6 +1877,19 @@ fn normalize_source_label(value: &str) -> Option<String> {
     Some(normalized)
 }
 
+fn source_labels_enabled(config: &Config) -> bool {
+    config.metrics_top_sources > 0 || config.metrics_top_source_failure_reasons > 0
+}
+
+fn ip_label_for_log(config: &Config, ip: IpAddr) -> String {
+    metrics::ip_label_for_mode(config.identity_ip_label_mode, ip)
+}
+
+fn ip_identity_key(config: &Config, ip: IpAddr) -> Arc<str> {
+    let label = ip_label_for_log(config, ip);
+    Arc::from(format!("ip:{label}"))
+}
+
 fn host_from_header_url(value: &HeaderValue) -> Option<String> {
     let raw = value.to_str().ok()?.trim();
     if raw.eq_ignore_ascii_case("null") {
@@ -1910,7 +1940,12 @@ fn source_label_from_headers(
             return Some(label);
         }
     }
-    identity.and_then(|ctx| normalize_source_label(ctx.identity_key.as_ref()))
+    if let Some(ctx) = identity {
+        if ctx.client_key_id.is_some() {
+            return normalize_source_label(ctx.identity_key.as_ref());
+        }
+    }
+    None
 }
 
 async fn unapproved_fallback_lines(state: &AppState) -> Vec<String> {
@@ -3122,7 +3157,7 @@ pub async fn access_middleware(
     let allow_debug = key_active || matches!(ip_rule.as_deref(), Some("allow"));
 
     let ip_identity = ip.map(|ip| AccessContext {
-        identity_key: Arc::from(format!("ip:{ip}")),
+        identity_key: ip_identity_key(&state.config, ip),
         client_key_id: None,
         max_concurrent_renders_override: None,
         allow_fresh: false,
@@ -3673,7 +3708,15 @@ mod tests {
         .unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
         Arc::new(AppState::new(
-            config, db, cache, assets, chain, metrics, None, None, None,
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            metrics,
+            None,
+            None,
+            None,
         ))
     }
 
@@ -4472,7 +4515,7 @@ fn log_failure_if_needed(
     identity: Option<&AccessContext>,
     request_id: Option<&str>,
 ) {
-    let Some(failure_log) = state.failure_log.as_ref() else {
+    let Some(failure_log_tx) = state.failure_log_tx.as_ref() else {
         return;
     };
     let status = response.status();
@@ -4500,15 +4543,12 @@ fn log_failure_if_needed(
         path,
         status.as_u16(),
         route_group.to_string(),
-        ip.map(|ip| ip.to_string()),
+        ip.map(|ip| ip_label_for_log(&state.config, ip)),
         identity.map(|ctx| ctx.identity_key.as_ref().to_string()),
         reason,
         request_id.map(|value| value.to_string()),
     );
-    let failure_log = failure_log.clone();
-    tokio::spawn(async move {
-        failure_log.write(entry).await;
-    });
+    let _ = failure_log_tx.try_send(entry);
 }
 
 fn current_hour_bucket() -> i64 {

@@ -602,11 +602,14 @@ Returns Prometheus text format. Access is **private by default** and granted whe
 
 - `METRICS_PUBLIC=true`
 - request IP matches `METRICS_ALLOW_IPS`
-- a valid API key is presented (unless `METRICS_REQUIRE_ADMIN_KEY=true`)
-- admin bearer auth is presented (`METRICS_REQUIRE_ADMIN_KEY=true`)
+- bearer matches `METRICS_BEARER_TOKEN` (recommended)
+- admin bearer auth is presented (`ADMIN_PASSWORD`)
 
 Metrics are kept low-cardinality (Top-K for IPs/collections). See `metrics/README.md`
 for dashboards and scrape configuration.
+
+Note: keep `METRICS_REQUIRE_ADMIN_KEY=true` in production to prevent render allowlisted IPs from
+implicitly gaining `/metrics` access; use `METRICS_ALLOW_IPS` or `METRICS_BEARER_TOKEN` for scrapes.
 
 ---
 
@@ -694,7 +697,7 @@ FALLBACK_UPLOAD_MAX_PIXELS=16000000
 
 # Metrics
 METRICS_PUBLIC=false
-METRICS_REQUIRE_ADMIN_KEY=false
+METRICS_REQUIRE_ADMIN_KEY=true
 METRICS_BEARER_TOKEN=
 METRICS_ALLOW_IPS=127.0.0.1/32
 METRICS_TOP_IPS=20
@@ -706,6 +709,12 @@ METRICS_TOP_SOURCE_FAILURE_REASONS=100
 METRICS_IP_LABEL_MODE=sha256_prefix
 METRICS_REFRESH_INTERVAL_SECONDS=10
 METRICS_EXPENSIVE_REFRESH_SECONDS=300
+
+# Usage tracking (privacy + retention)
+USAGE_TRACKING_ENABLED=true
+USAGE_SAMPLE_RATE=0.1
+USAGE_RETENTION_DAYS=7
+IDENTITY_IP_LABEL_MODE=sha256_prefix
 
 # Token override cache
 TOKEN_OVERRIDE_CACHE_TTL_SECONDS=30

@@ -6,7 +6,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tracing::warn;
 
 const DEFAULT_MAX_BYTES: u64 = 102_400;
@@ -138,5 +138,11 @@ impl FailureLog {
             return;
         }
         let _ = file.write_all(b"\n").await;
+    }
+}
+
+pub async fn run_failure_log(log: FailureLog, mut receiver: mpsc::Receiver<FailureLogEntry>) {
+    while let Some(entry) = receiver.recv().await {
+        log.write(entry).await;
     }
 }

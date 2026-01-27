@@ -14,13 +14,15 @@ shipping a public instance.
 - `MAX_IN_FLIGHT_REQUESTS` set to a sane ceiling (e.g., 256–1024).
 - `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` enabled for public traffic.
 - `MAX_ADMIN_BODY_BYTES` set to a sane cap for uploads (e.g., 100MB).
-- `METRICS_BEARER_TOKEN` set (or `METRICS_REQUIRE_ADMIN_KEY=true`) if `/metrics` is reachable.
+- `METRICS_REQUIRE_ADMIN_KEY=true` (default) and `METRICS_BEARER_TOKEN`/`METRICS_ALLOW_IPS`
+  configured if `/metrics` is reachable.
 - Unapproved fallback CTA text is admin-controlled and intentionally unvalidated; treat admin access as trusted.
 - `MAX_DECODED_RASTER_PIXELS` aligned with `MAX_CANVAS_PIXELS`.
 - `MAX_LAYERS_PER_RENDER` / `MAX_TOTAL_RASTER_PIXELS` tuned to your hardware.
 - `MAX_CONCURRENT_RPC_CALLS` set to protect RPC providers.
 - If using API keys, set `ACCESS_MODE` and a strong `API_KEY_SECRET`.
-- Set `USAGE_RETENTION_DAYS` to keep usage tables bounded.
+- Set `USAGE_SAMPLE_RATE` (lower in open mode) and `USAGE_RETENTION_DAYS` to keep usage tables bounded.
+- Keep `IDENTITY_IP_LABEL_MODE=sha256_prefix` unless you explicitly want raw IPs.
   - Consider `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` to reduce RPC hammering.
 
 ## Reverse proxy / CDN
@@ -30,6 +32,7 @@ shipping a public instance.
 - Set request timeouts appropriate for render latency.
 - Overwrite `X-Forwarded-For` / `Forwarded` headers and block direct access to the app port.
 - If multiple proxies are in the path, include all CIDR ranges in `TRUSTED_PROXY_CIDRS`.
+- Keep `TRUSTED_PROXY_CIDRS` tight (never `/0`).
 
 ## Network egress
 
@@ -40,6 +43,7 @@ shipping a public instance.
 
 - Do not log `Authorization`, `Cookie`, or `Set-Cookie` headers.
 - Avoid DEBUG logging in production unless headers are explicitly redacted.
+- Failure logs hash IPs by default; tune `FAILURE_LOG_CHANNEL_CAPACITY` if you see bursts.
 
 ## Storage
 

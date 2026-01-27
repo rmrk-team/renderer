@@ -1,6 +1,8 @@
 # Renderer Metrics (Prometheus + Grafana)
 
 This directory contains local-first Prometheus/Grafana configs for the renderer.
+Native (non-Docker) installs are the primary production path; Docker compose is provided
+for convenience.
 
 ## Start the stack
 
@@ -9,8 +11,11 @@ docker compose -f docker-compose.metrics.yml up -d
 ```
 
 By default Prometheus scrapes `host.docker.internal:8080`. If your renderer runs on a different
-port, update `metrics/prometheus.yml`. On Linux, `host.docker.internal` may not resolve; use
-`172.17.0.1` or run Prometheus on the host and scrape `127.0.0.1`.
+port, update `metrics/prometheus.yml`. The compose file adds a Linux host‑gateway mapping, but if
+`host.docker.internal` still does not resolve, use `172.17.0.1` or run Prometheus on the host and
+scrape `127.0.0.1`.
+
+Prometheus data is persisted in the `prometheus_data` volume.
 
 ## Copy/paste quickstart (auth)
 
@@ -42,6 +47,8 @@ Security defaults:
 - Set `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` before first start.
 - Do not expose these ports publicly; use SSH tunneling or a reverse proxy with auth if needed.
 - Docker images are pinned to versions in `docker-compose.metrics.yml` for reproducibility.
+- `/metrics` access is still private by default; use `METRICS_ALLOW_IPS` and/or
+  `METRICS_BEARER_TOKEN` (recommended), and keep `METRICS_REQUIRE_ADMIN_KEY=true` in production.
 
 Performance note:
 
@@ -175,8 +182,8 @@ in `/etc/grafana/grafana.ini`.
 
 Notes:
 
-- Admin bearer (`ADMIN_PASSWORD`) can access `/metrics`. Set `METRICS_REQUIRE_ADMIN_KEY=true` if
-  you want to require admin auth (allowlisted IPs and `METRICS_BEARER_TOKEN` still work).
+- Admin bearer (`ADMIN_PASSWORD`) can access `/metrics`. Keep `METRICS_REQUIRE_ADMIN_KEY=true`
+  in production; it prevents render allowlisted IPs from silently gaining metrics access.
 - Source attribution for top-source metrics is derived from `Origin`/`Referer` host when available.
   For server-to-server callers, you can send `X-Renderer-Source: your-domain` to label requests.
 - Failure metrics include non-success render outcomes (errors, fallbacks, queue/rate limits), so you
@@ -188,8 +195,14 @@ Notes:
 Grafana does not store time-series data; Prometheus does. Retention applies to **all** metrics
 (not just failures). To cap retention at 7 days:
 
-- Docker: add `--storage.tsdb.retention.time=7d` to the Prometheus command in `docker-compose.metrics.yml`.
+- Docker: set `--storage.tsdb.retention.time=7d` in `docker-compose.metrics.yml` (already present).
 - Linux systemd: set `--storage.tsdb.retention.time=7d` in the Prometheus service unit.
+- Native binary: pass `--storage.tsdb.retention.time=7d` on the command line.
+- To prevent disks from filling, consider adding a size cap:
+  `--storage.tsdb.retention.size=<cap>` (e.g., `20GB`).
+- Prometheus stores data under `--storage.tsdb.path` (Docker uses `/prometheus` in a named volume).
+- For native installs, that path is often `/var/lib/prometheus` or `/usr/local/var/lib/prometheus`,
+  but confirm in your service config.
 - If you want to keep failures longer, increase or remove the retention limit (or use remote
   storage). Prometheus does not support per-metric retention.
 - To wipe data immediately, stop Prometheus and delete its data directory.

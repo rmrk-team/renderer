@@ -86,7 +86,9 @@ Access control:
 - `API_KEY_SECRET`: required unless `ACCESS_MODE=open`.
 - `KEY_RATE_LIMIT_PER_MINUTE` / `KEY_RATE_LIMIT_BURST`: default per-key limits (overrides can be set per key).
 - `AUTH_FAILURE_RATE_LIMIT_PER_MINUTE` / `AUTH_FAILURE_RATE_LIMIT_BURST`: rate limit for unauthorized requests.
+- `USAGE_SAMPLE_RATE`: sampling for usage aggregation (lower this in open mode).
 - `USAGE_RETENTION_DAYS`: retention for hourly usage aggregates (0 disables cleanup).
+- `IDENTITY_IP_LABEL_MODE`: how IP-derived identities are stored (usage + failure logs).
 - `TRACK_KEYS_IN_OPEN_MODE`: when `ACCESS_MODE=open` or `denylist_only`, skip DB lookups for bearer tokens unless set to `true`.
 - API keys are accepted via `Authorization: Bearer` only (query-string keys are not supported).
 
@@ -100,7 +102,12 @@ access is granted when any of the following are true:
 - bearer matches `METRICS_BEARER_TOKEN` (recommended)
 - admin bearer auth is presented (`ADMIN_PASSWORD`)
 
-See `metrics/README.md` for dashboards, Docker compose, and non-Docker setup guidance.
+Keep `METRICS_REQUIRE_ADMIN_KEY=true` in production to prevent render allowlisted IPs from
+implicitly gaining `/metrics` access. Use `METRICS_ALLOW_IPS` and/or a metrics bearer token
+for scrapes.
+
+See `metrics/README.md` for dashboards, non-Docker setup (recommended for production), and
+Docker compose (convenience only).
 
 Minimal non-Docker steps:
 
@@ -112,7 +119,7 @@ Minimal non-Docker steps:
 
 Retention note: Prometheus retention is global (applies to **all** metrics), so a 7‑day cap will
 drop all time series beyond that window. See `metrics/README.md` for the retention flag and options
-if you want to keep failures longer.
+if you want to keep failures longer or cap disk usage by size.
 
 Security note: `docker-compose.metrics.yml` binds ports to `127.0.0.1` and disables anonymous
 Grafana access by default. Avoid public exposure without an authenticated proxy.
@@ -889,6 +896,8 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH`.
 - Set `FAILURE_LOG_PATH=off` to disable logging.
 - `FAILURE_LOG_MAX_BYTES` caps file size (oldest entries are truncated).
+- `FAILURE_LOG_CHANNEL_CAPACITY` bounds log bursts (entries are dropped when full).
+- IPs are hashed by default via `IDENTITY_IP_LABEL_MODE`.
 
 ### Warmup status
 
@@ -911,8 +920,9 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Original-size fallback renders are not cached; resized/OG variants are.
 - If a raster asset exceeds size limits, the renderer attempts a resize; if it still fails and
   `thumbnailUri` exists, the thumbnail is used.
-- Usage identity keys for non-API requests include the client IP (ensure `TRUSTED_PROXY_CIDRS` is set when proxying).
-- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable).
+- Usage identity keys for non-API requests include a hashed IP by default (see
+  `IDENTITY_IP_LABEL_MODE`); ensure `TRUSTED_PROXY_CIDRS` is set when proxying.
+- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable). Use `FAILURE_LOG_CHANNEL_CAPACITY` to bound bursts.
 - `?fresh=1` forces a state refresh and returns `Cache-Control: no-store`. If rate-limited, expect 429 with `Retry-After`.
 - Oversized raster assets are fetched with a higher byte cap and resized to `MAX_RASTER_RESIZE_DIM` during pinning/asset fetch.
 - Token warmup skips invalid/empty asset URIs (logged) so jobs can complete.

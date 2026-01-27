@@ -25,3 +25,4 @@ pinned-test*/
 node_modules/*
 AUDIT_*.md
 tmp/
+*.zip

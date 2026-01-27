@@ -22,6 +22,8 @@ curl http://127.0.0.1:8080/healthz
 Note: keep `FALLBACKS_DIR` outside `CACHE_DIR` so cache purges never delete fallbacks.
 Note: admin uploads are capped by `MAX_ADMIN_BODY_BYTES` and `FALLBACK_UPLOAD_MAX_BYTES`.
 Note: unapproved fallback CTA lines are admin-controlled and intentionally unvalidated.
+Note: `USAGE_SAMPLE_RATE` defaults to 0.1; set to 1.0 locally if you want full usage capture.
+Note: `IDENTITY_IP_LABEL_MODE=sha256_prefix` by default; set to `plain` only for local debugging.
 
 ## Tests
 ```bash
@@ -39,3 +41,5 @@ cargo test
 ## Debugging
 - `DEBUG_RENDER_TOKENS` / `DEBUG_RENDER_COLLECTIONS` to narrow logging.
 - `FAILURE_LOG_PATH` for JSON failure logs.
+- Metrics: keep `METRICS_REQUIRE_ADMIN_KEY=true` and use `METRICS_ALLOW_IPS=127.0.0.1/32`
+  or `METRICS_BEARER_TOKEN`, then follow `metrics/README.md` for Prometheus/Grafana.

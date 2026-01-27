@@ -191,6 +191,17 @@ async fn main() -> anyhow::Result<()> {
         Some(path) => FailureLog::new(path, config.failure_log_max_bytes),
         None => None,
     };
+    let (failure_log_tx, failure_log_rx) = if failure_log.is_some() {
+        let capacity = config.failure_log_channel_capacity;
+        if capacity == 0 {
+            (None, None)
+        } else {
+            let (tx, rx) = mpsc::channel(capacity.max(1));
+            (Some(tx), Some(rx))
+        }
+    } else {
+        (None, None)
+    };
     let state = Arc::new(AppState::new(
         config,
         db,
@@ -200,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
         metrics,
         usage_tx,
         render_queue_tx,
-        failure_log,
+        failure_log_tx,
     ));
     if let Err(err) = state.refresh_ip_rules().await {
         warn!(error = ?err, "failed to load ip rules cache");
@@ -258,6 +269,12 @@ async fn main() -> anyhow::Result<()> {
         let max_entries = state.config.usage_flush_max_entries;
         tokio::spawn(async move {
             usage::run_usage_aggregator(usage_db, usage_rx, flush_interval, max_entries).await;
+        });
+    }
+
+    if let (Some(failure_log), Some(failure_log_rx)) = (failure_log, failure_log_rx) {
+        tokio::spawn(async move {
+            failure_log::run_failure_log(failure_log, failure_log_rx).await;
         });
     }
 
@@ -375,6 +392,7 @@ mod tests {
             metrics_top_failure_reasons: 0,
             metrics_top_source_failure_reasons: 0,
             metrics_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
+            identity_ip_label_mode: crate::config::MetricsIpLabelMode::Sha256Prefix,
             metrics_refresh_interval: Duration::from_secs(1),
             metrics_expensive_refresh_interval: Duration::from_secs(1),
             token_override_cache_ttl: Duration::from_secs(1),
@@ -407,6 +425,7 @@ mod tests {
             rpc_failure_cooldown_seconds: 0,
             failure_log_path: None,
             failure_log_max_bytes: 0,
+            failure_log_channel_capacity: 0,
             require_approval: false,
             allow_http: true,
             allow_private_networks: false,

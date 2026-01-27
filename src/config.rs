@@ -79,6 +79,7 @@ pub struct Config {
     pub metrics_top_failure_reasons: usize,
     pub metrics_top_source_failure_reasons: usize,
     pub metrics_ip_label_mode: MetricsIpLabelMode,
+    pub identity_ip_label_mode: MetricsIpLabelMode,
     pub metrics_refresh_interval: Duration,
     pub metrics_expensive_refresh_interval: Duration,
     pub token_override_cache_ttl: Duration,
@@ -111,6 +112,7 @@ pub struct Config {
     pub rpc_failure_cooldown_seconds: u64,
     pub failure_log_path: Option<PathBuf>,
     pub failure_log_max_bytes: u64,
+    pub failure_log_channel_capacity: usize,
     pub require_approval: bool,
     pub allow_http: bool,
     pub allow_private_networks: bool,
@@ -337,7 +339,7 @@ impl Config {
         let fallback_upload_max_bytes = parse_usize("FALLBACK_UPLOAD_MAX_BYTES", 5 * 1024 * 1024);
         let fallback_upload_max_pixels = parse_u64("FALLBACK_UPLOAD_MAX_PIXELS", 16_000_000);
         let metrics_public = parse_bool("METRICS_PUBLIC", false);
-        let metrics_require_admin_key = parse_bool("METRICS_REQUIRE_ADMIN_KEY", false);
+        let metrics_require_admin_key = parse_bool("METRICS_REQUIRE_ADMIN_KEY", true);
         let metrics_bearer_token = env::var("METRICS_BEARER_TOKEN")
             .ok()
             .filter(|token| !token.is_empty());
@@ -351,6 +353,7 @@ impl Config {
         let metrics_top_source_failure_reasons =
             parse_usize("METRICS_TOP_SOURCE_FAILURE_REASONS", 100);
         let metrics_ip_label_mode = parse_metrics_ip_label_mode("METRICS_IP_LABEL_MODE");
+        let identity_ip_label_mode = parse_metrics_ip_label_mode("IDENTITY_IP_LABEL_MODE");
         let metrics_refresh_interval =
             Duration::from_secs(parse_u64("METRICS_REFRESH_INTERVAL_SECONDS", 10));
         let metrics_expensive_refresh_interval =
@@ -375,13 +378,13 @@ impl Config {
         let trusted_proxies = parse_trusted_proxies("TRUSTED_PROXY_CIDRS")?;
         warn_on_broad_proxy_ranges(&trusted_proxies);
         let usage_tracking_enabled = parse_bool("USAGE_TRACKING_ENABLED", true);
-        let usage_sample_rate = parse_f64("USAGE_SAMPLE_RATE", 1.0).clamp(0.0, 1.0);
+        let usage_sample_rate = parse_f64("USAGE_SAMPLE_RATE", 0.1).clamp(0.0, 1.0);
         let usage_channel_capacity = parse_usize("USAGE_CHANNEL_CAPACITY", 2000);
         let usage_flush_interval =
             Duration::from_secs(parse_u64("USAGE_FLUSH_INTERVAL_SECONDS", 5).max(1));
         let usage_flush_max_entries =
             parse_usize("USAGE_FLUSH_MAX_ENTRIES", usage_channel_capacity);
-        let usage_retention_days = parse_u64("USAGE_RETENTION_DAYS", 30);
+        let usage_retention_days = parse_u64("USAGE_RETENTION_DAYS", 7);
         let render_queue_capacity = parse_usize("RENDER_QUEUE_CAPACITY", 256);
         let render_layer_concurrency = parse_usize("RENDER_LAYER_CONCURRENCY", 8).max(1);
         let composite_cache_enabled = parse_bool("COMPOSITE_CACHE_ENABLED", true);
@@ -399,6 +402,7 @@ impl Config {
             .map(PathBuf::from)
             .or_else(|| Some(PathBuf::from("/var/log/renderer-failures.log")));
         let failure_log_max_bytes = parse_u64("FAILURE_LOG_MAX_BYTES", 102_400);
+        let failure_log_channel_capacity = parse_usize("FAILURE_LOG_CHANNEL_CAPACITY", 2000);
 
         if access_mode != AccessMode::Open && api_key_secret.is_none() {
             return Err(anyhow::anyhow!(
@@ -515,6 +519,7 @@ impl Config {
             metrics_top_failure_reasons,
             metrics_top_source_failure_reasons,
             metrics_ip_label_mode,
+            identity_ip_label_mode,
             metrics_refresh_interval,
             metrics_expensive_refresh_interval,
             token_override_cache_ttl,
@@ -547,6 +552,7 @@ impl Config {
             rpc_failure_cooldown_seconds,
             failure_log_path,
             failure_log_max_bytes,
+            failure_log_channel_capacity,
             require_approval,
             allow_http,
             allow_private_networks,

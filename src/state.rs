@@ -3,7 +3,7 @@ use crate::cache::{CacheManager, RenderCacheLimiter, RenderSingleflight};
 use crate::chain::ChainClient;
 use crate::config::Config;
 use crate::db::{ClientKey, CollectionConfig, Database, IpRule};
-use crate::failure_log::FailureLog;
+use crate::failure_log::FailureLogEntry;
 use crate::metrics::Metrics;
 use crate::rate_limit::{IdentityRateLimiter, KeyRateLimiter, RateLimiter};
 use crate::render_queue::RenderJob;
@@ -41,6 +41,7 @@ pub struct AppState {
     pub key_render_limiter: KeyRenderLimiter,
     pub usage_tx: Option<mpsc::Sender<UsageEvent>>,
     pub render_queue_tx: Option<mpsc::Sender<RenderJob>>,
+    pub failure_log_tx: Option<mpsc::Sender<FailureLogEntry>>,
     pub api_key_cache: ApiKeyCache,
     pub primary_asset_cache: PrimaryAssetCache,
     pub approval_negative_cache: ApprovalNegativeCache,
@@ -53,7 +54,6 @@ pub struct AppState {
     pub theme_source_cache: ThemeSourceCache,
     pub catalog_metadata_cache: CatalogMetadataCache,
     pub catalog_theme_cache: CatalogThemeCache,
-    pub failure_log: Option<FailureLog>,
 }
 
 impl AppState {
@@ -67,7 +67,7 @@ impl AppState {
         metrics: Arc<Metrics>,
         usage_tx: Option<mpsc::Sender<UsageEvent>>,
         render_queue_tx: Option<mpsc::Sender<RenderJob>>,
-        failure_log: Option<FailureLog>,
+        failure_log_tx: Option<mpsc::Sender<FailureLogEntry>>,
     ) -> Self {
         let render_singleflight = RenderSingleflight::new();
         let token_state_singleflight = RenderSingleflight::new();
@@ -142,6 +142,7 @@ impl AppState {
             key_render_limiter,
             usage_tx,
             render_queue_tx,
+            failure_log_tx,
             api_key_cache,
             primary_asset_cache,
             approval_negative_cache,
@@ -154,7 +155,6 @@ impl AppState {
             theme_source_cache,
             catalog_metadata_cache,
             catalog_theme_cache,
-            failure_log,
         }
     }
 

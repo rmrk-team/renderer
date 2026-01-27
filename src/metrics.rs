@@ -750,14 +750,18 @@ impl Metrics {
     }
 
     fn ip_label(&self, ip: IpAddr) -> String {
-        match self.ip_label_mode {
-            MetricsIpLabelMode::Plain => ip.to_string(),
-            MetricsIpLabelMode::Sha256Prefix => {
-                let mut hasher = Sha256::new();
-                hasher.update(ip.to_string().as_bytes());
-                let hash = hex::encode(hasher.finalize());
-                format!("sha256:{}", &hash[..12])
-            }
+        ip_label_for_mode(self.ip_label_mode, ip)
+    }
+}
+
+pub fn ip_label_for_mode(mode: MetricsIpLabelMode, ip: IpAddr) -> String {
+    match mode {
+        MetricsIpLabelMode::Plain => ip.to_string(),
+        MetricsIpLabelMode::Sha256Prefix => {
+            let mut hasher = Sha256::new();
+            hasher.update(ip.to_string().as_bytes());
+            let hash = hex::encode(hasher.finalize());
+            format!("sha256:{}", &hash[..12])
         }
     }
 }
