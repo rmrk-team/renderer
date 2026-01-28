@@ -44,6 +44,11 @@ shipping a public instance.
 - Do not log `Authorization`, `Cookie`, or `Set-Cookie` headers.
 - Avoid DEBUG logging in production unless headers are explicitly redacted.
 - Failure logs hash IPs by default; tune `FAILURE_LOG_CHANNEL_CAPACITY` if you see bursts.
+- Failure logs can be disabled with `FAILURE_LOG_PATH=off` (or rotated by changing the path).
+- Top-source metrics are only recorded for authenticated (client key) requests and validated
+  hostnames; untrusted headers are ignored to limit label churn.
+- Failure logs default to `/var/lib/renderer/logs/renderer-failures.log` and only record
+  `5xx` plus `401`/`403`/`429` by default.
 
 ## Storage
 
@@ -51,6 +56,38 @@ shipping a public instance.
 - Use fast local disk if possible; cached renders are read frequently.
 - If `PINNING_ENABLED=true`, plan and monitor `PINNED_DIR` growth (pinned assets are never evicted).
 - Keep `FALLBACKS_DIR` outside `CACHE_DIR` so cache purges never delete fallback assets.
+
+## Runbook
+
+### Prometheus disk is filling
+- Check `--storage.tsdb.retention.time` and `--storage.tsdb.retention.size` (size cap is required).
+- Reduce top‑K metrics if needed (`METRICS_TOP_SOURCES`, `METRICS_TOP_IPS`, etc.).
+- Move Prometheus data to a larger volume or use `remote_write` to long‑term storage.
+- Use node_exporter disk metrics to confirm if the volume is close to full.
+
+### Renderer failures spiking
+- Inspect `renderer_render_requests_total` by `result` and `renderer_top_failure_reasons_total`.
+- Correlate with upstream failures (`renderer_upstream_failures_total{kind=...}`).
+- Check rate limits (`RATE_LIMIT_*`, `AUTH_FAILURE_RATE_LIMIT_*`) and `MAX_IN_FLIGHT_REQUESTS`.
+- Review recent config changes (RPC endpoints, IPFS gateways).
+
+### Warmup queue stuck
+- Inspect `/status` and `/admin/api/warmup/status` for queue depth and pause state.
+- Resume jobs via `/admin/api/warmup/resume` if paused.
+- Check `WARMUP_MAX_TOKENS` / `WARMUP_MAX_RENDERS_PER_JOB` and RPC limits.
+
+### IPFS gateway issues
+- Check `renderer_upstream_failures_total{kind="ipfs_fetch"}` and fetch latency.
+- Rotate/update `IPFS_GATEWAYS`, or increase `IPFS_TIMEOUT_SECONDS`.
+- Verify outbound network egress rules allow gateway access.
+
+## Alerts (suggested)
+
+- Error rate: `sum(rate(renderer_render_requests_total{result="error"}[5m])) / sum(rate(renderer_render_requests_total[5m]))`
+- p95 render latency: `histogram_quantile(0.95, sum(rate(renderer_render_duration_seconds_bucket{stage="total"}[5m])) by (le))`
+- Render queue depth: `renderer_render_queue_depth`
+- Upstream failures: `sum(rate(renderer_upstream_failures_total[5m]))`
+- Disk space low (node_exporter): `node_filesystem_avail_bytes / node_filesystem_size_bytes`
 
 ## Suggested deployment profiles
 

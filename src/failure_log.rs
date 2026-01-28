@@ -15,7 +15,7 @@ const DEFAULT_MAX_BYTES: u64 = 102_400;
 pub struct FailureLog {
     path: PathBuf,
     max_bytes: u64,
-    guard: Arc<Mutex<()>>,
+    state: Arc<Mutex<FailureLogState>>,
 }
 
 #[derive(Serialize)]
@@ -78,7 +78,7 @@ impl FailureLog {
         Some(Self {
             path,
             max_bytes,
-            guard: Arc::new(Mutex::new(())),
+            state: Arc::new(Mutex::new(FailureLogState::default())),
         })
     }
 
@@ -90,36 +90,55 @@ impl FailureLog {
                 return;
             }
         };
-        let _guard = self.guard.lock().await;
-        if let Some(parent) = self.path.parent() {
-            if let Err(err) = fs::create_dir_all(parent).await {
-                warn!(error = ?err, path = %self.path.display(), "failed to create failure log dir");
-                return;
-            }
-        }
-        let line_bytes = line.as_bytes();
-        let line_len = line_bytes.len() as u64 + 1;
-        match fs::metadata(&self.path).await {
-            Ok(metadata) => {
-                if metadata.len().saturating_add(line_len) > self.max_bytes {
-                    if let Err(err) = fs::OpenOptions::new()
-                        .create(true)
-                        .write(true)
-                        .truncate(true)
-                        .open(&self.path)
-                        .await
-                    {
-                        warn!(error = ?err, path = %self.path.display(), "failed to truncate failure log");
-                        return;
-                    }
-                }
-            }
-            Err(err) => {
-                if err.kind() != std::io::ErrorKind::NotFound {
-                    warn!(error = ?err, path = %self.path.display(), "failed to stat failure log");
+        let mut state = self.state.lock().await;
+        if !state.parent_ready {
+            if let Some(parent) = self.path.parent() {
+                if let Err(err) = fs::create_dir_all(parent).await {
+                    warn!(
+                        error = ?err,
+                        path = %self.path.display(),
+                        "failed to create failure log dir"
+                    );
                     return;
                 }
             }
+            state.parent_ready = true;
+        }
+        let line_bytes = line.as_bytes();
+        let line_len = line_bytes.len() as u64 + 1;
+        let mut current_size = match state.known_size {
+            Some(size) => size,
+            None => match fs::metadata(&self.path).await {
+                Ok(metadata) => metadata.len(),
+                Err(err) => {
+                    if err.kind() != std::io::ErrorKind::NotFound {
+                        warn!(
+                            error = ?err,
+                            path = %self.path.display(),
+                            "failed to stat failure log"
+                        );
+                        return;
+                    }
+                    0
+                }
+            },
+        };
+        if current_size.saturating_add(line_len) > self.max_bytes {
+            if let Err(err) = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&self.path)
+                .await
+            {
+                warn!(
+                    error = ?err,
+                    path = %self.path.display(),
+                    "failed to truncate failure log"
+                );
+                return;
+            }
+            current_size = 0;
         }
         let mut file = match fs::OpenOptions::new()
             .create(true)
@@ -138,7 +157,15 @@ impl FailureLog {
             return;
         }
         let _ = file.write_all(b"\n").await;
+        current_size = current_size.saturating_add(line_len);
+        state.known_size = Some(current_size);
     }
+}
+
+#[derive(Default)]
+struct FailureLogState {
+    parent_ready: bool,
+    known_size: Option<u64>,
 }
 
 pub async fn run_failure_log(log: FailureLog, mut receiver: mpsc::Receiver<FailureLogEntry>) {

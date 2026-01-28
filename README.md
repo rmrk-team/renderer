@@ -127,6 +127,10 @@ Grafana access by default. Avoid public exposure without an authenticated proxy.
 Performance note: `METRICS_REFRESH_INTERVAL_SECONDS` controls cheap gauges (set `0` to disable),
 and `METRICS_EXPENSIVE_REFRESH_SECONDS` controls disk scans (default 300s).
 
+Source label note: top-source metrics are only recorded for authenticated (client key) requests,
+and the source must validate as a hostname (`X-Renderer-Source` or `Origin`/`Referer`).
+Unapproved collections are skipped in top-collection metrics to reduce churn.
+
 AccessMode semantics:
 
 - `open`: all requests allowed.
@@ -898,6 +902,7 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - `FAILURE_LOG_MAX_BYTES` caps file size (oldest entries are truncated).
 - `FAILURE_LOG_CHANNEL_CAPACITY` bounds log bursts (entries are dropped when full).
 - IPs are hashed by default via `IDENTITY_IP_LABEL_MODE`.
+- By default, only `5xx` plus `401`/`403`/`429` are logged to reduce 404 spam.
 
 ### Warmup status
 
@@ -918,11 +923,15 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - Raster layers that do not match the canonical canvas size are treated as nonconforming.
 - Non-composable primary assets fall back to a single-layer render using asset metadata.
 - Original-size fallback renders are not cached; resized/OG variants are.
+- Fallback widths snap to preset buckets (64/128/256/512/1024/2048); numeric widths round to nearest.
 - If a raster asset exceeds size limits, the renderer attempts a resize; if it still fails and
   `thumbnailUri` exists, the thumbnail is used.
 - Usage identity keys for non-API requests include a hashed IP by default (see
   `IDENTITY_IP_LABEL_MODE`); ensure `TRUSTED_PROXY_CIDRS` is set when proxying.
-- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default `/var/log/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set `FAILURE_LOG_PATH=off` to disable). Use `FAILURE_LOG_CHANNEL_CAPACITY` to bound bursts.
+- Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH` (default
+  `/var/lib/renderer/logs/renderer-failures.log`) and capped by `FAILURE_LOG_MAX_BYTES` (set
+  `FAILURE_LOG_PATH=off` to disable). By default, only `5xx` plus `401`/`403`/`429` are logged.
+  Use `FAILURE_LOG_CHANNEL_CAPACITY` to bound bursts.
 - `?fresh=1` forces a state refresh and returns `Cache-Control: no-store`. If rate-limited, expect 429 with `Retry-After`.
 - Oversized raster assets are fetched with a higher byte cap and resized to `MAX_RASTER_RESIZE_DIM` during pinning/asset fetch.
 - Token warmup skips invalid/empty asset URIs (logged) so jobs can complete.
@@ -933,6 +942,13 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 - `*_PUBLIC` flags bypass access gating only; they do not disable routes entirely.
 - Metrics: see `metrics/README.md` for Prometheus/Grafana setup and panel queries.
 - Fallback overrides are served from `FALLBACKS_DIR` and can replace unapproved/failed renders.
+
+### Release hardening checklist
+
+- Ensure writable paths: `CACHE_DIR`, `FALLBACKS_DIR`, `DB_PATH` directory, and `FAILURE_LOG_PATH`
+  (or set `FAILURE_LOG_PATH=off`).
+- If `ACCESS_MODE=open` or `hybrid`, set nonzero `RATE_LIMIT_PER_MINUTE` and burst.
+- Set Prometheus retention size cap (`--storage.tsdb.retention.size`) in addition to time.
 
 ### Deployment profiles
 

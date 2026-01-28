@@ -24,6 +24,7 @@ Note: admin uploads are capped by `MAX_ADMIN_BODY_BYTES` and `FALLBACK_UPLOAD_MA
 Note: unapproved fallback CTA lines are admin-controlled and intentionally unvalidated.
 Note: `USAGE_SAMPLE_RATE` defaults to 0.1; set to 1.0 locally if you want full usage capture.
 Note: `IDENTITY_IP_LABEL_MODE=sha256_prefix` by default; set to `plain` only for local debugging.
+Note: top-source metrics are recorded only for authenticated (client key) requests.
 
 ## Tests
 ```bash

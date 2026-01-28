@@ -126,6 +126,10 @@ fn fallback_file_cache() -> &'static DashMap<FallbackFileCacheKey, FallbackFileC
     FALLBACK_FILE_CACHE.get_or_init(DashMap::new)
 }
 
+pub(crate) fn clear_fallback_file_cache() {
+    fallback_file_cache().clear();
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RenderQuery {
     pub cache: Option<String>,
@@ -409,14 +413,16 @@ async fn render_canonical(
                 return Ok(response);
             }
         }
+        let api_error = map_render_error(err);
         record_render_error_metrics(
             &state,
             started.elapsed(),
             &request.chain,
             &request.collection,
             source_label.as_deref(),
+            api_error.code.as_deref(),
         );
-        return Err(map_render_error(err));
+        return Err(api_error);
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request, &headers).await {
@@ -474,14 +480,16 @@ async fn render_canonical(
                     return Ok(response);
                 }
             }
+            let api_error = map_render_error(err);
             record_render_error_metrics(
                 &state,
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
                 source_label.as_deref(),
+                api_error.code.as_deref(),
             );
-            Err(map_render_error(err))
+            Err(api_error)
         }
     }
 }
@@ -597,14 +605,16 @@ async fn render_og(
                 return Ok(response);
             }
         }
+        let api_error = map_render_error(err);
         record_render_error_metrics(
             &state,
             started.elapsed(),
             &request.chain,
             &request.collection,
             source_label.as_deref(),
+            api_error.code.as_deref(),
         );
-        return Err(map_render_error(err));
+        return Err(api_error);
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request, &headers).await {
@@ -662,14 +672,16 @@ async fn render_og(
                     return Ok(response);
                 }
             }
+            let api_error = map_render_error(err);
             record_render_error_metrics(
                 &state,
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
                 source_label.as_deref(),
+                api_error.code.as_deref(),
             );
-            Err(map_render_error(err))
+            Err(api_error)
         }
     }
 }
@@ -784,14 +796,16 @@ async fn render_legacy(
                 return Ok(response);
             }
         }
+        let api_error = map_render_error(err);
         record_render_error_metrics(
             &state,
             started.elapsed(),
             &request.chain,
             &request.collection,
             source_label.as_deref(),
+            api_error.code.as_deref(),
         );
-        return Err(map_render_error(err));
+        return Err(api_error);
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request, &headers).await {
@@ -853,14 +867,16 @@ async fn render_legacy(
                     return Ok(response);
                 }
             }
+            let api_error = map_render_error(err);
             record_render_error_metrics(
                 &state,
                 started.elapsed(),
                 &request.chain,
                 &request.collection,
                 source_label.as_deref(),
+                api_error.code.as_deref(),
             );
-            Err(map_render_error(err))
+            Err(api_error)
         }
     }
 }
@@ -943,14 +959,16 @@ async fn render_primary(
                 return Ok(response);
             }
         }
+        let api_error = map_render_error(err);
         record_render_error_metrics(
             &state,
             started.elapsed(),
             &request.chain,
             &request.collection,
             source_label.as_deref(),
+            api_error.code.as_deref(),
         );
-        return Err(map_render_error(err));
+        return Err(api_error);
     }
     if !prefer_json {
         if let Some(response) = resolve_token_override(&state, &request, &headers).await {
@@ -988,31 +1006,34 @@ async fn render_primary(
                     .primary_asset_cache
                     .insert_negative(primary_cache_key.clone())
                     .await;
+                let api_error = ApiError::from(err);
                 record_render_error_metrics(
                     &state,
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
                     source_label.as_deref(),
+                    api_error.code.as_deref(),
                 );
-                return Err(ApiError::from(err));
+                return Err(api_error);
             }
         }
     } else {
         match state.primary_asset_cache.get(&primary_cache_key).await {
             Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
             Some(crate::state::PrimaryAssetCacheValue::Negative) => {
+                let api_error =
+                    ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
+                        .with_code("primary_asset_lookup_failed");
                 record_render_error_metrics(
                     &state,
                     started.elapsed(),
                     &request.chain,
                     &request.collection,
                     source_label.as_deref(),
+                    api_error.code.as_deref(),
                 );
-                return Err(
-                    ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
-                        .with_code("primary_asset_lookup_failed"),
-                );
+                return Err(api_error);
             }
             None => {
                 let _permit = state
@@ -1037,14 +1058,16 @@ async fn render_primary(
                             .primary_asset_cache
                             .insert_negative(primary_cache_key.clone())
                             .await;
+                        let api_error = ApiError::from(err);
                         record_render_error_metrics(
                             &state,
                             started.elapsed(),
                             &request.chain,
                             &request.collection,
                             source_label.as_deref(),
+                            api_error.code.as_deref(),
                         );
-                        return Err(ApiError::from(err));
+                        return Err(api_error);
                     }
                 }
             }
@@ -1877,6 +1900,59 @@ fn normalize_source_label(value: &str) -> Option<String> {
     Some(normalized)
 }
 
+fn normalize_source_host(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut host = trimmed.to_ascii_lowercase();
+    if host.ends_with('.') {
+        host.pop();
+    }
+    if host.len() > 253 {
+        return None;
+    }
+    let (host_part, port) = if let Some((left, right)) = host.rsplit_once(':') {
+        if right.chars().all(|ch| ch.is_ascii_digit()) && !left.contains(':') {
+            let port_value = right.parse::<u16>().ok()?;
+            if port_value == 0 {
+                return None;
+            }
+            (left, Some(port_value))
+        } else {
+            (host.as_str(), None)
+        }
+    } else {
+        (host.as_str(), None)
+    };
+    if host_part.parse::<IpAddr>().is_ok() {
+        return None;
+    }
+    let labels: Vec<&str> = host_part.split('.').collect();
+    if labels.len() < 2 {
+        return None;
+    }
+    for label in &labels {
+        if label.is_empty() || label.len() > 63 {
+            return None;
+        }
+        if label.starts_with('-') || label.ends_with('-') {
+            return None;
+        }
+        if !label
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        {
+            return None;
+        }
+    }
+    Some(if let Some(port) = port {
+        format!("{host_part}:{port}")
+    } else {
+        host_part.to_string()
+    })
+}
+
 fn source_labels_enabled(config: &Config) -> bool {
     config.metrics_top_sources > 0 || config.metrics_top_source_failure_reasons > 0
 }
@@ -1902,13 +1978,15 @@ fn host_from_header_url(value: &HeaderValue) -> Option<String> {
     } else {
         host.to_string()
     };
-    normalize_source_label(&label)
+    normalize_source_host(&label)
 }
 
 fn source_label_from_headers(
     headers: &HeaderMap,
     identity: Option<&AccessContext>,
 ) -> Option<String> {
+    let identity = identity?;
+    identity.client_key_id?;
     if let Some(value) = headers.get("X-Renderer-Source") {
         if let Ok(raw) = value.to_str() {
             if raw.contains("://") {
@@ -1919,13 +1997,13 @@ fn source_label_from_headers(
                         } else {
                             host.to_string()
                         };
-                        if let Some(label) = normalize_source_label(&label) {
+                        if let Some(label) = normalize_source_host(&label) {
                             return Some(label);
                         }
                     }
                 }
             }
-            if let Some(label) = normalize_source_label(raw) {
+            if let Some(label) = normalize_source_host(raw) {
                 return Some(label);
             }
         }
@@ -1940,12 +2018,7 @@ fn source_label_from_headers(
             return Some(label);
         }
     }
-    if let Some(ctx) = identity {
-        if ctx.client_key_id.is_some() {
-            return normalize_source_label(ctx.identity_key.as_ref());
-        }
-    }
-    None
+    normalize_source_label(identity.identity_key.as_ref())
 }
 
 async fn unapproved_fallback_lines(state: &AppState) -> Vec<String> {
@@ -3616,7 +3689,7 @@ fn is_metrics_bearer_authorized(config: &Config, headers: &HeaderMap) -> bool {
     bool::from(token.as_bytes().ct_eq(bearer.as_bytes()))
 }
 
-fn is_safe_fallback_dir(root: &StdPath, candidate: &StdPath) -> bool {
+pub(crate) fn is_safe_fallback_dir(root: &StdPath, candidate: &StdPath) -> bool {
     if !candidate.is_absolute() {
         return false;
     }
@@ -3626,7 +3699,18 @@ fn is_safe_fallback_dir(root: &StdPath, candidate: &StdPath) -> bool {
     {
         return false;
     }
-    candidate.starts_with(root)
+    if !candidate.starts_with(root) {
+        return false;
+    }
+    let root = match std::fs::canonicalize(root) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    let candidate = match std::fs::canonicalize(candidate) {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    candidate.starts_with(&root)
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -3708,15 +3792,7 @@ mod tests {
         .unwrap();
         let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
         Arc::new(AppState::new(
-            config,
-            db,
-            cache,
-            assets,
-            chain,
-            metrics,
-            None,
-            None,
-            None,
+            config, db, cache, assets, chain, metrics, None, None, None,
         ))
     }
 
@@ -3916,16 +3992,17 @@ mod tests {
 
     #[test]
     fn safe_fallback_dir_rejects_dot_components() {
-        let root = StdPath::new("/var/lib/renderer/fallbacks");
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("fallbacks");
+        std::fs::create_dir_all(&root).unwrap();
+        let child = root.join("collection");
+        std::fs::create_dir_all(&child).unwrap();
         assert!(!is_safe_fallback_dir(
-            root,
-            StdPath::new("/var/lib/renderer/fallbacks/../secrets")
+            &root,
+            root.join("..").join("secrets").as_path()
         ));
-        assert!(!is_safe_fallback_dir(root, StdPath::new("relative/path")));
-        assert!(is_safe_fallback_dir(
-            root,
-            StdPath::new("/var/lib/renderer/fallbacks/collection")
-        ));
+        assert!(!is_safe_fallback_dir(&root, StdPath::new("relative/path")));
+        assert!(is_safe_fallback_dir(&root, &child));
     }
 
     #[tokio::test]
@@ -4036,7 +4113,15 @@ mod tests {
             header::ORIGIN,
             HeaderValue::from_static("https://opensea.io"),
         );
-        let label = source_label_from_headers(&headers, None).expect("source label");
+        let identity = AccessContext {
+            identity_key: Arc::from("client:1"),
+            client_key_id: Some(1),
+            max_concurrent_renders_override: None,
+            allow_fresh: false,
+            allow_on_demand_approval: false,
+            allow_debug: false,
+        };
+        let label = source_label_from_headers(&headers, Some(&identity)).expect("source label");
         assert_eq!(label, "singular.app");
     }
 
@@ -4047,7 +4132,15 @@ mod tests {
             header::ORIGIN,
             HeaderValue::from_static("https://example.test:8443"),
         );
-        let label = source_label_from_headers(&headers, None).expect("source label");
+        let identity = AccessContext {
+            identity_key: Arc::from("client:1"),
+            client_key_id: Some(1),
+            max_concurrent_renders_override: None,
+            allow_fresh: false,
+            allow_on_demand_approval: false,
+            allow_debug: false,
+        };
+        let label = source_label_from_headers(&headers, Some(&identity)).expect("source label");
         assert_eq!(label, "example.test:8443");
     }
 
@@ -4451,6 +4544,54 @@ fn is_failure_result(result: &str) -> bool {
     !matches!(result, "ok" | "cache_hit" | "cache_miss" | "token_override")
 }
 
+fn error_code_from_response(response: &Response) -> Option<String> {
+    response
+        .headers()
+        .get("X-Renderer-Error-Code")
+        .and_then(|value| value.to_str().ok())
+        .map(sanitize_error_header)
+        .filter(|value| !value.is_empty())
+}
+
+fn is_approval_error_code(code: &str) -> bool {
+    matches!(
+        code,
+        "collection_not_approved" | "approval_stale" | "approval_check_rate_limited"
+    )
+}
+
+fn should_track_collection_for_response(result: &str, response: &Response) -> bool {
+    if result == "unapproved_fallback" {
+        return false;
+    }
+    if let Some(code) = error_code_from_response(response) {
+        if is_approval_error_code(&code) {
+            return false;
+        }
+    }
+    true
+}
+
+fn failure_reason_from_response(result: &str, response: &Response) -> String {
+    if result != "error" && is_failure_result(result) {
+        return result.to_string();
+    }
+    if let Some(code) = error_code_from_response(response) {
+        return code;
+    }
+    "error".to_string()
+}
+
+fn failure_reason_from_error_code(error_code: Option<&str>) -> String {
+    if let Some(code) = error_code {
+        let sanitized = sanitize_error_header(code);
+        if !sanitized.is_empty() {
+            return sanitized;
+        }
+    }
+    "error".to_string()
+}
+
 fn record_render_metrics(
     state: &AppState,
     response: &Response,
@@ -4463,9 +4604,12 @@ fn record_render_metrics(
     let bytes = response_bytes(response);
     state.metrics.observe_render_result(result);
     state.metrics.observe_render_duration("total", duration);
-    state
-        .metrics
-        .observe_top_collection(chain, collection, bytes);
+    let track_collection = should_track_collection_for_response(result, response);
+    if track_collection {
+        state
+            .metrics
+            .observe_top_collection(chain, collection, bytes);
+    }
     if let Some(source) = source_label {
         state.metrics.observe_source_bytes(source, bytes);
     }
@@ -4481,11 +4625,14 @@ fn record_render_metrics(
         }
     }
     if is_failure_result(result) {
-        state.metrics.observe_failure_collection(chain, collection);
+        if track_collection {
+            state.metrics.observe_failure_collection(chain, collection);
+        }
         let source = source_label.unwrap_or("unknown");
+        let reason = failure_reason_from_response(result, response);
         state.metrics.observe_failure_source(source);
-        state.metrics.observe_failure_reason(result);
-        state.metrics.observe_failure_source_reason(source, result);
+        state.metrics.observe_failure_reason(&reason);
+        state.metrics.observe_failure_source_reason(source, &reason);
     }
 }
 
@@ -4495,14 +4642,27 @@ fn record_render_error_metrics(
     chain: &str,
     collection: &str,
     source_label: Option<&str>,
+    error_code: Option<&str>,
 ) {
     state.metrics.observe_render_result("error");
     state.metrics.observe_render_duration("total", duration);
-    state.metrics.observe_failure_collection(chain, collection);
+    let track_collection = !error_code.map(is_approval_error_code).unwrap_or(false);
+    if track_collection {
+        state.metrics.observe_failure_collection(chain, collection);
+    }
     let source = source_label.unwrap_or("unknown");
+    let reason = failure_reason_from_error_code(error_code);
     state.metrics.observe_failure_source(source);
-    state.metrics.observe_failure_reason("error");
-    state.metrics.observe_failure_source_reason(source, "error");
+    state.metrics.observe_failure_reason(&reason);
+    state.metrics.observe_failure_source_reason(source, &reason);
+}
+
+fn should_log_failure(status: StatusCode) -> bool {
+    status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+        )
 }
 
 fn log_failure_if_needed(
@@ -4519,7 +4679,7 @@ fn log_failure_if_needed(
         return;
     };
     let status = response.status();
-    if !(status.is_client_error() || status.is_server_error()) {
+    if !should_log_failure(status) {
         return;
     }
     let reason = response

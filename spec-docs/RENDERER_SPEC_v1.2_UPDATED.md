@@ -611,6 +611,13 @@ for dashboards and scrape configuration.
 Note: keep `METRICS_REQUIRE_ADMIN_KEY=true` in production to prevent render allowlisted IPs from
 implicitly gaining `/metrics` access; use `METRICS_ALLOW_IPS` or `METRICS_BEARER_TOKEN` for scrapes.
 
+Source label semantics:
+
+- Top-source metrics are recorded only for authenticated (client key) requests.
+- `X-Renderer-Source` and `Origin`/`Referer` are accepted only when they validate as hostnames.
+- Unapproved collections are skipped in top-collection metrics to reduce churn.
+- Failure-reason metrics use fallback kinds, otherwise `X-Renderer-Error-Code`.
+
 ---
 
 ## 10. Admin Panel

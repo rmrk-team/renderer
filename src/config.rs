@@ -395,12 +395,19 @@ impl Config {
         let rpc_failure_threshold =
             parse_u64("RPC_FAILURE_THRESHOLD", 2).min(u32::MAX as u64) as u32;
         let rpc_failure_cooldown_seconds = parse_u64("RPC_FAILURE_COOLDOWN_SECONDS", 60);
-        let failure_log_path = env::var("FAILURE_LOG_PATH")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("off"))
-            .map(PathBuf::from)
-            .or_else(|| Some(PathBuf::from("/var/log/renderer-failures.log")));
+        let failure_log_path = match env::var("FAILURE_LOG_PATH") {
+            Ok(value) => {
+                let trimmed = value.trim();
+                if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("off") {
+                    None
+                } else {
+                    Some(PathBuf::from(trimmed))
+                }
+            }
+            Err(_) => Some(PathBuf::from(
+                "/var/lib/renderer/logs/renderer-failures.log",
+            )),
+        };
         let failure_log_max_bytes = parse_u64("FAILURE_LOG_MAX_BYTES", 102_400);
         let failure_log_channel_capacity = parse_usize("FAILURE_LOG_CHANNEL_CAPACITY", 2000);
 

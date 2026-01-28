@@ -10,7 +10,7 @@ use crate::fallbacks::{
     FALLBACK_OG_WIDTH, FALLBACK_WIDTH_PRESETS, FallbackMeta, collection_fallback_dir,
     global_unapproved_dir, token_override_dir,
 };
-use crate::http::client_ip;
+use crate::http::{clear_fallback_file_cache, client_ip, is_safe_fallback_dir};
 use crate::rate_limit::RateLimitInfo;
 use crate::render::OutputFormat;
 use crate::render::refresh_canvas_size;
@@ -31,7 +31,7 @@ use hmac::{Hmac, Mac};
 use image::imageops;
 use image::imageops::FilterType;
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
-use rand::RngCore;
+use rand::{RngCore, random};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -781,6 +781,7 @@ async fn upload_global_unapproved_fallback(
     let payload = parse_fallback_upload(multipart, state.config.fallback_upload_max_bytes).await?;
     let dir = global_unapproved_dir(&state.config);
     let meta = write_fallback_variants(&state, &dir, payload.bytes).await?;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "dir": dir.to_string_lossy(),
@@ -798,6 +799,7 @@ async fn delete_global_unapproved_fallback(
             warn!(error = ?err, path = %dir.display(), "failed to remove global fallback dir");
         }
     }
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "removed": exists
@@ -852,6 +854,7 @@ async fn upload_collection_unapproved_fallback(
         .db
         .set_collection_unapproved_fallback(&chain, &collection, true, Some(&dir.to_string_lossy()))
         .await?;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "fallback": config,
@@ -875,6 +878,7 @@ async fn delete_collection_unapproved_fallback(
         .db
         .set_collection_unapproved_fallback(&chain, &collection, false, None)
         .await?;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "removed": exists,
@@ -895,6 +899,7 @@ async fn upload_collection_render_fallback(
         .db
         .set_collection_render_fallback(&chain, &collection, true, Some(&dir.to_string_lossy()))
         .await?;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "fallback": config,
@@ -918,6 +923,7 @@ async fn delete_collection_render_fallback(
         .db
         .set_collection_render_fallback(&chain, &collection, false, None)
         .await?;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "removed": exists,
@@ -965,6 +971,7 @@ async fn upload_token_override(
         .await?;
     let cache_key = crate::state::token_override_cache_key(&chain, &collection, &token_id);
     state.token_override_cache.invalidate(&cache_key).await;
+    clear_fallback_file_cache();
     Ok(Json(serde_json::json!({
         "status": "ok",
         "override": override_row,
@@ -985,12 +992,16 @@ async fn delete_token_override(
     state.token_override_cache.invalidate(&cache_key).await;
     if removed.is_some() {
         let dir = token_override_dir(&state.config, &chain, &collection, &token_id)?;
-        if !dir.starts_with(&state.config.fallbacks_dir) {
+        let exists = tokio::fs::metadata(&dir).await.is_ok();
+        if exists && !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir) {
             return Err(AdminError::bad_request("invalid override path"));
         }
-        if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
-            warn!(error = ?err, path = %dir.display(), "failed to remove override dir");
+        if exists {
+            if let Err(err) = tokio::fs::remove_dir_all(&dir).await {
+                warn!(error = ?err, path = %dir.display(), "failed to remove override dir");
+            }
         }
+        clear_fallback_file_cache();
     }
     Ok(Json(serde_json::json!({
         "status": "ok",
@@ -1057,7 +1068,10 @@ fn generate_and_write_fallback(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("fallback");
-    let temp_dir = parent.join(format!(".fallback_tmp_{dir_name}_{updated_at_ms}"));
+    let nonce: u64 = random();
+    let temp_dir = parent.join(format!(
+        ".fallback_tmp_{dir_name}_{updated_at_ms}_{nonce:016x}"
+    ));
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir)?;
     }
@@ -1099,7 +1113,9 @@ fn generate_and_write_fallback(
     let meta_bytes = serde_json::to_vec_pretty(&meta)?;
     write_atomic(&temp_dir.join("meta.json"), &meta_bytes)?;
     if dir.exists() {
-        let backup_dir = parent.join(format!(".fallback_old_{dir_name}_{updated_at_ms}"));
+        let backup_dir = parent.join(format!(
+            ".fallback_old_{dir_name}_{updated_at_ms}_{nonce:016x}"
+        ));
         if backup_dir.exists() {
             std::fs::remove_dir_all(&backup_dir)?;
         }

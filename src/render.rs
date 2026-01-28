@@ -2365,8 +2365,11 @@ async fn load_layer(
             "debug layer start"
         );
     }
-    let is_optional_layer =
-        !layer.required && matches!(layer.kind, LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay);
+    let is_optional_layer = !layer.required
+        && matches!(
+            layer.kind,
+            LayerKind::SlotPart | LayerKind::SlotChild | LayerKind::Overlay
+        );
     debug!(
         metadata_uri = %layer.metadata_uri,
         required = layer.required,

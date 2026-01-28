@@ -83,6 +83,14 @@ scrape_configs:
       - targets: ["127.0.0.1:8080"]
 ```
 
+Optional: if you run node_exporter locally, add:
+
+```
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
+```
+
 4. Restart Prometheus (or re-run the binary) after updating the config.
 
 ### Metrics auth (renderer)
@@ -184,22 +192,35 @@ Notes:
 
 - Admin bearer (`ADMIN_PASSWORD`) can access `/metrics`. Keep `METRICS_REQUIRE_ADMIN_KEY=true`
   in production; it prevents render allowlisted IPs from silently gaining metrics access.
-- Source attribution for top-source metrics is derived from `Origin`/`Referer` host when available.
-  For server-to-server callers, you can send `X-Renderer-Source: your-domain` to label requests.
+- Source attribution is **only recorded for authenticated (client key) requests** and the source
+  must validate as a hostname. Invalid or untrusted values are ignored.
+- `X-Renderer-Source` accepts hostnames (or URLs with hostnames); `Origin`/`Referer` are used only
+  when they parse to valid hostnames.
+- Top-collection metrics skip unapproved collections to reduce label churn.
 - Failure metrics include non-success render outcomes (errors, fallbacks, queue/rate limits), so you
   can see which collections or sources are degrading even if a fallback image is returned.
+- Failure reasons now use `X-Renderer-Error-Code` when no fallback kind is present.
 - Cache hit/miss source bytes let you identify clients with poor cache behavior.
+
+## Ops cheat sheet
+
+- **Enable Prometheus scrape:** keep `METRICS_REQUIRE_ADMIN_KEY=true`, set `METRICS_BEARER_TOKEN`,
+  and include the `authorization` block in your scrape config.
+- **Rotate/disable failure logs:** set `FAILURE_LOG_PATH=off` (disable) or point it to a new file
+  (rotate), then restart; tune `FAILURE_LOG_CHANNEL_CAPACITY` if bursts drop entries.
+- **Raise retention safely:** set both `--storage.tsdb.retention.time` and
+  `--storage.tsdb.retention.size`, move `--storage.tsdb.path` to a volume, and watch series churn.
 
 ### Data retention (Prometheus)
 
 Grafana does not store time-series data; Prometheus does. Retention applies to **all** metrics
 (not just failures). To cap retention at 7 days:
 
-- Docker: set `--storage.tsdb.retention.time=7d` in `docker-compose.metrics.yml` (already present).
+- Docker: `docker-compose.metrics.yml` sets both `--storage.tsdb.retention.time=7d` and
+  `--storage.tsdb.retention.size=20GB` (tune these to your disk budget).
 - Linux systemd: set `--storage.tsdb.retention.time=7d` in the Prometheus service unit.
 - Native binary: pass `--storage.tsdb.retention.time=7d` on the command line.
-- To prevent disks from filling, consider adding a size cap:
-  `--storage.tsdb.retention.size=<cap>` (e.g., `20GB`).
+- Adjust `--storage.tsdb.retention.size=<cap>` to keep disk usage bounded.
 - Prometheus stores data under `--storage.tsdb.path` (Docker uses `/prometheus` in a named volume).
 - For native installs, that path is often `/var/lib/prometheus` or `/usr/local/var/lib/prometheus`,
   but confirm in your service config.
