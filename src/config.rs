@@ -103,7 +103,9 @@ pub struct Config {
     pub usage_flush_max_entries: usize,
     pub usage_retention_days: u64,
     pub render_queue_capacity: usize,
+    pub render_queue_soft_limit: usize,
     pub render_layer_concurrency: usize,
+    pub render_timeout_seconds: u64,
     pub composite_cache_enabled: bool,
     pub cache_size_refresh_interval: Duration,
     pub rpc_timeout_seconds: u64,
@@ -386,7 +388,14 @@ impl Config {
             parse_usize("USAGE_FLUSH_MAX_ENTRIES", usage_channel_capacity);
         let usage_retention_days = parse_u64("USAGE_RETENTION_DAYS", 7);
         let render_queue_capacity = parse_usize("RENDER_QUEUE_CAPACITY", 256);
+        let render_queue_soft_limit = parse_usize("RENDER_QUEUE_SOFT_LIMIT", 64);
+        let render_queue_soft_limit = if render_queue_soft_limit == 0 {
+            render_queue_capacity
+        } else {
+            render_queue_soft_limit.min(render_queue_capacity)
+        };
         let render_layer_concurrency = parse_usize("RENDER_LAYER_CONCURRENCY", 8).max(1);
+        let render_timeout_seconds = parse_u64("RENDER_TIMEOUT_SECONDS", 12);
         let composite_cache_enabled = parse_bool("COMPOSITE_CACHE_ENABLED", true);
         let cache_size_refresh_interval =
             Duration::from_secs(parse_u64("CACHE_SIZE_REFRESH_SECONDS", 300).max(1));
@@ -550,7 +559,9 @@ impl Config {
             usage_flush_max_entries,
             usage_retention_days,
             render_queue_capacity,
+            render_queue_soft_limit,
             render_layer_concurrency,
+            render_timeout_seconds,
             composite_cache_enabled,
             cache_size_refresh_interval,
             rpc_timeout_seconds,

@@ -12,7 +12,7 @@ use crate::metrics;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
-    RenderRequest, render_token_with_limit_checked,
+    RenderRequest, RenderTimeoutError, render_token_with_limit_checked,
 };
 use crate::state::{AppState, TokenOverrideEntry, token_override_cache_key};
 use crate::usage::UsageEvent;
@@ -315,17 +315,6 @@ async fn render_canonical(
     headers: HeaderMap,
     context: Option<Extension<AccessContext>>,
 ) -> Result<Response, ApiError> {
-    if asset_id == "0" {
-        return render_primary(
-            State(state),
-            Path((chain, collection, token_id, format)),
-            Query(query),
-            RawQuery(None),
-            headers,
-            context,
-        )
-        .await;
-    }
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     render::validate_render_params(&chain, &collection, &token_id, Some(&asset_id))
@@ -946,7 +935,6 @@ async fn render_primary(
     } else {
         None
     };
-    let render_limit = context.as_ref().and_then(|ctx| ctx.0.render_limit());
     if let Err(err) = render::ensure_collection_approved(
         &state,
         &request.chain,
@@ -1018,20 +1006,6 @@ async fn render_primary(
                     .primary_asset_cache
                     .insert_negative(primary_cache_key.clone())
                     .await;
-                if let Some(response) = try_render_token_uri_fallback(
-                    state.clone(),
-                    &request,
-                    render_limit,
-                    &headers,
-                    &placeholder_width,
-                    started,
-                    source_label.as_deref(),
-                    prefer_json,
-                )
-                .await?
-                {
-                    return Ok(response);
-                }
                 let api_error = ApiError::from(err);
                 record_render_error_metrics(
                     &state,
@@ -1048,20 +1022,6 @@ async fn render_primary(
         match state.primary_asset_cache.get(&primary_cache_key).await {
             Some(crate::state::PrimaryAssetCacheValue::Hit(asset_id)) => asset_id,
             Some(crate::state::PrimaryAssetCacheValue::Negative) => {
-                if let Some(response) = try_render_token_uri_fallback(
-                    state.clone(),
-                    &request,
-                    render_limit,
-                    &headers,
-                    &placeholder_width,
-                    started,
-                    source_label.as_deref(),
-                    prefer_json,
-                )
-                .await?
-                {
-                    return Ok(response);
-                }
                 let api_error =
                     ApiError::new(StatusCode::BAD_GATEWAY, "primary asset lookup failed")
                         .with_code("primary_asset_lookup_failed");
@@ -1098,20 +1058,6 @@ async fn render_primary(
                             .primary_asset_cache
                             .insert_negative(primary_cache_key.clone())
                             .await;
-                        if let Some(response) = try_render_token_uri_fallback(
-                            state.clone(),
-                            &request,
-                            render_limit,
-                            &headers,
-                            &placeholder_width,
-                            started,
-                            source_label.as_deref(),
-                            prefer_json,
-                        )
-                        .await?
-                        {
-                            return Ok(response);
-                        }
                         let api_error = ApiError::from(err);
                         record_render_error_metrics(
                             &state,
@@ -1166,64 +1112,6 @@ async fn render_primary(
         source_label.as_deref(),
     );
     Ok(response)
-}
-
-async fn try_render_token_uri_fallback(
-    state: Arc<AppState>,
-    base_request: &RenderRequest,
-    render_limit: Option<RenderKeyLimit>,
-    headers: &HeaderMap,
-    placeholder_width: &Option<String>,
-    started: Instant,
-    source_label: Option<&str>,
-    prefer_json: bool,
-) -> Result<Option<Response>, ApiError> {
-    if prefer_json {
-        return Ok(None);
-    }
-    let request = RenderRequest {
-        asset_id: render::TOKEN_URI_ASSET_ID.to_string(),
-        ..base_request.clone()
-    };
-    match render_token_with_limit_checked(state.clone(), request.clone(), render_limit).await {
-        Ok(response) => {
-            let response = to_http_response(response, headers).await;
-            record_render_metrics(
-                &state,
-                &response,
-                started.elapsed(),
-                &request.chain,
-                &request.collection,
-                source_label,
-            );
-            Ok(Some(response))
-        }
-        Err(err) => {
-            if let Some(response) =
-                fallback_for_render_error(&state, &request, placeholder_width, headers, &err).await
-            {
-                record_render_metrics(
-                    &state,
-                    &response,
-                    started.elapsed(),
-                    &request.chain,
-                    &request.collection,
-                    source_label,
-                );
-                return Ok(Some(response));
-            }
-            let api_error = map_render_error(err);
-            record_render_error_metrics(
-                &state,
-                started.elapsed(),
-                &request.chain,
-                &request.collection,
-                source_label,
-                api_error.code.as_deref(),
-            );
-            Err(api_error)
-        }
-    }
 }
 
 async fn render_primary_or_legacy_asset(
@@ -4976,6 +4864,16 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "render queue full")
             .with_code("render_queue_full")
             .with_field("queue_full", Value::Bool(true))
+            .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
+            .with_log_detail(detail);
+    }
+    if let Some(timeout_error) = error.downcast_ref::<RenderTimeoutError>() {
+        let timeout_seconds = match timeout_error {
+            RenderTimeoutError::Timeout { seconds } => *seconds,
+        };
+        return ApiError::new(StatusCode::GATEWAY_TIMEOUT, "render timeout")
+            .with_code("render_timeout")
+            .with_field("timeout_seconds", Value::Number(timeout_seconds.into()))
             .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
             .with_log_detail(detail);
     }

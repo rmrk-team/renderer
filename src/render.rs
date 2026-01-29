@@ -24,6 +24,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::{self, JoinSet};
+use tokio::time::timeout;
 use tracing::{debug, warn};
 use usvg::ImageKind;
 
@@ -41,7 +42,6 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
-pub(crate) const TOKEN_URI_ASSET_ID: &str = "token-uri";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
 
 #[cfg(test)]
@@ -134,6 +134,12 @@ pub enum RenderLimitError {
 pub enum RenderQueueError {
     #[error("render queue full")]
     QueueFull,
+}
+
+#[derive(Debug, Error)]
+pub enum RenderTimeoutError {
+    #[error("render timed out after {seconds}s")]
+    Timeout { seconds: u64 },
 }
 
 #[derive(Debug, Error)]
@@ -332,6 +338,15 @@ async fn render_token_with_limit_internal(
         }
         if cache_enabled {
             if let Some(queue) = state.render_queue_tx.as_ref() {
+                let capacity = state.config.render_queue_capacity;
+                let soft_limit = state.config.render_queue_soft_limit;
+                if soft_limit > 0 {
+                    let available = queue.capacity();
+                    let depth = capacity.saturating_sub(available);
+                    if depth >= soft_limit {
+                        return Err(RenderQueueError::QueueFull.into());
+                    }
+                }
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 let job = crate::render_queue::RenderJob {
                     request: request.clone(),
@@ -352,13 +367,16 @@ async fn render_token_with_limit_internal(
                 let _singleflight = permit;
                 let _key_permit = acquire_key_permit(&state, key_limit).await?;
                 let _permit = state.render_semaphore.acquire().await?;
-                render_token_uncached(&state, &request, width, &variant_key, &base_key).await
+                render_token_uncached_with_timeout(&state, &request, width, &variant_key, &base_key)
+                    .await
             });
             return handle.await?;
         }
         let _key_permit = acquire_key_permit(&state, key_limit).await?;
         let _permit = state.render_semaphore.acquire().await?;
-        let result = render_token_uncached(&state, &request, width, &variant_key, &base_key).await;
+        let result =
+            render_token_uncached_with_timeout(&state, &request, width, &variant_key, &base_key)
+                .await;
         return result;
     }
 }
@@ -707,6 +725,41 @@ impl Drop for SlowRenderGuard<'_> {
                 elapsed_ms = elapsed.as_millis(),
                 "slow render"
             );
+        }
+    }
+}
+
+pub(crate) async fn render_token_uncached_with_timeout(
+    state: &AppState,
+    request: &RenderRequest,
+    width: Option<u32>,
+    variant_key: &str,
+    base_key: &str,
+) -> Result<RenderResponse> {
+    let timeout_seconds = state.config.render_timeout_seconds;
+    if timeout_seconds == 0 {
+        return render_token_uncached(state, request, width, variant_key, base_key).await;
+    }
+    match timeout(
+        Duration::from_secs(timeout_seconds),
+        render_token_uncached(state, request, width, variant_key, base_key),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => {
+            warn!(
+                chain = %request.chain,
+                collection = %request.collection,
+                token_id = %request.token_id,
+                asset_id = %request.asset_id,
+                timeout_seconds,
+                "render timed out"
+            );
+            Err(RenderTimeoutError::Timeout {
+                seconds: timeout_seconds,
+            }
+            .into())
         }
     }
 }
@@ -1229,13 +1282,6 @@ fn is_non_composable_error(err: &anyhow::Error) -> bool {
     })
 }
 
-fn is_contract_revert_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string();
-        message.contains("Contract call reverted") || message.contains("execution reverted")
-    })
-}
-
 fn is_asset_too_large_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
@@ -1301,67 +1347,56 @@ async fn load_compose_for_request(
         }
     }
 
-    let (compose, fallback_used) = if asset_id == TOKEN_URI_ASSET_ID {
-        match compose_from_token_uri(state, chain, collection, token_id).await? {
-            Some(compose) => (compose, true),
-            None => {
-                return Err(anyhow!(
-                    "token URI missing for {chain}:{collection}:{token_id}"
-                ));
-            }
-        }
-    } else {
-        let refresh_result = state
-            .chain
-            .compose_equippables(chain, collection, token_id, asset_id)
-            .await;
-        match refresh_result {
-            Ok(compose) => (compose, false),
-            Err(err) => {
-                if !is_non_composable_error(&err) {
-                    let _ = state
-                        .db
-                        .record_token_state_error(
-                            chain,
-                            collection,
-                            token_id,
-                            asset_id,
-                            &err.to_string(),
-                            expires_at,
-                        )
-                        .await;
-                    if let Some(compose) = cached_compose {
-                        return Ok((compose, cached_fallback));
-                    }
-                    return Err(err);
+    let refresh_result = state
+        .chain
+        .compose_equippables(chain, collection, token_id, asset_id)
+        .await;
+    let (compose, fallback_used) = match refresh_result {
+        Ok(compose) => (compose, false),
+        Err(err) => {
+            if !is_non_composable_error(&err) {
+                let _ = state
+                    .db
+                    .record_token_state_error(
+                        chain,
+                        collection,
+                        token_id,
+                        asset_id,
+                        &err.to_string(),
+                        expires_at,
+                    )
+                    .await;
+                if let Some(compose) = cached_compose {
+                    return Ok((compose, cached_fallback));
                 }
-                debug!(
-                    error = ?err,
-                    chain = %chain,
-                    collection = %collection,
-                    token_id = %token_id,
-                    asset_id = %asset_id,
-                    "asset is non-composable; falling back to static asset metadata"
-                );
-                let metadata_uri = state
-                    .chain
-                    .get_asset_metadata(chain, collection, token_id, asset_id)
-                    .await?;
-                let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
-                (
-                    ComposeResult {
-                        metadata_uri: metadata_uri.clone(),
-                        catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
-                        fixed_parts: vec![FixedPart {
-                            part_id,
-                            z: 0,
-                            metadata_uri,
-                        }],
-                        slot_parts: Vec::<SlotPart>::new(),
-                    },
-                    true,
-                )
+                return Err(err);
             }
+            debug!(
+                error = ?err,
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                asset_id = %asset_id,
+                "asset is non-composable; falling back to static asset metadata"
+            );
+            let metadata_uri = state
+                .chain
+                .get_asset_metadata(chain, collection, token_id, asset_id)
+                .await?;
+            let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
+            (
+                ComposeResult {
+                    metadata_uri: metadata_uri.clone(),
+                    catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                    fixed_parts: vec![FixedPart {
+                        part_id,
+                        z: 0,
+                        metadata_uri,
+                    }],
+                    slot_parts: Vec::<SlotPart>::new(),
+                },
+                true,
+            )
         }
     };
 
@@ -1389,57 +1424,6 @@ async fn load_compose_for_request(
             .await;
     }
     Ok((compose, fallback_used))
-}
-
-async fn compose_from_token_uri(
-    state: &AppState,
-    chain: &str,
-    collection: &str,
-    token_id: &str,
-) -> Result<Option<ComposeResult>> {
-    match state.chain.get_token_uri(chain, collection, token_id).await {
-        Ok(token_uri) => {
-            let token_uri = token_uri.trim();
-            if token_uri.is_empty() {
-                warn!(
-                    chain = %chain,
-                    collection = %collection,
-                    token_id = %token_id,
-                    "token URI empty; skipping"
-                );
-                return Ok(None);
-            }
-            Ok(Some(ComposeResult {
-                metadata_uri: token_uri.to_string(),
-                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
-                fixed_parts: vec![FixedPart {
-                    part_id: 0,
-                    z: 0,
-                    metadata_uri: token_uri.to_string(),
-                }],
-                slot_parts: Vec::new(),
-            }))
-        }
-        Err(err) => {
-            if is_contract_revert_error(&err) {
-                warn!(
-                    chain = %chain,
-                    collection = %collection,
-                    token_id = %token_id,
-                    "token URI reverted; skipping"
-                );
-                return Ok(None);
-            }
-            warn!(
-                chain = %chain,
-                collection = %collection,
-                token_id = %token_id,
-                error = ?err,
-                "token URI fallback failed"
-            );
-            Err(err)
-        }
-    }
 }
 
 fn layer_sort_key(layer: &Layer) -> (u16, u8) {

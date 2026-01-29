@@ -1,6 +1,7 @@
 use crate::cache::SingleflightPermit;
 use crate::render::{
-    RenderKeyLimit, RenderQueueError, RenderRequest, RenderResponse, render_token_uncached,
+    RenderKeyLimit, RenderQueueError, RenderRequest, RenderResponse,
+    render_token_uncached_with_timeout,
 };
 use crate::state::AppState;
 use anyhow::Result;
@@ -76,7 +77,7 @@ async fn run_job(
         None
     };
     let _permit = state.render_semaphore.acquire().await?;
-    render_token_uncached(&state, &request, width, &variant_key, &base_key).await
+    render_token_uncached_with_timeout(&state, &request, width, &variant_key, &base_key).await
 }
 
 pub fn try_enqueue(
