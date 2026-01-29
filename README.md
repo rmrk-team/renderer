@@ -895,6 +895,54 @@ Cache control is safe because cache busting is URL-driven via the `cache=` param
 
 ## Troubleshooting
 
+### Catalog audit script (IPFS availability)
+
+Use `scripts/catalog-audit.ts` to walk a catalog and verify which IPFS assets are
+missing/unfetchable for a collection. It resolves catalog parts from on-chain data,
+fetches part metadata, and probes the referenced asset URIs across configured gateways.
+
+Defaults:
+
+- Catalog: `0x6aa04fbaa07e3a3f548cb0ae04b5e32c0a5fcfa9`
+- RPC: `MOONBEAM_RPC` → `RPC_URL` → Alchemy Moonbeam endpoint from `.env`
+- IPFS gateways: `IPFS_GATEWAYS` + a small built-in fallback list
+- Timeout: `IPFS_TIMEOUT_SECONDS=8`
+- Concurrency: `AUDIT_CONCURRENCY=4`
+
+Typical run (Moonbeam Alchemy limits logs to 10k blocks):
+
+```bash
+set -a
+source .env
+set +a
+
+IPFS_TIMEOUT_SECONDS=8 \
+AUDIT_CONCURRENCY=8 \
+FROM_BLOCK=3700000 \
+TO_BLOCK=3800000 \
+LOG_RANGE=10000 \
+bun run scripts/catalog-audit.ts
+```
+
+Output summary fields:
+
+- `missingMetadata`: part metadata unreachable (metadata URI fetch failed)
+- `missingAssets`: metadata resolved, but asset URI not fetchable (likely unpinned)
+- `noAssetUri`: part metadata has no renderable asset URI (common for slot parts)
+- `okAssets`: asset URI fetchable from at least one gateway
+
+If you need a full JSON report, set `OUTPUT_PATH=/path/to/report.json`.
+
+Internals:
+
+1. Tries `getTotalParts()` + `getPartByIndex()` (fast path).
+2. Falls back to `getPaginatedPartIds()` + `getPart()` if total/index calls revert.
+3. Falls back to scanning `AddedPart` logs (respecting `FROM_BLOCK`, `TO_BLOCK`, `LOG_RANGE`).
+
+When a collection shows many `missingAssets`, the shared CID root is usually unpinned on
+public gateways. Pinning the CID (or restoring it to the cache gateway) is required for
+stable renders.
+
 ### Failure log
 
 - Failure responses (4xx/5xx) are logged as JSON lines to `FAILURE_LOG_PATH`.

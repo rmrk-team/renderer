@@ -26,3 +26,4 @@ node_modules/*
 AUDIT_*.md
 tmp/
 *.zip
+renderer-failures.log
