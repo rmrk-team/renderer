@@ -41,6 +41,7 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
+pub(crate) const TOKEN_URI_ASSET_ID: &str = "token-uri";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
 
 #[cfg(test)]
@@ -1228,6 +1229,13 @@ fn is_non_composable_error(err: &anyhow::Error) -> bool {
     })
 }
 
+fn is_contract_revert_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let message = cause.to_string();
+        message.contains("Contract call reverted") || message.contains("execution reverted")
+    })
+}
+
 fn is_asset_too_large_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
@@ -1293,56 +1301,67 @@ async fn load_compose_for_request(
         }
     }
 
-    let refresh_result = state
-        .chain
-        .compose_equippables(chain, collection, token_id, asset_id)
-        .await;
-    let (compose, fallback_used) = match refresh_result {
-        Ok(compose) => (compose, false),
-        Err(err) => {
-            if !is_non_composable_error(&err) {
-                let _ = state
-                    .db
-                    .record_token_state_error(
-                        chain,
-                        collection,
-                        token_id,
-                        asset_id,
-                        &err.to_string(),
-                        expires_at,
-                    )
-                    .await;
-                if let Some(compose) = cached_compose {
-                    return Ok((compose, cached_fallback));
-                }
-                return Err(err);
+    let (compose, fallback_used) = if asset_id == TOKEN_URI_ASSET_ID {
+        match compose_from_token_uri(state, chain, collection, token_id).await? {
+            Some(compose) => (compose, true),
+            None => {
+                return Err(anyhow!(
+                    "token URI missing for {chain}:{collection}:{token_id}"
+                ));
             }
-            debug!(
-                error = ?err,
-                chain = %chain,
-                collection = %collection,
-                token_id = %token_id,
-                asset_id = %asset_id,
-                "asset is non-composable; falling back to static asset metadata"
-            );
-            let metadata_uri = state
-                .chain
-                .get_asset_metadata(chain, collection, token_id, asset_id)
-                .await?;
-            let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
-            (
-                ComposeResult {
-                    metadata_uri: metadata_uri.clone(),
-                    catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
-                    fixed_parts: vec![FixedPart {
-                        part_id,
-                        z: 0,
-                        metadata_uri,
-                    }],
-                    slot_parts: Vec::<SlotPart>::new(),
-                },
-                true,
-            )
+        }
+    } else {
+        let refresh_result = state
+            .chain
+            .compose_equippables(chain, collection, token_id, asset_id)
+            .await;
+        match refresh_result {
+            Ok(compose) => (compose, false),
+            Err(err) => {
+                if !is_non_composable_error(&err) {
+                    let _ = state
+                        .db
+                        .record_token_state_error(
+                            chain,
+                            collection,
+                            token_id,
+                            asset_id,
+                            &err.to_string(),
+                            expires_at,
+                        )
+                        .await;
+                    if let Some(compose) = cached_compose {
+                        return Ok((compose, cached_fallback));
+                    }
+                    return Err(err);
+                }
+                debug!(
+                    error = ?err,
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    asset_id = %asset_id,
+                    "asset is non-composable; falling back to static asset metadata"
+                );
+                let metadata_uri = state
+                    .chain
+                    .get_asset_metadata(chain, collection, token_id, asset_id)
+                    .await?;
+                let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
+                (
+                    ComposeResult {
+                        metadata_uri: metadata_uri.clone(),
+                        catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                        fixed_parts: vec![FixedPart {
+                            part_id,
+                            z: 0,
+                            metadata_uri,
+                        }],
+                        slot_parts: Vec::<SlotPart>::new(),
+                    },
+                    true,
+                )
+            }
         }
     };
 
@@ -1370,6 +1389,57 @@ async fn load_compose_for_request(
             .await;
     }
     Ok((compose, fallback_used))
+}
+
+async fn compose_from_token_uri(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+    token_id: &str,
+) -> Result<Option<ComposeResult>> {
+    match state.chain.get_token_uri(chain, collection, token_id).await {
+        Ok(token_uri) => {
+            let token_uri = token_uri.trim();
+            if token_uri.is_empty() {
+                warn!(
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    "token URI empty; skipping"
+                );
+                return Ok(None);
+            }
+            Ok(Some(ComposeResult {
+                metadata_uri: token_uri.to_string(),
+                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                fixed_parts: vec![FixedPart {
+                    part_id: 0,
+                    z: 0,
+                    metadata_uri: token_uri.to_string(),
+                }],
+                slot_parts: Vec::new(),
+            }))
+        }
+        Err(err) => {
+            if is_contract_revert_error(&err) {
+                warn!(
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    "token URI reverted; skipping"
+                );
+                return Ok(None);
+            }
+            warn!(
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                error = ?err,
+                "token URI fallback failed"
+            );
+            Err(err)
+        }
+    }
 }
 
 fn layer_sort_key(layer: &Layer) -> (u16, u8) {
