@@ -60,6 +60,7 @@ HTTP safety caps:
 - `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_BURST` enable per-IP rate limiting (0 disables).
 - `APPROVAL_ON_DEMAND_RATE_LIMIT_PER_MINUTE` / `APPROVAL_ON_DEMAND_RATE_LIMIT_BURST` throttle on-demand approval checks for unknown collections (per identity).
 - `MAX_ADMIN_BODY_BYTES` caps admin API request bodies.
+- `MAX_BLOCKING_TASKS` caps CPU-heavy `spawn_blocking` work (SVG parse/render, raster decode/encode).
 - Asset/metadata fetches resolve DNS once per request and pin the connection to the resolved IPs to reduce DNS rebinding risk.
 - `CACHE_SIZE_REFRESH_SECONDS` controls how often cache size stats are refreshed for `/status` and admin dashboard.
 - `OUTBOUND_CLIENT_CACHE_TTL_SECONDS` / `OUTBOUND_CLIENT_CACHE_CAPACITY` cache pinned HTTP clients for outbound fetches.
@@ -67,6 +68,11 @@ HTTP safety caps:
 - `MAX_CONCURRENT_RPC_CALLS` caps concurrent RPC calls (primary-route lookups + warmup fallbacks).
 - `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` caches failed primary-asset lookups briefly to avoid RPC hammering.
 - `DEFAULT_CACHE_TTL_SECONDS` sets a default HTTP cache TTL when `cache` is omitted.
+
+Render timeouts:
+
+- `RENDER_TIMEOUT_SECONDS` caps render execution once a job starts (0 disables).
+- `RENDER_REQUEST_TIMEOUT_SECONDS` caps end-to-end request time including queue wait (0 disables).
 
 ### Render policy
 

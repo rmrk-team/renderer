@@ -158,6 +158,22 @@ pub struct RenderKeyLimit {
     pub max_concurrent: usize,
 }
 
+async fn spawn_blocking_with_semaphore<T, F>(blocking_semaphore: Arc<Semaphore>, f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    let permit = blocking_semaphore.acquire_owned().await?;
+    let handle = task::spawn_blocking(move || {
+        let _permit = permit;
+        f()
+    });
+    match handle.await {
+        Ok(result) => result,
+        Err(err) => Err(anyhow!("blocking task failed: {err}")),
+    }
+}
+
 impl OutputFormat {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
@@ -358,7 +374,27 @@ async fn render_token_with_limit_internal(
                     respond_to: tx,
                 };
                 crate::render_queue::try_enqueue(queue, job)?;
-                return rx.await?;
+                let request_timeout = state.config.render_request_timeout_seconds;
+                if request_timeout == 0 {
+                    return rx.await?;
+                }
+                match timeout(Duration::from_secs(request_timeout), rx).await {
+                    Ok(result) => return result?,
+                    Err(_) => {
+                        warn!(
+                            chain = %request.chain,
+                            collection = %request.collection,
+                            token_id = %request.token_id,
+                            asset_id = %request.asset_id,
+                            timeout_seconds = request_timeout,
+                            "render request timed out waiting for queue"
+                        );
+                        return Err(RenderTimeoutError::Timeout {
+                            seconds: request_timeout,
+                        }
+                        .into());
+                    }
+                }
             }
             let state = state.clone();
             let request = request.clone();
@@ -976,19 +1012,16 @@ pub(crate) async fn render_token_uncached(
                             .await?
                         {
                             let max_pixels = state.config.max_decoded_raster_pixels;
-                            let image = match task::spawn_blocking(move || {
+                            let blocking = state.blocking_semaphore.clone();
+                            let image = match spawn_blocking_with_semaphore(blocking, move || {
                                 decode_raster(&bytes, max_pixels)
                             })
                             .await
                             {
-                                Ok(Ok(image)) => image,
-                                Ok(Err(err)) => {
-                                    state.metrics.observe_upstream_failure("decode");
-                                    return Err(err);
-                                }
+                                Ok(image) => image,
                                 Err(err) => {
                                     state.metrics.observe_upstream_failure("decode");
-                                    return Err(anyhow!("decode raster task failed: {err}"));
+                                    return Err(err);
                                 }
                             };
                             composite_from_cache = true;
@@ -1016,6 +1049,7 @@ pub(crate) async fn render_token_uncached(
             for (idx, layer) in layers.iter().enumerate() {
                 let permit = semaphore.clone().acquire_owned().await?;
                 let assets = state.assets.clone();
+                let blocking_semaphore = state.blocking_semaphore.clone();
                 let layer = layer.clone();
                 let max_svg_bytes = state.config.max_svg_bytes;
                 let max_svg_nodes = state.config.max_svg_node_count;
@@ -1030,6 +1064,7 @@ pub(crate) async fn render_token_uncached(
                     let _permit = permit;
                     let result = load_layer(
                         &assets,
+                        blocking_semaphore,
                         &layer,
                         debug_context,
                         idx,
@@ -1049,6 +1084,12 @@ pub(crate) async fn render_token_uncached(
                     .await;
                     (idx, result)
                 });
+                if join_set.len() >= layer_limit {
+                    if let Some(joined) = join_set.join_next().await {
+                        let (idx, result) = joined?;
+                        results[idx] = Some(result);
+                    }
+                }
             }
             while let Some(joined) = join_set.join_next().await {
                 let (idx, result) = joined?;
@@ -1135,8 +1176,10 @@ pub(crate) async fn render_token_uncached(
     let should_store_composite =
         !composite_from_cache && composite_key.is_some() && missing_layers == 0;
     let encode_started = Instant::now();
-    let (bytes, composite_bytes) =
-        match task::spawn_blocking(move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+    let blocking = state.blocking_semaphore.clone();
+    let (bytes, composite_bytes) = match spawn_blocking_with_semaphore(
+        blocking,
+        move || -> Result<(Vec<u8>, Option<Vec<u8>>)> {
             let composite_bytes = if should_store_composite {
                 let mut bytes = Vec::new();
                 let encoder = PngEncoder::new_with_quality(
@@ -1164,19 +1207,16 @@ pub(crate) async fn render_token_uncached(
             }
             let bytes = encode_image(final_image, &output_format)?;
             Ok((bytes, composite_bytes))
-        })
-        .await
-        {
-            Ok(Ok(result)) => result,
-            Ok(Err(err)) => {
-                state.metrics.observe_upstream_failure("encode");
-                return Err(err);
-            }
-            Err(err) => {
-                state.metrics.observe_upstream_failure("encode");
-                return Err(anyhow!("encode task failed: {err}"));
-            }
-        };
+        },
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(err) => {
+            state.metrics.observe_upstream_failure("encode");
+            return Err(err);
+        }
+    };
     state
         .metrics
         .observe_render_duration("encode", encode_started.elapsed());
@@ -2042,20 +2082,12 @@ async fn compute_render_fingerprint(
     let mut results: Vec<Option<ResolvedMetadata>> = vec![None; layers.len()];
     let layer_limit = state.config.render_layer_concurrency.max(1);
     let semaphore = Arc::new(Semaphore::new(layer_limit));
-    for (idx, layer) in layers.iter().enumerate() {
-        let permit = semaphore.clone().acquire_owned().await?;
-        let assets = assets.clone();
-        let metadata_uri = layer.metadata_uri.clone();
-        let required = layer.required;
-        let kind = layer.kind;
-        join_set.spawn(async move {
-            let _permit = permit;
-            let resolved = assets.resolve_metadata(&metadata_uri, false).await;
-            (idx, metadata_uri, required, kind, resolved)
-        });
-    }
-    while let Some(result) = join_set.join_next().await {
-        let (idx, metadata_uri, required, kind, resolved) = result?;
+    let mut handle_join = |idx: usize,
+                           metadata_uri: String,
+                           required: bool,
+                           kind: LayerKind,
+                           resolved: Result<Option<ResolvedMetadata>>|
+     -> Result<()> {
         match resolved {
             Ok(Some(resolved)) => results[idx] = Some(resolved),
             Ok(None) => {
@@ -2086,6 +2118,29 @@ async fn compute_render_fingerprint(
                 );
             }
         }
+        Ok(())
+    };
+    for (idx, layer) in layers.iter().enumerate() {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let assets = assets.clone();
+        let metadata_uri = layer.metadata_uri.clone();
+        let required = layer.required;
+        let kind = layer.kind;
+        join_set.spawn(async move {
+            let _permit = permit;
+            let resolved = assets.resolve_metadata(&metadata_uri, false).await;
+            (idx, metadata_uri, required, kind, resolved)
+        });
+        if join_set.len() >= layer_limit {
+            if let Some(result) = join_set.join_next().await {
+                let (idx, metadata_uri, required, kind, resolved) = result?;
+                handle_join(idx, metadata_uri, required, kind, resolved)?;
+            }
+        }
+    }
+    while let Some(result) = join_set.join_next().await {
+        let (idx, metadata_uri, required, kind, resolved) = result?;
+        handle_join(idx, metadata_uri, required, kind, resolved)?;
     }
     let mut fingerprint_input = format!(
         "policy:{:?}:{:?};canvas:{}x{};",
@@ -2171,7 +2226,8 @@ async fn ensure_canvas_size(
             let max_svg_nodes = state.config.max_svg_node_count;
             let max_decoded_raster_pixels = state.config.max_decoded_raster_pixels;
             let max_raster_bytes = state.config.max_raster_bytes;
-            match task::spawn_blocking(move || {
+            let blocking = state.blocking_semaphore.clone();
+            match spawn_blocking_with_semaphore(blocking, move || {
                 derive_canvas_from_asset(
                     &bytes,
                     default_width,
@@ -2184,13 +2240,9 @@ async fn ensure_canvas_size(
             })
             .await
             {
-                Ok(Ok(result)) => result,
-                Ok(Err(err)) => {
-                    warn!(error = ?err, "failed to parse base asset, using defaults");
-                    (default_width, default_height, true)
-                }
+                Ok(result) => result,
                 Err(err) => {
-                    warn!(error = ?err, "failed to join base asset parse, using defaults");
+                    warn!(error = ?err, "failed to parse base asset, using defaults");
                     (default_width, default_height, true)
                 }
             }
@@ -2217,7 +2269,8 @@ async fn ensure_canvas_size(
                             let max_svg_nodes = state.config.max_svg_node_count;
                             let max_decoded_raster_pixels = state.config.max_decoded_raster_pixels;
                             let max_raster_bytes = state.config.max_raster_bytes;
-                            match task::spawn_blocking(move || {
+                            let blocking = state.blocking_semaphore.clone();
+                            match spawn_blocking_with_semaphore(blocking, move || {
                                 derive_canvas_from_asset(
                                     &bytes,
                                     default_width,
@@ -2230,13 +2283,9 @@ async fn ensure_canvas_size(
                             })
                             .await
                             {
-                                Ok(Ok(result)) => result,
-                                Ok(Err(err)) => {
-                                    warn!(error = ?err, "failed to parse base asset, using defaults");
-                                    (default_width, default_height, true)
-                                }
+                                Ok(result) => result,
                                 Err(err) => {
-                                    warn!(error = ?err, "failed to join base asset parse, using defaults");
+                                    warn!(error = ?err, "failed to parse base asset, using defaults");
                                     (default_width, default_height, true)
                                 }
                             }
@@ -2389,6 +2438,7 @@ fn derive_canvas_from_asset(
 #[allow(clippy::too_many_arguments)]
 async fn load_layer(
     assets: &AssetResolver,
+    blocking_semaphore: Arc<Semaphore>,
     layer: &Layer,
     debug_context: Option<DebugRenderContext>,
     layer_index: usize,
@@ -2443,6 +2493,7 @@ async fn load_layer(
             max_raster_bytes,
             max_decoded_raster_pixels,
             assets,
+            &blocking_semaphore,
         )
         .await?;
         let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
@@ -2598,6 +2649,7 @@ async fn load_layer(
         max_raster_bytes,
         max_decoded_raster_pixels,
         assets,
+        &blocking_semaphore,
     )
     .await?;
     let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
@@ -2622,6 +2674,7 @@ async fn rasterize_bytes(
     max_raster_bytes: usize,
     max_decoded_raster_pixels: u64,
     assets: &AssetResolver,
+    blocking_semaphore: &Arc<Semaphore>,
 ) -> Result<(RgbaImage, bool)> {
     if is_svg(bytes) {
         let cache_key = sha256_hex_bytes(bytes);
@@ -2629,13 +2682,14 @@ async fn rasterize_bytes(
             .fetch_raster_cache(&cache_key, canvas_width, canvas_height)
             .await?
         {
-            match task::spawn_blocking(move || -> Result<RgbaImage> {
+            let blocking = blocking_semaphore.clone();
+            match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
                 decode_raster(&raster, max_decoded_raster_pixels)
             })
             .await
             {
-                Ok(Ok(image)) => return Ok((image, false)),
-                Ok(Err(_)) | Err(_) => {
+                Ok(image) => return Ok((image, false)),
+                Err(_) => {
                     assets.observe_upstream_failure("decode");
                     let _ = assets
                         .remove_raster_cache(&cache_key, canvas_width, canvas_height)
@@ -2644,8 +2698,10 @@ async fn rasterize_bytes(
             }
         }
         let svg_bytes = bytes.to_vec();
-        let (image, png_bytes) =
-            match task::spawn_blocking(move || -> Result<(RgbaImage, Vec<u8>)> {
+        let blocking = blocking_semaphore.clone();
+        let (image, png_bytes) = match spawn_blocking_with_semaphore(
+            blocking,
+            move || -> Result<(RgbaImage, Vec<u8>)> {
                 let tree = parse_svg(
                     &svg_bytes,
                     max_svg_bytes,
@@ -2660,38 +2716,32 @@ async fn rasterize_bytes(
                 let mut png_bytes = Vec::new();
                 image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
                 Ok((image, png_bytes))
-            })
-            .await
-            {
-                Ok(Ok(result)) => result,
-                Ok(Err(err)) => {
-                    assets.observe_upstream_failure("svg_parse");
-                    return Err(err);
-                }
-                Err(err) => {
-                    assets.observe_upstream_failure("svg_parse");
-                    return Err(anyhow!("svg parse task failed: {err}"));
-                }
-            };
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                assets.observe_upstream_failure("svg_parse");
+                return Err(err);
+            }
+        };
         assets
             .store_raster_cache(&cache_key, canvas_width, canvas_height, &png_bytes)
             .await?;
         return Ok((image, false));
     }
     let bytes = bytes.to_vec();
-    let image = match task::spawn_blocking(move || -> Result<RgbaImage> {
+    let blocking = blocking_semaphore.clone();
+    let image = match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
         decode_raster(&bytes, max_decoded_raster_pixels)
     })
     .await
     {
-        Ok(Ok(image)) => image,
-        Ok(Err(err)) => {
-            assets.observe_upstream_failure("decode");
-            return Err(err);
-        }
+        Ok(image) => image,
         Err(err) => {
             assets.observe_upstream_failure("decode");
-            return Err(anyhow!("decode raster task failed: {err}"));
+            return Err(err);
         }
     };
     let nonconforming = image.width() != canvas_width || image.height() != canvas_height;

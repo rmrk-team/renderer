@@ -1735,6 +1735,30 @@ async fn queued_fallback_response(
     .await
 }
 
+async fn render_timeout_fallback_response(
+    format: &OutputFormat,
+    width: u32,
+    height: u32,
+    retry_after_seconds: u64,
+) -> Response {
+    let lines = vec![
+        "RENDER TIMEOUT".to_string(),
+        "RETRY IN A MOMENT".to_string(),
+    ];
+    fallback_text_response(
+        format,
+        width,
+        height,
+        &lines,
+        "timeout",
+        "render_timeout",
+        "render_timeout",
+        StatusCode::OK,
+        Some(retry_after_seconds),
+    )
+    .await
+}
+
 async fn approval_rate_limited_fallback_response(
     format: &OutputFormat,
     width: u32,
@@ -2618,6 +2642,10 @@ async fn fallback_for_render_error(
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return Some(queued_fallback_response(&request.format, width, height, 5).await);
     }
+    if error.downcast_ref::<RenderTimeoutError>().is_some() {
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(render_timeout_fallback_response(&request.format, width, height, 5).await);
+    }
     resolve_render_failure_fallback(state, request, headers).await
 }
 
@@ -2691,6 +2719,15 @@ async fn fallback_head_for_render_error(
             "queued",
             "queue_full",
             "render_queue_full",
+            Some(5),
+        ));
+    }
+    if error.downcast_ref::<RenderTimeoutError>().is_some() {
+        return Some(fallback_head_response(
+            &request.format,
+            "timeout",
+            "render_timeout",
+            "render_timeout",
             Some(5),
         ));
     }

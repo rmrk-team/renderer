@@ -30,6 +30,7 @@ pub struct Config {
     pub max_concurrent_renders: usize,
     pub max_concurrent_ipfs_fetches: usize,
     pub max_concurrent_rpc_calls: usize,
+    pub max_blocking_tasks: usize,
     pub default_canvas_width: u32,
     pub default_canvas_height: u32,
     pub default_cache_timestamp: Option<String>,
@@ -106,6 +107,7 @@ pub struct Config {
     pub render_queue_soft_limit: usize,
     pub render_layer_concurrency: usize,
     pub render_timeout_seconds: u64,
+    pub render_request_timeout_seconds: u64,
     pub composite_cache_enabled: bool,
     pub cache_size_refresh_interval: Duration,
     pub rpc_timeout_seconds: u64,
@@ -263,6 +265,10 @@ impl Config {
         let max_concurrent_renders = parse_usize("MAX_CONCURRENT_RENDERS", 4);
         let max_concurrent_ipfs_fetches = parse_usize("MAX_CONCURRENT_IPFS_FETCHES", 16);
         let max_concurrent_rpc_calls = parse_usize("MAX_CONCURRENT_RPC_CALLS", 16);
+        let default_blocking_tasks = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(4);
+        let max_blocking_tasks = parse_usize("MAX_BLOCKING_TASKS", default_blocking_tasks).max(1);
 
         let default_canvas_width = parse_u32("DEFAULT_CANVAS_WIDTH", 1080);
         let default_canvas_height = parse_u32("DEFAULT_CANVAS_HEIGHT", 1512);
@@ -396,6 +402,10 @@ impl Config {
         };
         let render_layer_concurrency = parse_usize("RENDER_LAYER_CONCURRENCY", 8).max(1);
         let render_timeout_seconds = parse_u64("RENDER_TIMEOUT_SECONDS", 12);
+        let render_request_timeout_seconds = parse_u64(
+            "RENDER_REQUEST_TIMEOUT_SECONDS",
+            render_timeout_seconds.saturating_mul(2),
+        );
         let composite_cache_enabled = parse_bool("COMPOSITE_CACHE_ENABLED", true);
         let cache_size_refresh_interval =
             Duration::from_secs(parse_u64("CACHE_SIZE_REFRESH_SECONDS", 300).max(1));
@@ -486,6 +496,7 @@ impl Config {
             max_concurrent_renders,
             max_concurrent_ipfs_fetches,
             max_concurrent_rpc_calls,
+            max_blocking_tasks,
             default_canvas_width,
             default_canvas_height,
             default_cache_timestamp,
@@ -562,6 +573,7 @@ impl Config {
             render_queue_soft_limit,
             render_layer_concurrency,
             render_timeout_seconds,
+            render_request_timeout_seconds,
             composite_cache_enabled,
             cache_size_refresh_interval,
             rpc_timeout_seconds,
