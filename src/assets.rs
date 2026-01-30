@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::net::lookup_host;
 use tokio::sync::{Mutex, Semaphore};
+use tokio::time::sleep;
 use tracing::{debug, warn};
 use url::{Host, Url};
 
@@ -37,6 +38,7 @@ pub struct AssetResolver {
     pin_store: Option<Arc<PinnedAssetStore>>,
     ipfs_semaphore: Arc<Semaphore>,
     nonrenderable_meta_cache: Arc<Mutex<NonRenderableMetaCache>>,
+    ipfs_negative_cache: Arc<Mutex<IpfsNegativeCache>>,
     metrics: Arc<Metrics>,
 }
 
@@ -53,6 +55,12 @@ pub struct ResolvedMetadata {
 
 #[derive(Debug, Default)]
 struct NonRenderableMetaCache {
+    map: HashMap<String, Instant>,
+    order: VecDeque<String>,
+}
+
+#[derive(Debug, Default)]
+struct IpfsNegativeCache {
     map: HashMap<String, Instant>,
     order: VecDeque<String>,
 }
@@ -81,6 +89,58 @@ impl NonRenderableMetaCache {
             }
         }
         self.evict_expired(ttl);
+    }
+
+    fn evict_expired(&mut self, ttl: Duration) {
+        let mut kept = VecDeque::with_capacity(self.order.len());
+        while let Some(key) = self.order.pop_front() {
+            let expired = self
+                .map
+                .get(&key)
+                .map(|when| when.elapsed() > ttl)
+                .unwrap_or(true);
+            if expired {
+                self.map.remove(&key);
+            } else {
+                kept.push_back(key);
+            }
+        }
+        self.order = kept;
+    }
+}
+
+impl IpfsNegativeCache {
+    fn contains(&mut self, key: &str, ttl: Duration) -> bool {
+        let Some(when) = self.map.get(key).copied() else {
+            return false;
+        };
+        if when.elapsed() <= ttl {
+            return true;
+        }
+        self.map.remove(key);
+        false
+    }
+
+    fn insert(&mut self, key: String, ttl: Duration, capacity: usize) {
+        if self.map.contains_key(&key) {
+            return;
+        }
+        self.map.insert(key.clone(), Instant::now());
+        self.order.push_back(key);
+        while self.order.len() > capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+        self.evict_expired(ttl);
+    }
+
+    fn remove(&mut self, key: &str) {
+        if self.map.remove(key).is_some() {
+            if let Some(pos) = self.order.iter().position(|item| item == key) {
+                self.order.remove(pos);
+            }
+        }
     }
 
     fn evict_expired(&mut self, ttl: Duration) {
@@ -288,6 +348,7 @@ impl AssetResolver {
             pin_store,
             ipfs_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
+            ipfs_negative_cache: Arc::new(Mutex::new(IpfsNegativeCache::default())),
             metrics,
         })
     }
@@ -302,6 +363,39 @@ impl AssetResolver {
 
     pub fn pinned_store(&self) -> Option<Arc<PinnedAssetStore>> {
         self.pin_store.clone()
+    }
+
+    fn ipfs_negative_cache_ttl(&self) -> Option<Duration> {
+        if self.config.ipfs_negative_cache_seconds == 0 {
+            None
+        } else {
+            Some(Duration::from_secs(self.config.ipfs_negative_cache_seconds))
+        }
+    }
+
+    async fn ipfs_negative_cache_contains(&self, key: &str) -> bool {
+        let Some(ttl) = self.ipfs_negative_cache_ttl() else {
+            return false;
+        };
+        let mut cache = self.ipfs_negative_cache.lock().await;
+        cache.contains(key, ttl)
+    }
+
+    async fn ipfs_negative_cache_insert(&self, key: String) {
+        let Some(ttl) = self.ipfs_negative_cache_ttl() else {
+            return;
+        };
+        let capacity = self.config.ipfs_negative_cache_capacity.max(1);
+        let mut cache = self.ipfs_negative_cache.lock().await;
+        cache.insert(key, ttl, capacity);
+    }
+
+    async fn ipfs_negative_cache_remove(&self, key: &str) {
+        if self.config.ipfs_negative_cache_seconds == 0 {
+            return;
+        }
+        let mut cache = self.ipfs_negative_cache.lock().await;
+        cache.remove(key);
     }
 
     pub async fn resolve_metadata(
@@ -779,12 +873,48 @@ impl AssetResolver {
                 }
             }
         }
+        let negative_key = resolved.cache_key.clone();
+        if self.ipfs_negative_cache_contains(&negative_key).await {
+            debug!(
+                asset_key = %ipfs_asset_key(resolved),
+                "ipfs negative cache hit"
+            );
+            return Err(AssetFetchError::Upstream {
+                url: ipfs_asset_key(resolved),
+            }
+            .into());
+        }
         let gateways = &self.config.ipfs_gateways;
+        let hedge_delay = Duration::from_millis(self.config.ipfs_hedge_delay_ms);
         let mut last_err = None;
-        for (index, gateway) in gateways.iter().enumerate() {
-            let url = format!("{}{}{}", gateway, resolved.cid, resolved.path);
+        let mut index = 0usize;
+        while index < gateways.len() {
+            let url = format!("{}{}{}", gateways[index], resolved.cid, resolved.path);
+            if hedge_delay > Duration::from_millis(0) && index + 1 < gateways.len() {
+                let secondary_url =
+                    format!("{}{}{}", gateways[index + 1], resolved.cid, resolved.path);
+                match self
+                    .fetch_ipfs_hedged(url, secondary_url, kind, hedge_delay, index + 1, index + 2)
+                    .await
+                {
+                    Ok(fetched) => {
+                        self.ipfs_negative_cache_remove(&negative_key).await;
+                        return Ok(fetched);
+                    }
+                    Err(err) => {
+                        self.metrics
+                            .observe_upstream_failure(FetchOrigin::Ipfs.failure_label());
+                        last_err = Some(err);
+                        index += 2;
+                        continue;
+                    }
+                }
+            }
             match self.fetch_http_bytes(&url, kind, FetchOrigin::Ipfs).await {
-                Ok(fetched) => return Ok(fetched),
+                Ok(fetched) => {
+                    self.ipfs_negative_cache_remove(&negative_key).await;
+                    return Ok(fetched);
+                }
                 Err(err) => {
                     self.metrics
                         .observe_upstream_failure(FetchOrigin::Ipfs.failure_label());
@@ -794,10 +924,17 @@ impl AssetResolver {
                         attempt = index + 1,
                         "ipfs fetch failed, rotating gateway"
                     );
+                    index += 1;
                 }
             }
         }
-        Err(last_err.unwrap_or_else(|| anyhow!("ipfs fetch failed")))
+        if let Some(err) = last_err {
+            if should_negative_cache_error(&err) {
+                self.ipfs_negative_cache_insert(negative_key).await;
+            }
+            return Err(err);
+        }
+        Err(anyhow!("ipfs fetch failed"))
     }
 
     async fn fetch_http_bytes(
@@ -847,6 +984,94 @@ impl AssetResolver {
             bytes: buffer.freeze(),
             content_type,
         })
+    }
+
+    async fn fetch_ipfs_hedged(
+        &self,
+        primary_url: String,
+        secondary_url: String,
+        kind: FetchKind,
+        hedge_delay: Duration,
+        primary_attempt: usize,
+        secondary_attempt: usize,
+    ) -> Result<FetchedBytes> {
+        let mut primary = Box::pin(self.fetch_http_bytes(&primary_url, kind, FetchOrigin::Ipfs));
+        let mut secondary_future: Option<
+            std::pin::Pin<Box<dyn std::future::Future<Output = Result<FetchedBytes>> + Send>>,
+        > = None;
+        let delay = sleep(hedge_delay);
+        tokio::pin!(delay);
+        let mut primary_err: Option<anyhow::Error> = None;
+        let mut secondary_err: Option<anyhow::Error> = None;
+
+        loop {
+            if let Some(fut) = secondary_future.as_mut() {
+                tokio::select! {
+                    result = &mut primary, if primary_err.is_none() => {
+                        match result {
+                            Ok(bytes) => return Ok(bytes),
+                            Err(err) => {
+                                warn!(
+                                    ipfs_url = %primary_url,
+                                    attempt = primary_attempt,
+                                    "ipfs fetch failed, rotating gateway"
+                                );
+                                primary_err = Some(err);
+                            }
+                        }
+                    }
+                    result = fut => {
+                        match result {
+                            Ok(bytes) => return Ok(bytes),
+                            Err(err) => {
+                                warn!(
+                                    ipfs_url = %secondary_url,
+                                    attempt = secondary_attempt,
+                                    "ipfs fetch failed, rotating gateway"
+                                );
+                                secondary_err = Some(err);
+                            }
+                        }
+                    }
+                }
+            } else {
+                tokio::select! {
+                    result = &mut primary => {
+                        match result {
+                            Ok(bytes) => return Ok(bytes),
+                            Err(err) => {
+                                warn!(
+                                    ipfs_url = %primary_url,
+                                    attempt = primary_attempt,
+                                    "ipfs fetch failed, rotating gateway"
+                                );
+                                primary_err = Some(err);
+                                secondary_future = Some(Box::pin(self.fetch_http_bytes(
+                                    &secondary_url,
+                                    kind,
+                                    FetchOrigin::Ipfs,
+                                )));
+                            }
+                        }
+                    }
+                    _ = &mut delay => {
+                        secondary_future = Some(Box::pin(self.fetch_http_bytes(
+                            &secondary_url,
+                            kind,
+                            FetchOrigin::Ipfs,
+                        )));
+                    }
+                }
+            }
+
+            if primary_err.is_some() && secondary_err.is_some() {
+                break;
+            }
+        }
+
+        Err(primary_err
+            .or(secondary_err)
+            .unwrap_or_else(|| anyhow!("ipfs fetch failed")))
     }
 
     async fn fetch_http_bytes_with_limit(
@@ -1185,6 +1410,23 @@ fn parse_ipfs_uri(uri: &str) -> Result<(String, String)> {
         .map(|path| format!("/{path}"))
         .unwrap_or_default();
     Ok((cid, path))
+}
+
+fn ipfs_asset_key(resolved: &ResolvedUri) -> String {
+    format!("ipfs://{}{}", resolved.cid, resolved.path)
+}
+
+fn should_negative_cache_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
+            matches!(
+                fetch_error,
+                AssetFetchError::Upstream { .. } | AssetFetchError::UpstreamStatus { .. }
+            )
+        } else {
+            cause.downcast_ref::<reqwest::Error>().is_some()
+        }
+    })
 }
 
 fn normalize_ipfs_uri(uri: &str) -> Option<String> {

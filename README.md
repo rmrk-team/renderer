@@ -68,6 +68,8 @@ HTTP safety caps:
 - `MAX_CONCURRENT_RPC_CALLS` caps concurrent RPC calls (primary-route lookups + warmup fallbacks).
 - `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` caches failed primary-asset lookups briefly to avoid RPC hammering.
 - `DEFAULT_CACHE_TTL_SECONDS` sets a default HTTP cache TTL when `cache` is omitted.
+- `IPFS_HEDGE_DELAY_MS` races a second gateway after a short delay (0 disables).
+- `IPFS_NEGATIVE_CACHE_SECONDS` / `IPFS_NEGATIVE_CACHE_CAPACITY` cache repeated IPFS failures to avoid hammering.
 
 Render timeouts:
 

@@ -7,6 +7,7 @@ use crate::state::AppState;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc, oneshot};
+use tracing::debug;
 
 pub struct RenderJob {
     pub request: RenderRequest,
@@ -40,6 +41,16 @@ pub fn spawn_workers(state: Arc<AppState>, receiver: mpsc::Receiver<RenderJob>, 
                     key_limit,
                     respond_to,
                 } = job;
+                if respond_to.is_closed() {
+                    debug!(
+                        chain = %request.chain,
+                        collection = %request.collection,
+                        token_id = %request.token_id,
+                        asset_id = %request.asset_id,
+                        "render queue job has no waiter; skipping"
+                    );
+                    continue;
+                }
                 let result = run_job(
                     state.clone(),
                     request,
