@@ -568,10 +568,11 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
-- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Reason: approval_required|queue_full|rate_limited` (dynamic fallbacks)
-- `X-Renderer-Fallback-Action: register_collection|retry|none`
+- `X-Renderer-Fallback-Action: retry|backoff|stop`
+- `X-Renderer-Fallback-Until: <unix_ts>` (present when backoff is advised)
 - `X-Renderer-Error-Code: <code>` (JSON errors and fallbacks)
 - `X-Request-Id: <id>` for correlation
 - `Cache-Control: public, max-age=...` when cacheable

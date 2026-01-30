@@ -139,6 +139,15 @@ async fn main() -> anyhow::Result<()> {
     http::init_placeholder_cache(&config);
     let db = Database::new(&config).await?;
     let cache = CacheManager::new(&config)?;
+    match cache.cleanup_temp_files().await {
+        Ok(removed) if removed > 0 => {
+            info!(removed, "cache temp files cleaned up");
+        }
+        Ok(_) => {}
+        Err(err) => {
+            warn!(error = ?err, "cache temp file cleanup failed");
+        }
+    }
     let metrics = Arc::new(metrics::Metrics::new(&config));
     let pinned_store = Arc::new(PinnedAssetStore::new(&config)?);
     if config.local_ipfs_enabled && config.pinning_enabled {

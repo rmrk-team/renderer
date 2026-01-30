@@ -228,6 +228,15 @@ impl CacheManager {
         Ok(())
     }
 
+    pub async fn cleanup_temp_files(&self) -> Result<usize> {
+        let dirs = vec![
+            self.renders_dir.clone(),
+            self.assets_dir.clone(),
+            self.overlays_dir.clone(),
+        ];
+        tokio::task::spawn_blocking(move || cleanup_temp_files_sync(&dirs)).await?
+    }
+
     pub async fn evict_loop(self, interval: Duration) {
         loop {
             if let Err(err) = self.evict_once().await {
@@ -502,6 +511,41 @@ fn walk_dir(dir: &Path) -> Result<Vec<std::fs::DirEntry>> {
         }
     }
     Ok(entries)
+}
+
+fn cleanup_temp_files_sync(dirs: &[PathBuf]) -> Result<usize> {
+    let mut removed = 0usize;
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+        let entries = match walk_dir(dir) {
+            Ok(entries) => entries,
+            Err(err) => {
+                warn!(error = ?err, path = %dir.display(), "temp file scan failed");
+                continue;
+            }
+        };
+        for entry in entries {
+            let path = entry.path();
+            if !is_temp_cache_file(&path) {
+                continue;
+            }
+            if let Err(err) = std::fs::remove_file(&path) {
+                warn!(error = ?err, path = %path.display(), "temp file cleanup failed");
+                continue;
+            }
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn is_temp_cache_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    name.starts_with('.') && name.contains(".tmp-")
 }
 
 #[cfg(test)]

@@ -1156,14 +1156,29 @@ pub(crate) async fn render_token_uncached(
                 .observe_render_duration("fetch_assets", fetch_started.elapsed());
 
             let compose_started = Instant::now();
-            let mut base = RgbaImage::from_pixel(
-                canvas_width,
-                canvas_height,
-                background.unwrap_or(Rgba([0, 0, 0, 0])),
-            );
-            for layer in layers_to_composite {
-                image::imageops::overlay(&mut base, &layer.image, layer.offset_x, layer.offset_y);
-            }
+            let blocking = state.blocking_semaphore.clone();
+            let background = background.unwrap_or(Rgba([0, 0, 0, 0]));
+            let base =
+                match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
+                    let mut base = RgbaImage::from_pixel(canvas_width, canvas_height, background);
+                    for layer in layers_to_composite {
+                        image::imageops::overlay(
+                            &mut base,
+                            &layer.image,
+                            layer.offset_x,
+                            layer.offset_y,
+                        );
+                    }
+                    Ok(base)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        state.metrics.observe_upstream_failure("compose");
+                        return Err(err);
+                    }
+                };
             state
                 .metrics
                 .observe_render_duration("compose", compose_started.elapsed());

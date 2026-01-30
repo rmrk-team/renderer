@@ -1883,7 +1883,7 @@ async fn fallback_text_response(
     );
     headers.insert(
         "X-Renderer-Fallback-Action",
-        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind, retry_after_seconds)),
     );
     headers.insert(
         "X-Renderer-Fallback-Reason",
@@ -1901,15 +1901,29 @@ async fn fallback_text_response(
             .unwrap_or(HeaderValue::from_static("5"));
         headers.insert(header::RETRY_AFTER, value);
     }
+    if let Some(value) = fallback_until_header(retry_after_seconds) {
+        headers.insert("X-Renderer-Fallback-Until", value);
+    }
     (status, headers, bytes).into_response()
 }
 
-fn fallback_action_for_kind(fallback_kind: &str) -> &'static str {
-    match fallback_kind {
-        "unapproved" => "register_collection",
-        "queued" | "approval_rate_limited" | "approval_stale" => "retry",
-        _ => "none",
+fn fallback_action_for_kind(fallback_kind: &str, retry_after_seconds: Option<u64>) -> &'static str {
+    if retry_after_seconds.is_some() {
+        return "backoff";
     }
+    match fallback_kind {
+        "unapproved" | "token_override" => "stop",
+        "approval_stale" | "queued" | "timeout_queue" | "timeout_render" => "backoff",
+        "render_fallback" => "backoff",
+        _ => "retry",
+    }
+}
+
+fn fallback_until_header(retry_after_seconds: Option<u64>) -> Option<HeaderValue> {
+    let seconds = retry_after_seconds?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let until = now.saturating_add(seconds);
+    HeaderValue::from_str(&until.to_string()).ok()
 }
 
 fn normalize_source_label(value: &str) -> Option<String> {
@@ -2246,7 +2260,7 @@ async fn fallback_file_response(
     );
     headers.insert(
         "X-Renderer-Fallback-Action",
-        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind, retry_after_seconds)),
     );
     headers.insert(
         "X-Renderer-Fallback-Source",
@@ -2260,6 +2274,9 @@ async fn fallback_file_response(
         let value = HeaderValue::from_str(&retry_after.to_string())
             .unwrap_or(HeaderValue::from_static("5"));
         headers.insert(header::RETRY_AFTER, value);
+    }
+    if let Some(value) = fallback_until_header(retry_after_seconds) {
+        headers.insert("X-Renderer-Fallback-Until", value);
     }
     if if_none_match_matches(request_headers, &file.etag) {
         headers.insert(header::CONTENT_LENGTH, HeaderValue::from_static("0"));
@@ -2334,7 +2351,7 @@ async fn fallback_head_from_dir(
     );
     headers.insert(
         "X-Renderer-Fallback-Action",
-        HeaderValue::from_static(fallback_action_for_kind(fallback_kind)),
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind, retry_after_seconds)),
     );
     headers.insert(
         "X-Renderer-Fallback-Source",
@@ -2344,6 +2361,9 @@ async fn fallback_head_from_dir(
         let value = HeaderValue::from_str(&retry_after.to_string())
             .unwrap_or(HeaderValue::from_static("5"));
         headers.insert(header::RETRY_AFTER, value);
+    }
+    if let Some(value) = fallback_until_header(retry_after_seconds) {
+        headers.insert("X-Renderer-Fallback-Until", value);
     }
     Some((StatusCode::OK, headers).into_response())
 }
@@ -2699,6 +2719,10 @@ fn fallback_head_response(
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
     );
     headers.insert(
+        "X-Renderer-Fallback-Action",
+        HeaderValue::from_static(fallback_action_for_kind(fallback_kind, retry_after_seconds)),
+    );
+    headers.insert(
         "X-Renderer-Fallback-Reason",
         HeaderValue::from_str(reason).unwrap_or(HeaderValue::from_static("unknown")),
     );
@@ -2710,6 +2734,9 @@ fn fallback_head_response(
         let value = HeaderValue::from_str(&retry_after.to_string())
             .unwrap_or(HeaderValue::from_static("5"));
         headers.insert(header::RETRY_AFTER, value);
+    }
+    if let Some(value) = fallback_until_header(retry_after_seconds) {
+        headers.insert("X-Renderer-Fallback-Until", value);
     }
     (StatusCode::OK, headers).into_response()
 }
@@ -3925,7 +3952,7 @@ mod tests {
             headers
                 .get("X-Renderer-Fallback-Action")
                 .and_then(|value| value.to_str().ok()),
-            Some("register_collection")
+            Some("stop")
         );
         assert_eq!(
             headers
@@ -4128,7 +4155,7 @@ mod tests {
             .get("X-Renderer-Fallback-Action")
             .and_then(|value| value.to_str().ok())
             .unwrap_or("");
-        assert_eq!(action, "register_collection");
+        assert_eq!(action, "stop");
         let reason = response
             .headers()
             .get("X-Renderer-Fallback-Reason")

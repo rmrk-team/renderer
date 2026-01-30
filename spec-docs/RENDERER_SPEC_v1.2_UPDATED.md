@@ -498,9 +498,10 @@ GET /render/{chain}/{collection}/{tokenId}/{assetId}.{format}
 - `X-Renderer-Result: rendered|placeholder|cache-miss|fallback`
 - `X-Renderer-Cache-Hit: true|false`
 - `X-Cache: HIT|MISS`
-- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
-- `X-Renderer-Fallback-Action: register_collection|retry|none`
+- `X-Renderer-Fallback-Action: retry|backoff|stop`
+- `X-Renderer-Fallback-Until: <unix_ts>` (present when backoff is advised)
 - `X-Renderer-Error-Code: <code>`
 - `Cache-Control: public, max-age=...` (safe due to cache busting in URL)
 
