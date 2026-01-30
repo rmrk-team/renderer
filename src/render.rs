@@ -40,6 +40,38 @@ const WIDTH_PRESETS: [(&str, u32); 6] = [
     ("xxl", 2048u32),
 ];
 
+macro_rules! layer_profile {
+    ($ctx:expr, $layer:expr, $layer_index:expr, $step:expr, $elapsed:expr $(, $field:ident = $value:expr )* $(,)?) => {{
+        if let Some(context) = $ctx {
+            debug!(
+                step = $step,
+                elapsed_ms = $elapsed.as_millis(),
+                chain = %context.chain,
+                collection = %context.collection,
+                token_id = %context.token_id,
+                asset_id = %context.asset_id,
+                layer_index = $layer_index,
+                kind = ?$layer.kind,
+                required = $layer.required,
+                metadata_uri = %$layer.metadata_uri,
+                $( $field = $value, )*
+                "layer profile"
+            );
+        } else {
+            debug!(
+                step = $step,
+                elapsed_ms = $elapsed.as_millis(),
+                layer_index = $layer_index,
+                kind = ?$layer.kind,
+                required = $layer.required,
+                metadata_uri = %$layer.metadata_uri,
+                $( $field = $value, )*
+                "layer profile"
+            );
+        }
+    }};
+}
+
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
@@ -1389,10 +1421,21 @@ async fn load_compose_for_request(
     let now = now_epoch();
     let ttl = i64::try_from(state.config.token_state_check_ttl_seconds).unwrap_or(i64::MAX);
     let expires_at = now.saturating_add(ttl.max(0));
+    let db_get_started = Instant::now();
     let cached_entry = state
         .db
         .get_token_state(chain, collection, token_id, asset_id)
         .await?;
+    debug!(
+        step = "compose_db_get",
+        elapsed_ms = db_get_started.elapsed().as_millis(),
+        chain = %chain,
+        collection = %collection,
+        token_id = %token_id,
+        asset_id = %asset_id,
+        cache_hit = cached_entry.is_some(),
+        "compose profile"
+    );
     let cached_compose = cached_entry
         .as_ref()
         .and_then(|entry| entry.state_json.as_ref())
@@ -1408,6 +1451,15 @@ async fn load_compose_for_request(
     if !fresh {
         if let Some(compose) = cached_compose.clone() {
             if cached_valid {
+                debug!(
+                    step = "compose_cache_hit",
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    asset_id = %asset_id,
+                    fallback_used = cached_fallback,
+                    "compose profile"
+                );
                 return Ok((compose, cached_fallback));
             }
         }
@@ -1419,7 +1471,17 @@ async fn load_compose_for_request(
         .acquire(&singleflight_key)
         .await;
     if !permit.is_leader() {
+        let wait_started = Instant::now();
         let _ = permit.wait_result(Duration::from_secs(30)).await;
+        debug!(
+            step = "compose_singleflight_wait",
+            elapsed_ms = wait_started.elapsed().as_millis(),
+            chain = %chain,
+            collection = %collection,
+            token_id = %token_id,
+            asset_id = %asset_id,
+            "compose profile"
+        );
         if let Some(entry) = state
             .db
             .get_token_state(chain, collection, token_id, asset_id)
@@ -1427,20 +1489,41 @@ async fn load_compose_for_request(
         {
             if let Some(state_json) = entry.state_json.as_ref() {
                 if let Ok(compose) = serde_json::from_str::<ComposeResult>(state_json) {
+                    debug!(
+                        step = "compose_singleflight_cache_hit",
+                        chain = %chain,
+                        collection = %collection,
+                        token_id = %token_id,
+                        asset_id = %asset_id,
+                        fallback_used = entry.fallback_used,
+                        "compose profile"
+                    );
                     return Ok((compose, entry.fallback_used));
                 }
             }
         }
     }
 
+    let compose_started = Instant::now();
     let refresh_result = state
         .chain
         .compose_equippables(chain, collection, token_id, asset_id)
         .await;
+    debug!(
+        step = "compose_equippables",
+        elapsed_ms = compose_started.elapsed().as_millis(),
+        chain = %chain,
+        collection = %collection,
+        token_id = %token_id,
+        asset_id = %asset_id,
+        status = if refresh_result.is_ok() { "ok" } else { "error" },
+        "compose profile"
+    );
     let (compose, fallback_used) = match refresh_result {
         Ok(compose) => (compose, false),
         Err(err) => {
             if !is_non_composable_error(&err) {
+                let record_started = Instant::now();
                 let _ = state
                     .db
                     .record_token_state_error(
@@ -1452,6 +1535,15 @@ async fn load_compose_for_request(
                         expires_at,
                     )
                     .await;
+                debug!(
+                    step = "compose_record_error",
+                    elapsed_ms = record_started.elapsed().as_millis(),
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    asset_id = %asset_id,
+                    "compose profile"
+                );
                 if let Some(compose) = cached_compose {
                     return Ok((compose, cached_fallback));
                 }
@@ -1465,10 +1557,20 @@ async fn load_compose_for_request(
                 asset_id = %asset_id,
                 "asset is non-composable; falling back to static asset metadata"
             );
+            let metadata_started = Instant::now();
             let metadata_uri = state
                 .chain
                 .get_asset_metadata(chain, collection, token_id, asset_id)
                 .await?;
+            debug!(
+                step = "compose_fallback_metadata",
+                elapsed_ms = metadata_started.elapsed().as_millis(),
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                asset_id = %asset_id,
+                "compose profile"
+            );
             let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
             (
                 ComposeResult {
@@ -1487,13 +1589,24 @@ async fn load_compose_for_request(
     };
 
     if !is_zero_address(&compose.catalog_address) {
+        let catalog_started = Instant::now();
         let _ = state
             .db
             .set_collection_catalog_address(chain, collection, &compose.catalog_address)
             .await;
+        debug!(
+            step = "compose_set_catalog",
+            elapsed_ms = catalog_started.elapsed().as_millis(),
+            chain = %chain,
+            collection = %collection,
+            token_id = %token_id,
+            asset_id = %asset_id,
+            "compose profile"
+        );
     }
     if let Ok(state_json) = serde_json::to_string(&compose) {
         let state_hash = sha256_hex_bytes(state_json.as_bytes());
+        let upsert_started = Instant::now();
         let _ = state
             .db
             .upsert_token_state(
@@ -1508,6 +1621,15 @@ async fn load_compose_for_request(
                 fallback_used,
             )
             .await;
+        debug!(
+            step = "compose_upsert_state",
+            elapsed_ms = upsert_started.elapsed().as_millis(),
+            chain = %chain,
+            collection = %collection,
+            token_id = %token_id,
+            asset_id = %asset_id,
+            "compose profile"
+        );
     }
     Ok((compose, fallback_used))
 }
@@ -1798,21 +1920,60 @@ async fn apply_theme_if_svg<'a>(
     bytes: &'a [u8],
     theme: Option<&ThemeReplaceMap>,
     layer: &Layer,
+    layer_index: usize,
+    debug_context: Option<&DebugRenderContext>,
     theme_source_cache: &ThemeSourceCache,
 ) -> Result<Cow<'a, [u8]>> {
+    let step_started = Instant::now();
     let theme = match theme {
         Some(theme) if !matches!(layer.kind, LayerKind::Overlay) => theme,
-        _ => return Ok(Cow::Borrowed(bytes)),
+        _ => {
+            layer_profile!(
+                debug_context,
+                layer,
+                layer_index,
+                "theme_skip",
+                step_started.elapsed(),
+                reason = "no_theme_or_overlay"
+            );
+            return Ok(Cow::Borrowed(bytes));
+        }
     };
     if !is_svg(bytes) {
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "theme_skip",
+            step_started.elapsed(),
+            reason = "not_svg"
+        );
         return Ok(Cow::Borrowed(bytes));
     }
     let sources = if find_case_insensitive(bytes, b"data-theme_color_").is_some() {
         let hash = sha256_hex_bytes(bytes);
-        if let Some(cached) = theme_source_cache.get(&hash).await {
+        let lookup_started = Instant::now();
+        let cached = theme_source_cache.get(&hash).await;
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "theme_source_cache_lookup",
+            lookup_started.elapsed(),
+            cache_hit = cached.is_some()
+        );
+        if let Some(cached) = cached {
             cached
         } else {
+            let extract_started = Instant::now();
             let extracted = extract_svg_theme_sources(bytes);
+            layer_profile!(
+                debug_context,
+                layer,
+                layer_index,
+                "theme_source_extract",
+                extract_started.elapsed()
+            );
             theme_source_cache.insert(hash, extracted.clone()).await;
             extracted
         }
@@ -1833,9 +1994,27 @@ async fn apply_theme_if_svg<'a>(
             .any(|value| find_case_insensitive(bytes, value.as_bytes()).is_some())
     };
     if !should_attempt {
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "theme_skip",
+            step_started.elapsed(),
+            reason = "no_match"
+        );
         return Ok(Cow::Borrowed(bytes));
     }
+    let apply_started = Instant::now();
     let (themed, replaced) = apply_theme_to_svg_bytes(bytes, theme, &sources, use_declared);
+    layer_profile!(
+        debug_context,
+        layer,
+        layer_index,
+        "theme_apply",
+        apply_started.elapsed(),
+        replaced = replaced,
+        output_bytes = themed.len()
+    );
     if replaced {
         debug!(
             metadata_uri = %layer.metadata_uri,
@@ -2226,12 +2405,20 @@ async fn ensure_canvas_size(
     let first = fixed_parts
         .first()
         .ok_or_else(|| anyhow!("no fixed parts for canvas size derivation"))?;
+    let resolve_started = Instant::now();
     let resolved = state
         .assets
         .resolve_metadata(&first.metadata_uri, prefer_thumb)
         .await
         .ok()
         .flatten();
+    debug!(
+        step = "canvas_resolve_metadata",
+        elapsed_ms = resolve_started.elapsed().as_millis(),
+        metadata_uri = %first.metadata_uri,
+        resolved = resolved.is_some(),
+        "canvas profile"
+    );
     if let Some(resolved) = resolved.as_ref() {
         debug!(
             metadata_uri = %first.metadata_uri,
@@ -2258,13 +2445,29 @@ async fn ensure_canvas_size(
         ) {
             let expected = sha256_hex(&format!("{art_uri}:{width}x{height}"));
             if fingerprint == &expected {
+                debug!(
+                    step = "canvas_cached",
+                    metadata_uri = %first.metadata_uri,
+                    art_uri = %art_uri,
+                    width = width,
+                    height = height,
+                    "canvas profile"
+                );
                 return Ok((width as u32, height as u32));
             }
         }
     }
 
+    let fetch_started = Instant::now();
     let (width, height, used_fallback) = match state.assets.fetch_asset(&art_uri).await {
         Ok(asset) => {
+            debug!(
+                step = "canvas_fetch_asset",
+                elapsed_ms = fetch_started.elapsed().as_millis(),
+                art_uri = %art_uri,
+                bytes = asset.bytes.len(),
+                "canvas profile"
+            );
             let bytes = asset.bytes.to_vec();
             let default_width = state.config.default_canvas_width;
             let default_height = state.config.default_canvas_height;
@@ -2273,6 +2476,7 @@ async fn ensure_canvas_size(
             let max_decoded_raster_pixels = state.config.max_decoded_raster_pixels;
             let max_raster_bytes = state.config.max_raster_bytes;
             let blocking = state.blocking_semaphore.clone();
+            let derive_started = Instant::now();
             match spawn_blocking_with_semaphore(blocking, move || {
                 derive_canvas_from_asset(
                     &bytes,
@@ -2286,7 +2490,15 @@ async fn ensure_canvas_size(
             })
             .await
             {
-                Ok(result) => result,
+                Ok(result) => {
+                    debug!(
+                        step = "canvas_derive",
+                        elapsed_ms = derive_started.elapsed().as_millis(),
+                        art_uri = %art_uri,
+                        "canvas profile"
+                    );
+                    result
+                }
                 Err(err) => {
                     warn!(error = ?err, "failed to parse base asset, using defaults");
                     (default_width, default_height, true)
@@ -2307,7 +2519,15 @@ async fn ensure_canvas_size(
                             "base asset too large, using thumbnail for canvas"
                         );
                         art_uri = thumb.art_uri;
+                        let thumb_fetch_started = Instant::now();
                         if let Ok(asset) = state.assets.fetch_asset(&art_uri).await {
+                            debug!(
+                                step = "canvas_fetch_thumb",
+                                elapsed_ms = thumb_fetch_started.elapsed().as_millis(),
+                                art_uri = %art_uri,
+                                bytes = asset.bytes.len(),
+                                "canvas profile"
+                            );
                             let bytes = asset.bytes.to_vec();
                             let default_width = state.config.default_canvas_width;
                             let default_height = state.config.default_canvas_height;
@@ -2316,6 +2536,7 @@ async fn ensure_canvas_size(
                             let max_decoded_raster_pixels = state.config.max_decoded_raster_pixels;
                             let max_raster_bytes = state.config.max_raster_bytes;
                             let blocking = state.blocking_semaphore.clone();
+                            let derive_started = Instant::now();
                             match spawn_blocking_with_semaphore(blocking, move || {
                                 derive_canvas_from_asset(
                                     &bytes,
@@ -2329,7 +2550,15 @@ async fn ensure_canvas_size(
                             })
                             .await
                             {
-                                Ok(result) => result,
+                                Ok(result) => {
+                                    debug!(
+                                        step = "canvas_derive_thumb",
+                                        elapsed_ms = derive_started.elapsed().as_millis(),
+                                        art_uri = %art_uri,
+                                        "canvas profile"
+                                    );
+                                    result
+                                }
                                 Err(err) => {
                                     warn!(error = ?err, "failed to parse base asset, using defaults");
                                     (default_width, default_height, true)
@@ -2501,6 +2730,8 @@ async fn load_layer(
     prefer_thumb: bool,
     allow_thumb_fallback: bool,
 ) -> Result<Option<LayerImage>> {
+    let layer_started = Instant::now();
+    let context = debug_context.as_ref();
     if let Some(context) = debug_context.as_ref() {
         warn!(
             chain = %context.chain,
@@ -2526,10 +2757,25 @@ async fn load_layer(
         "loading layer"
     );
     if layer.metadata_uri.starts_with("local://") {
+        let fetch_started = Instant::now();
         let bytes = assets.fetch_local_bytes(&layer.metadata_uri).await?;
-        let themed =
-            apply_theme_if_svg(&bytes, theme_replace.as_deref(), layer, &theme_source_cache)
-                .await?;
+        layer_profile!(
+            context,
+            layer,
+            layer_index,
+            "fetch_local_bytes",
+            fetch_started.elapsed(),
+            bytes = bytes.len()
+        );
+        let themed = apply_theme_if_svg(
+            &bytes,
+            theme_replace.as_deref(),
+            layer,
+            layer_index,
+            debug_context.as_ref(),
+            &theme_source_cache,
+        )
+        .await?;
         let (image, nonconforming) = rasterize_bytes(
             themed.as_ref(),
             canvas_width,
@@ -2540,8 +2786,12 @@ async fn load_layer(
             max_decoded_raster_pixels,
             assets,
             &blocking_semaphore,
+            layer,
+            layer_index,
+            debug_context.as_ref(),
         )
         .await?;
+        let policy_started = Instant::now();
         let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
         let layer_image = apply_raster_mismatch_policy(
             layer,
@@ -2551,13 +2801,39 @@ async fn load_layer(
             canvas_width,
             canvas_height,
         )?;
+        layer_profile!(
+            context,
+            layer,
+            layer_index,
+            "raster_policy",
+            policy_started.elapsed(),
+            nonconforming = nonconforming
+        );
+        layer_profile!(
+            context,
+            layer,
+            layer_index,
+            "layer_total",
+            layer_started.elapsed()
+        );
         return Ok(Some(layer_image));
     }
-    let asset = match assets
+    let resolve_started = Instant::now();
+    let resolve_result = assets
         .resolve_metadata(&layer.metadata_uri, prefer_thumb)
-        .await
-    {
+        .await;
+    let asset = match resolve_result {
         Ok(Some(mut resolved)) => {
+            layer_profile!(
+                context,
+                layer,
+                layer_index,
+                "resolve_metadata",
+                resolve_started.elapsed(),
+                status = "ok",
+                source = resolved.source,
+                art_uri = resolved.art_uri.as_str()
+            );
             if let Some(context) = debug_context.as_ref() {
                 warn!(
                     chain = %context.chain,
@@ -2578,44 +2854,142 @@ async fn load_layer(
                 field = %resolved.source,
                 "resolved layer metadata"
             );
+            let fetch_started = Instant::now();
             match assets.fetch_asset(&resolved.art_uri).await {
-                Ok(asset) => asset,
+                Ok(asset) => {
+                    layer_profile!(
+                        context,
+                        layer,
+                        layer_index,
+                        "fetch_asset",
+                        fetch_started.elapsed(),
+                        bytes = asset.bytes.len(),
+                        art_uri = resolved.art_uri.as_str()
+                    );
+                    asset
+                }
                 Err(err) => {
+                    layer_profile!(
+                        context,
+                        layer,
+                        layer_index,
+                        "fetch_asset",
+                        fetch_started.elapsed(),
+                        status = "error",
+                        art_uri = resolved.art_uri.as_str()
+                    );
                     if allow_thumb_fallback && !prefer_thumb && is_asset_too_large_error(&err) {
-                        if let Ok(Some(thumb)) =
-                            assets.resolve_metadata(&layer.metadata_uri, true).await
-                        {
-                            if thumb.art_uri != resolved.art_uri {
-                                debug!(
-                                    metadata_uri = %layer.metadata_uri,
-                                    art_uri = %thumb.art_uri,
-                                    "layer asset too large, using thumbnail"
+                        let thumb_resolve_started = Instant::now();
+                        match assets.resolve_metadata(&layer.metadata_uri, true).await {
+                            Ok(Some(thumb)) => {
+                                layer_profile!(
+                                    context,
+                                    layer,
+                                    layer_index,
+                                    "resolve_metadata_thumb",
+                                    thumb_resolve_started.elapsed(),
+                                    status = "ok",
+                                    source = thumb.source,
+                                    art_uri = thumb.art_uri.as_str()
                                 );
-                                resolved = thumb;
-                                assets.fetch_asset(&resolved.art_uri).await?
-                            } else if is_optional_layer {
-                                warn!(
-                                    error = ?err,
-                                    metadata_uri = %layer.metadata_uri,
-                                    art_uri = %resolved.art_uri,
-                                    kind = ?layer.kind,
-                                    "optional layer asset too large and thumbnail missing, skipping"
+                                if thumb.art_uri != resolved.art_uri {
+                                    debug!(
+                                        metadata_uri = %layer.metadata_uri,
+                                        art_uri = %thumb.art_uri,
+                                        "layer asset too large, using thumbnail"
+                                    );
+                                    resolved = thumb;
+                                    let thumb_fetch_started = Instant::now();
+                                    let asset = assets.fetch_asset(&resolved.art_uri).await?;
+                                    layer_profile!(
+                                        context,
+                                        layer,
+                                        layer_index,
+                                        "fetch_asset_thumb",
+                                        thumb_fetch_started.elapsed(),
+                                        bytes = asset.bytes.len(),
+                                        art_uri = resolved.art_uri.as_str()
+                                    );
+                                    asset
+                                } else if is_optional_layer {
+                                    warn!(
+                                        error = ?err,
+                                        metadata_uri = %layer.metadata_uri,
+                                        art_uri = %resolved.art_uri,
+                                        kind = ?layer.kind,
+                                        "optional layer asset too large and thumbnail missing, skipping"
+                                    );
+                                    layer_profile!(
+                                        context,
+                                        layer,
+                                        layer_index,
+                                        "layer_skip",
+                                        resolve_started.elapsed(),
+                                        reason = "thumb_same_optional"
+                                    );
+                                    return Ok(None);
+                                } else {
+                                    return Err(err);
+                                }
+                            }
+                            Ok(None) => {
+                                layer_profile!(
+                                    context,
+                                    layer,
+                                    layer_index,
+                                    "resolve_metadata_thumb",
+                                    thumb_resolve_started.elapsed(),
+                                    status = "none"
                                 );
-                                return Ok(None);
-                            } else {
+                                if is_optional_layer {
+                                    warn!(
+                                        error = ?err,
+                                        metadata_uri = %layer.metadata_uri,
+                                        art_uri = %resolved.art_uri,
+                                        kind = ?layer.kind,
+                                        "optional layer asset too large and thumbnail missing, skipping"
+                                    );
+                                    layer_profile!(
+                                        context,
+                                        layer,
+                                        layer_index,
+                                        "layer_skip",
+                                        resolve_started.elapsed(),
+                                        reason = "thumb_missing_optional"
+                                    );
+                                    return Ok(None);
+                                }
                                 return Err(err);
                             }
-                        } else if is_optional_layer {
-                            warn!(
-                                error = ?err,
-                                metadata_uri = %layer.metadata_uri,
-                                art_uri = %resolved.art_uri,
-                                kind = ?layer.kind,
-                                "optional layer asset too large and thumbnail missing, skipping"
-                            );
-                            return Ok(None);
-                        } else {
-                            return Err(err);
+                            Err(_) => {
+                                layer_profile!(
+                                    context,
+                                    layer,
+                                    layer_index,
+                                    "resolve_metadata_thumb",
+                                    thumb_resolve_started.elapsed(),
+                                    status = "error"
+                                );
+                                if is_optional_layer {
+                                    warn!(
+                                        error = ?err,
+                                        metadata_uri = %layer.metadata_uri,
+                                        art_uri = %resolved.art_uri,
+                                        kind = ?layer.kind,
+                                        "optional layer asset too large and thumbnail missing, skipping"
+                                    );
+                                    layer_profile!(
+                                        context,
+                                        layer,
+                                        layer_index,
+                                        "layer_skip",
+                                        resolve_started.elapsed(),
+                                        reason = "thumb_error_optional"
+                                    );
+                                    return Ok(None);
+                                }
+                                return Err(err);
+                            }
                         }
                     } else if is_optional_layer {
                         warn!(
@@ -2625,6 +2999,14 @@ async fn load_layer(
                             kind = ?layer.kind,
                             "optional layer asset fetch failed, skipping"
                         );
+                        layer_profile!(
+                            context,
+                            layer,
+                            layer_index,
+                            "layer_skip",
+                            resolve_started.elapsed(),
+                            reason = "asset_fetch_optional"
+                        );
                         return Ok(None);
                     } else {
                         return Err(err);
@@ -2633,23 +3015,55 @@ async fn load_layer(
             }
         }
         Ok(None) => {
+            layer_profile!(
+                context,
+                layer,
+                layer_index,
+                "resolve_metadata",
+                resolve_started.elapsed(),
+                status = "none"
+            );
             if is_optional_layer {
                 debug!(
                     metadata_uri = %layer.metadata_uri,
                     kind = ?layer.kind,
                     "metadata has no renderable media, skipping layer"
                 );
+                layer_profile!(
+                    context,
+                    layer,
+                    layer_index,
+                    "layer_skip",
+                    resolve_started.elapsed(),
+                    reason = "metadata_none_optional"
+                );
                 return Ok(None);
             }
             return Err(anyhow!("metadata has no renderable media"));
         }
         Err(err) => {
+            layer_profile!(
+                context,
+                layer,
+                layer_index,
+                "resolve_metadata",
+                resolve_started.elapsed(),
+                status = "error"
+            );
             if is_optional_layer {
                 warn!(
                     error = ?err,
                     metadata_uri = %layer.metadata_uri,
                     kind = ?layer.kind,
                     "optional layer metadata resolve failed, skipping"
+                );
+                layer_profile!(
+                    context,
+                    layer,
+                    layer_index,
+                    "layer_skip",
+                    resolve_started.elapsed(),
+                    reason = "metadata_error_optional"
                 );
                 return Ok(None);
             }
@@ -2658,7 +3072,17 @@ async fn load_layer(
                 metadata_uri = %layer.metadata_uri,
                 "metadata resolve failed, treating as direct asset"
             );
-            assets.fetch_asset(&layer.metadata_uri).await?
+            let fetch_direct_started = Instant::now();
+            let asset = assets.fetch_asset(&layer.metadata_uri).await?;
+            layer_profile!(
+                context,
+                layer,
+                layer_index,
+                "fetch_asset_direct",
+                fetch_direct_started.elapsed(),
+                bytes = asset.bytes.len()
+            );
+            asset
         }
     };
     if let Some(context) = debug_context.as_ref() {
@@ -2683,6 +3107,8 @@ async fn load_layer(
         &asset.bytes,
         theme_replace.as_deref(),
         layer,
+        layer_index,
+        debug_context.as_ref(),
         &theme_source_cache,
     )
     .await?;
@@ -2696,8 +3122,12 @@ async fn load_layer(
         max_decoded_raster_pixels,
         assets,
         &blocking_semaphore,
+        layer,
+        layer_index,
+        debug_context.as_ref(),
     )
     .await?;
+    let policy_started = Instant::now();
     let policy = raster_policy_for_layer(layer, raster_mismatch_fixed, raster_mismatch_child);
     let layer_image = apply_raster_mismatch_policy(
         layer,
@@ -2707,6 +3137,21 @@ async fn load_layer(
         canvas_width,
         canvas_height,
     )?;
+    layer_profile!(
+        context,
+        layer,
+        layer_index,
+        "raster_policy",
+        policy_started.elapsed(),
+        nonconforming = nonconforming
+    );
+    layer_profile!(
+        context,
+        layer,
+        layer_index,
+        "layer_total",
+        layer_started.elapsed()
+    );
     Ok(Some(layer_image))
 }
 
@@ -2721,20 +3166,56 @@ async fn rasterize_bytes(
     max_decoded_raster_pixels: u64,
     assets: &AssetResolver,
     blocking_semaphore: &Arc<Semaphore>,
+    layer: &Layer,
+    layer_index: usize,
+    debug_context: Option<&DebugRenderContext>,
 ) -> Result<(RgbaImage, bool)> {
+    let rasterize_started = Instant::now();
     if is_svg(bytes) {
         let cache_key = sha256_hex_bytes(bytes);
-        if let Some(raster) = assets
+        let cache_lookup_started = Instant::now();
+        let cached = assets
             .fetch_raster_cache(&cache_key, canvas_width, canvas_height)
-            .await?
-        {
+            .await?;
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "raster_cache_lookup",
+            cache_lookup_started.elapsed(),
+            cache_hit = cached.is_some(),
+            bytes = bytes.len(),
+            canvas_width = canvas_width,
+            canvas_height = canvas_height
+        );
+        if let Some(raster) = cached {
+            let raster_len = raster.len();
+            let decode_started = Instant::now();
             let blocking = blocking_semaphore.clone();
             match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
                 decode_raster(&raster, max_decoded_raster_pixels)
             })
             .await
             {
-                Ok(image) => return Ok((image, false)),
+                Ok(image) => {
+                    layer_profile!(
+                        debug_context,
+                        layer,
+                        layer_index,
+                        "raster_cache_decode",
+                        decode_started.elapsed(),
+                        bytes = raster_len
+                    );
+                    layer_profile!(
+                        debug_context,
+                        layer,
+                        layer_index,
+                        "rasterize_svg_total",
+                        rasterize_started.elapsed(),
+                        cache_hit = true
+                    );
+                    return Ok((image, false));
+                }
                 Err(_) => {
                     assets.observe_upstream_failure("decode");
                     let _ = assets
@@ -2745,40 +3226,110 @@ async fn rasterize_bytes(
         }
         let svg_bytes = bytes.to_vec();
         let blocking = blocking_semaphore.clone();
-        let (image, png_bytes) = match spawn_blocking_with_semaphore(
-            blocking,
-            move || -> Result<(RgbaImage, Vec<u8>)> {
-                let tree = parse_svg(
-                    &svg_bytes,
-                    max_svg_bytes,
-                    max_svg_nodes,
-                    max_raster_bytes,
-                    max_decoded_raster_pixels,
-                )?;
-                let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
-                let image =
-                    RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
-                        .ok_or_else(|| anyhow!("failed to build raster image"))?;
-                let mut png_bytes = Vec::new();
-                image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
-                Ok((image, png_bytes))
-            },
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(err) => {
-                assets.observe_upstream_failure("svg_parse");
-                return Err(err);
-            }
-        };
+        let (image, png_bytes, parse_ms, render_ms, image_ms, encode_ms) =
+            match spawn_blocking_with_semaphore(
+                blocking,
+                move || -> Result<(RgbaImage, Vec<u8>, u128, u128, u128, u128)> {
+                    let parse_started = Instant::now();
+                    let tree = parse_svg(
+                        &svg_bytes,
+                        max_svg_bytes,
+                        max_svg_nodes,
+                        max_raster_bytes,
+                        max_decoded_raster_pixels,
+                    )?;
+                    let parse_ms = parse_started.elapsed().as_millis();
+                    let render_started = Instant::now();
+                    let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
+                    let render_ms = render_started.elapsed().as_millis();
+                    let image_started = Instant::now();
+                    let image =
+                        RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
+                            .ok_or_else(|| anyhow!("failed to build raster image"))?;
+                    let image_ms = image_started.elapsed().as_millis();
+                    let encode_started = Instant::now();
+                    let mut png_bytes = Vec::new();
+                    image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+                    let encode_ms = encode_started.elapsed().as_millis();
+                    Ok((image, png_bytes, parse_ms, render_ms, image_ms, encode_ms))
+                },
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(err) => {
+                    assets.observe_upstream_failure("svg_parse");
+                    layer_profile!(
+                        debug_context,
+                        layer,
+                        layer_index,
+                        "rasterize_svg_total",
+                        rasterize_started.elapsed(),
+                        status = "error"
+                    );
+                    return Err(err);
+                }
+            };
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "svg_parse",
+            Duration::from_millis(parse_ms as u64),
+            bytes = bytes.len(),
+            canvas_width = canvas_width,
+            canvas_height = canvas_height
+        );
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "svg_render",
+            Duration::from_millis(render_ms as u64),
+            canvas_width = canvas_width,
+            canvas_height = canvas_height
+        );
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "svg_image_build",
+            Duration::from_millis(image_ms as u64)
+        );
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "svg_png_encode",
+            Duration::from_millis(encode_ms as u64),
+            png_bytes = png_bytes.len()
+        );
+        let cache_store_started = Instant::now();
         assets
             .store_raster_cache(&cache_key, canvas_width, canvas_height, &png_bytes)
             .await?;
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "raster_cache_store",
+            cache_store_started.elapsed(),
+            png_bytes = png_bytes.len()
+        );
+        layer_profile!(
+            debug_context,
+            layer,
+            layer_index,
+            "rasterize_svg_total",
+            rasterize_started.elapsed(),
+            cache_hit = false
+        );
         return Ok((image, false));
     }
     let bytes = bytes.to_vec();
+    let bytes_len = bytes.len();
     let blocking = blocking_semaphore.clone();
+    let decode_started = Instant::now();
     let image = match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
         decode_raster(&bytes, max_decoded_raster_pixels)
     })
@@ -2790,7 +3341,25 @@ async fn rasterize_bytes(
             return Err(err);
         }
     };
+    layer_profile!(
+        debug_context,
+        layer,
+        layer_index,
+        "raster_decode",
+        decode_started.elapsed(),
+        bytes = bytes_len,
+        width = image.width(),
+        height = image.height()
+    );
     let nonconforming = image.width() != canvas_width || image.height() != canvas_height;
+    layer_profile!(
+        debug_context,
+        layer,
+        layer_index,
+        "rasterize_raster_total",
+        rasterize_started.elapsed(),
+        nonconforming = nonconforming
+    );
     Ok((image, nonconforming))
 }
 
@@ -3415,16 +3984,41 @@ fn encode_image(image: DynamicImage, format: &OutputFormat) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     match format {
         OutputFormat::Webp => {
+            let rgba_started = Instant::now();
+            let rgba = image.to_rgba8();
+            debug!(
+                step = "encode_webp_rgba",
+                elapsed_ms = rgba_started.elapsed().as_millis(),
+                width = rgba.width(),
+                height = rgba.height(),
+                "encode profile"
+            );
+            let encode_started = Instant::now();
             let encoder = image::codecs::webp::WebPEncoder::new_lossless(&mut bytes);
             encoder.encode(
-                image.to_rgba8().as_raw(),
-                image.width(),
-                image.height(),
+                rgba.as_raw(),
+                rgba.width(),
+                rgba.height(),
                 image::ExtendedColorType::Rgba8,
             )?;
+            debug!(
+                step = "encode_webp_write",
+                elapsed_ms = encode_started.elapsed().as_millis(),
+                bytes = bytes.len(),
+                "encode profile"
+            );
         }
         OutputFormat::Png => {
+            let rgba_started = Instant::now();
             let rgba = image.to_rgba8();
+            debug!(
+                step = "encode_png_rgba",
+                elapsed_ms = rgba_started.elapsed().as_millis(),
+                width = rgba.width(),
+                height = rgba.height(),
+                "encode profile"
+            );
+            let encode_started = Instant::now();
             let encoder = PngEncoder::new_with_quality(
                 &mut bytes,
                 CompressionType::Best,
@@ -3436,9 +4030,24 @@ fn encode_image(image: DynamicImage, format: &OutputFormat) -> Result<Vec<u8>> {
                 rgba.height(),
                 image::ColorType::Rgba8.into(),
             )?;
+            debug!(
+                step = "encode_png_write",
+                elapsed_ms = encode_started.elapsed().as_millis(),
+                bytes = bytes.len(),
+                "encode profile"
+            );
         }
         OutputFormat::Jpeg => {
+            let rgb_started = Instant::now();
             let rgb = image.to_rgb8();
+            debug!(
+                step = "encode_jpeg_rgb",
+                elapsed_ms = rgb_started.elapsed().as_millis(),
+                width = rgb.width(),
+                height = rgb.height(),
+                "encode profile"
+            );
+            let encode_started = Instant::now();
             let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90);
             encoder.encode(
                 rgb.as_raw(),
@@ -3446,8 +4055,20 @@ fn encode_image(image: DynamicImage, format: &OutputFormat) -> Result<Vec<u8>> {
                 rgb.height(),
                 image::ColorType::Rgb8.into(),
             )?;
+            debug!(
+                step = "encode_jpeg_write",
+                elapsed_ms = encode_started.elapsed().as_millis(),
+                bytes = bytes.len(),
+                "encode profile"
+            );
         }
     }
+    debug!(
+        step = "encode_total",
+        bytes = bytes.len(),
+        output_format = %format.extension(),
+        "encode profile"
+    );
     Ok(bytes)
 }
 

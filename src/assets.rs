@@ -501,6 +501,7 @@ impl AssetResolver {
         &self,
         resolved: &ResolvedUri,
         ttl: Duration,
+        confirm_missing: bool,
     ) {
         if !self.ipfs_negative_cache_enabled() {
             return;
@@ -514,9 +515,89 @@ impl AssetResolver {
         let mut tracker = self.ipfs_negative_cid_tracker.lock().await;
         if tracker.record_failure(&resolved.cid, &resolved.path, window, capacity, threshold) {
             drop(tracker);
-            self.ipfs_negative_cache_insert(ipfs_negative_cache_root_key(resolved), ttl)
-                .await;
+            if !confirm_missing {
+                debug!(
+                    cid = %resolved.cid,
+                    "skipping root negative cache for non-not-found error"
+                );
+                return;
+            }
+            if self.ipfs_confirm_root_missing(&resolved.cid).await {
+                self.ipfs_negative_cache_insert(ipfs_negative_cache_root_key(resolved), ttl)
+                    .await;
+            } else {
+                debug!(
+                    cid = %resolved.cid,
+                    "root probe did not confirm missing cid"
+                );
+            }
         }
+    }
+
+    async fn ipfs_confirm_root_missing(&self, cid: &str) -> bool {
+        let gateways = &self.config.ipfs_gateways;
+        if gateways.is_empty() {
+            return false;
+        }
+        let mut saw_not_found = false;
+        for gateway in gateways {
+            let url = format!("{gateway}{cid}");
+            if let Some(status) = self.ipfs_probe_url_status(&url).await {
+                if status == StatusCode::OK || status == StatusCode::PARTIAL_CONTENT {
+                    return false;
+                }
+                if status == StatusCode::NOT_FOUND || status == StatusCode::GONE {
+                    saw_not_found = true;
+                }
+            }
+        }
+        saw_not_found
+    }
+
+    async fn ipfs_probe_url_status(&self, url: &str) -> Option<StatusCode> {
+        let resolved = self.validate_http_url(url).await.ok()?;
+        let _permit = self.ipfs_semaphore.acquire().await.ok()?;
+        let timeout = Duration::from_secs(self.config.ipfs_timeout_seconds.min(5).max(1));
+        let mut headers = header::HeaderMap::new();
+        headers.insert(header::RANGE, header::HeaderValue::from_static("bytes=0-0"));
+        if resolved.is_ip_literal {
+            return self
+                .client
+                .get(resolved.parsed.clone())
+                .headers(headers)
+                .timeout(timeout)
+                .send()
+                .await
+                .ok()
+                .map(|response| response.status());
+        }
+        let scheme = resolved.parsed.scheme().to_string();
+        let host = resolved.host.clone();
+        for addr in resolved.addrs.iter().copied() {
+            let key = ClientCacheKey {
+                scheme: scheme.clone(),
+                host: host.clone(),
+                port: addr.port(),
+                ip: addr.ip(),
+            };
+            let client = if let Some(client) = self.client_cache.get(&key).await {
+                client
+            } else {
+                let client = self.client_with_resolve(&host, addr).ok()?;
+                self.client_cache.insert(key, client.clone()).await;
+                client
+            };
+            if let Ok(response) = client
+                .get(resolved.parsed.clone())
+                .headers(headers.clone())
+                .timeout(timeout)
+                .send()
+                .await
+            {
+                return Some(response.status());
+            }
+        }
+        None
     }
 
     pub async fn resolve_metadata(
@@ -1058,7 +1139,8 @@ impl AssetResolver {
             if let Some(ttl) = negative_cache_ttl_for_error(&err, &self.config) {
                 let key = ipfs_negative_cache_key(resolved);
                 self.ipfs_negative_cache_insert(key.clone(), ttl).await;
-                self.ipfs_negative_cache_insert_root_if_needed(resolved, ttl)
+                let confirm_missing = is_ipfs_not_found_error(&err);
+                self.ipfs_negative_cache_insert_root_if_needed(resolved, ttl, confirm_missing)
                     .await;
             }
             return Err(err);
@@ -1074,6 +1156,7 @@ impl AssetResolver {
     ) -> Result<FetchedBytes> {
         let _metrics_timer = FetchMetricsTimer::new(self.metrics.clone(), origin);
         let mut timer = FetchTimer::new(url, Some(kind));
+        let fetch_started = Instant::now();
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
         let mut response = self.send_pinned_request(&resolved).await?;
@@ -1108,7 +1191,12 @@ impl AssetResolver {
             }
             buffer.extend_from_slice(&chunk);
         }
-        debug!(url = %url, size = total, "fetched asset");
+        debug!(
+            url = %url,
+            size = total,
+            elapsed_ms = fetch_started.elapsed().as_millis(),
+            "fetched asset"
+        );
         Ok(FetchedBytes {
             bytes: buffer.freeze(),
             content_type,
@@ -1215,6 +1303,7 @@ impl AssetResolver {
     ) -> Result<FetchedBytes> {
         let _metrics_timer = FetchMetricsTimer::new(self.metrics.clone(), origin);
         let mut timer = FetchTimer::new(url, None);
+        let fetch_started = Instant::now();
         timer.max_bytes = Some(max_bytes);
         let resolved = self.validate_http_url(url).await?;
         let _permit = self.ipfs_semaphore.acquire().await?;
@@ -1245,7 +1334,12 @@ impl AssetResolver {
             }
             buffer.extend_from_slice(&chunk);
         }
-        debug!(url = %url, size = total, "fetched asset");
+        debug!(
+            url = %url,
+            size = total,
+            elapsed_ms = fetch_started.elapsed().as_millis(),
+            "fetched asset"
+        );
         Ok(FetchedBytes {
             bytes: buffer.freeze(),
             content_type,
@@ -1585,6 +1679,20 @@ fn negative_cache_ttl_for_error(err: &anyhow::Error, config: &Config) -> Option<
             if short.is_zero() { None } else { Some(short) }
         } else {
             None
+        }
+    })
+}
+
+fn is_ipfs_not_found_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
+            matches!(
+                fetch_error,
+                AssetFetchError::UpstreamStatus { status, .. }
+                    if *status == StatusCode::NOT_FOUND || *status == StatusCode::GONE
+            )
+        } else {
+            false
         }
     })
 }

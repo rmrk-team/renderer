@@ -12,6 +12,25 @@ type FetchResult = {
   status?: number;
   gateway?: string;
   error?: string;
+  timeout?: boolean;
+  attempts?: AttemptInfo[];
+};
+
+type AttemptInfo = {
+  gateway: string;
+  status?: number;
+  timeout?: boolean;
+  error?: string;
+  bytes?: number;
+};
+
+type JsonFetchResult = {
+  data?: Record<string, unknown>;
+  error?: string;
+  gateway?: string;
+  status?: number;
+  timeout?: boolean;
+  attempts?: AttemptInfo[];
 };
 
 const DEFAULT_GATEWAYS = [
@@ -36,17 +55,53 @@ const LOG_EVENT_ABI = [
 const CATALOG_ADDRESS =
   process.env.CATALOG_ADDRESS ??
   "0x6aa04fbaa07e3a3f548cb0ae04b5e32c0a5fcfa9";
-const RPC_URL =
-  process.env.MOONBEAM_RPC ??
-  process.env.RPC_URL ??
-  "https://moonbeam-mainnet.g.alchemy.com/v2/VfzqrNtWWcvzE_HdcYt-czPcfX0zqriz";
+const CATALOG_CHAIN = (process.env.CATALOG_CHAIN ?? process.env.CHAIN ?? "").trim();
+const RPC_URL = resolveRpcUrl();
 const TIMEOUT_SECONDS = Number(process.env.IPFS_TIMEOUT_SECONDS ?? "8");
 const CONCURRENCY = Number(process.env.AUDIT_CONCURRENCY ?? "4");
 const LOG_RANGE = Number(process.env.LOG_RANGE ?? "10000");
+const IPFS_JSON_MAX_BYTES = Number(
+  process.env.IPFS_JSON_MAX_BYTES ?? String(2 * 1024 * 1024),
+);
+
+function resolveRpcUrl(): string {
+  const direct = process.env.RPC_URL?.trim();
+  if (direct) {
+    return direct;
+  }
+  const endpoints = parseRpcEndpoints();
+  if (CATALOG_CHAIN && endpoints[CATALOG_CHAIN]?.length) {
+    return endpoints[CATALOG_CHAIN][0];
+  }
+  const entries = Object.entries(endpoints).filter(([, urls]) => urls.length > 0);
+  if (!CATALOG_CHAIN && entries.length === 1) {
+    return entries[0][1][0];
+  }
+  throw new Error(
+    "RPC endpoint not configured. Set RPC_URL or CATALOG_CHAIN with RPC_ENDPOINTS.",
+  );
+}
+
+function parseRpcEndpoints(): Record<string, string[]> {
+  const raw = process.env.RPC_ENDPOINTS;
+  if (!raw) {
+    return {};
+  }
+  const parsed = safeParseJson<Record<string, string[]>>(raw);
+  if (!parsed) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(parsed).map(([key, urls]) => [
+      key,
+      Array.isArray(urls) ? urls.filter((url) => typeof url === "string") : [],
+    ]),
+  );
+}
 
 function parseGateways(): string[] {
   const raw = process.env.IPFS_GATEWAYS;
-  const gateways = raw ? safeParseJson<string[]>(raw) : [];
+  const gateways = raw ? safeParseJson<string[]>(raw) ?? [] : [];
   const merged = [...gateways, ...DEFAULT_GATEWAYS];
   const seen = new Set<string>();
   return merged.filter((item) => {
@@ -96,30 +151,102 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+function isTimeoutError(err: unknown) {
+  if (err instanceof Error && err.name === "AbortError") {
+    return true;
+  }
+  return false;
+}
+
+async function readJsonWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<{ data?: Record<string, unknown>; error?: string; bytes?: number }> {
+  const contentLength = response.headers.get("content-length");
+  if (contentLength) {
+    const length = Number(contentLength);
+    if (!Number.isNaN(length) && length > maxBytes) {
+      return { error: "json_too_large", bytes: length };
+    }
+  }
+  if (!response.body) {
+    return { error: "empty_body" };
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      total += value.length;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { error: "json_too_large", bytes: total };
+      }
+      chunks.push(value);
+    }
+  }
+  const combined = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  try {
+    const text = new TextDecoder().decode(combined);
+    return { data: JSON.parse(text) as Record<string, unknown>, bytes: total };
+  } catch (err) {
+    return { error: `json_parse_failed:${String(err)}`, bytes: total };
+  }
+}
+
 async function fetchIpfsJson(
   uri: string,
   gateways: string[],
   timeoutMs: number,
-): Promise<{ data?: Record<string, unknown>; error?: string; gateway?: string }> {
+): Promise<JsonFetchResult> {
   const parsed = parseIpfsUri(uri);
   if (!parsed) {
     return { error: "not_ipfs" };
   }
   const suffix = parsed.path ? `/${parsed.path}` : "";
+  const attempts: AttemptInfo[] = [];
   for (const gateway of gateways) {
     const url = `${gateway}${parsed.cid}${suffix}`;
     try {
       const response = await fetchWithTimeout(url, {}, timeoutMs);
       if (!response.ok) {
+        attempts.push({ gateway, status: response.status });
         continue;
       }
-      const data = (await response.json()) as Record<string, unknown>;
-      return { data, gateway };
-    } catch {
-      // try next gateway
+      const parsedJson = await readJsonWithLimit(response, IPFS_JSON_MAX_BYTES);
+      if (!parsedJson.data) {
+        attempts.push({
+          gateway,
+          status: response.status,
+          error: parsedJson.error,
+          bytes: parsedJson.bytes,
+        });
+        continue;
+      }
+      return {
+        data: parsedJson.data,
+        gateway,
+        status: response.status,
+        attempts,
+      };
+    } catch (err) {
+      attempts.push({
+        gateway,
+        error: String(err),
+        timeout: isTimeoutError(err),
+      });
     }
   }
-  return { error: "fetch_failed" };
+  return { error: "fetch_failed", attempts };
 }
 
 async function probeIpfsAsset(
@@ -132,6 +259,7 @@ async function probeIpfsAsset(
     return { ok: false, error: "not_ipfs" };
   }
   const suffix = parsed.path ? `/${parsed.path}` : "";
+  const attempts: AttemptInfo[] = [];
   for (const gateway of gateways) {
     const url = `${gateway}${parsed.cid}${suffix}`;
     try {
@@ -140,14 +268,19 @@ async function probeIpfsAsset(
         { headers: { Range: "bytes=0-0" } },
         timeoutMs,
       );
+      attempts.push({ gateway, status: response.status });
       if (response.status === 200 || response.status === 206) {
-        return { ok: true, status: response.status, gateway };
+        return { ok: true, status: response.status, gateway, attempts };
       }
     } catch (err) {
-      continue;
+      attempts.push({
+        gateway,
+        error: String(err),
+        timeout: isTimeoutError(err),
+      });
     }
   }
-  return { ok: false, error: "fetch_failed" };
+  return { ok: false, error: "fetch_failed", attempts };
 }
 
 async function mapWithConcurrency<T, R>(
@@ -299,13 +432,25 @@ async function main() {
 
   const report = {
     catalogAddress: CATALOG_ADDRESS,
+    chain: CATALOG_CHAIN || null,
     rpcUrl: RPC_URL,
     totalParts: parts.length,
-    missingMetadata: [] as CatalogPart[],
+    missingMetadata: [] as Array<{
+      part: CatalogPart;
+      error: string;
+      status?: number;
+      timeout?: boolean;
+      gateway?: string;
+      attempts?: AttemptInfo[];
+    }>,
     missingAssets: [] as Array<{
       part: CatalogPart;
       assetUri: string;
       error: string;
+      status?: number;
+      timeout?: boolean;
+      gateway?: string;
+      attempts?: AttemptInfo[];
     }>,
     noAssetUri: [] as CatalogPart[],
     okAssets: [] as Array<{
@@ -317,11 +462,23 @@ async function main() {
 
   const partResults = await mapWithConcurrency(parts, CONCURRENCY, async (part) => {
     if (!part.metadataUri) {
-      return { kind: "missing_metadata" as const, part };
+      return {
+        kind: "missing_metadata" as const,
+        part,
+        error: "missing_metadata_uri",
+      };
     }
     const meta = await fetchIpfsJson(part.metadataUri, gateways, timeoutMs);
     if (!meta.data) {
-      return { kind: "missing_metadata" as const, part };
+      return {
+        kind: "missing_metadata" as const,
+        part,
+        error: meta.error ?? "fetch_failed",
+        status: meta.status,
+        timeout: meta.timeout,
+        gateway: meta.gateway,
+        attempts: meta.attempts,
+      };
     }
     const assetUri = pickAssetUri(meta.data);
     if (!assetUri) {
@@ -344,12 +501,23 @@ async function main() {
       part,
       assetUri,
       error: assetProbe.error ?? "fetch_failed",
+      status: assetProbe.status,
+      timeout: assetProbe.timeout,
+      gateway: assetProbe.gateway,
+      attempts: assetProbe.attempts,
     };
   });
 
   for (const result of partResults) {
     if (result.kind === "missing_metadata") {
-      report.missingMetadata.push(result.part);
+      report.missingMetadata.push({
+        part: result.part,
+        error: result.error,
+        status: result.status,
+        timeout: result.timeout,
+        gateway: result.gateway,
+        attempts: result.attempts,
+      });
       continue;
     }
     if (result.kind === "ok_asset") {
@@ -368,6 +536,10 @@ async function main() {
       part: result.part,
       assetUri: result.assetUri,
       error: result.error,
+      status: result.status,
+      timeout: result.timeout,
+      gateway: result.gateway,
+      attempts: result.attempts,
     });
   }
 
@@ -384,8 +556,10 @@ async function main() {
   console.log(JSON.stringify(summary, null, 2));
   if (report.missingMetadata.length > 0) {
     console.log("Missing metadata:");
-    for (const part of report.missingMetadata) {
-      console.log(`- part_index=${part.index} metadata_uri=${part.metadataUri}`);
+    for (const entry of report.missingMetadata) {
+      console.log(
+        `- part_index=${entry.part.index} metadata_uri=${entry.part.metadataUri} error=${entry.error}`,
+      );
     }
   }
   if (report.missingAssets.length > 0) {

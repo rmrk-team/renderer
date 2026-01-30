@@ -5854,5 +5854,190 @@
         "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-46-47-530Z-6b991e4/pinned.log"
       }
     }
+  },
+  {
+    "runId": "2026-01-30T12-24-48-979Z-f92ad4f",
+    "timestamp": "2026-01-30T12:24:48.979Z",
+    "commit": "f92ad4fc3230fa6d951078bfcd93dbe503c7cda9",
+    "dirty": true,
+    "configPath": "benchmarks/renderer-benchmark-config.json",
+    "baseUrl": "http://127.0.0.1:63533",
+    "port": 63533,
+    "format": "webp",
+    "width": "medium",
+    "iterations": 1,
+    "concurrency": 1,
+    "trimRatio": 0.1,
+    "timeoutMs": 60000,
+    "rustLog": "proj_renderer=debug,sqlx=warn",
+    "modes": {
+      "fresh": {
+        "mode": "fresh",
+        "warmupIterations": 0,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 5188.5,
+            "p95Ms": 16998,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:63533/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 29518,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:63533/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 16998,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:63533/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 3508,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:63533/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 3291,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:63533/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 3326,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:63533/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 3306,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:63533/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 13241,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:63533/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 5624,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:63533/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 4753,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:63533/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 12878,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 5188.5,
+        "iterationMedianMs": 5188.5,
+        "tokenMedians": {
+          "kanaria-1": 29518,
+          "kanaria-3005": 16998,
+          "chunkies-1": 3508,
+          "chunkies-2": 3291,
+          "chunkies-3": 3326,
+          "chunkies-4": 3306,
+          "me-avatars-1": 13241,
+          "me-avatars-2": 5624,
+          "me-avatars-3": 4753,
+          "me-avatars-4": 12878
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T12-24-48-979Z-f92ad4f/fresh.log"
+      }
+    }
   }
 ]
