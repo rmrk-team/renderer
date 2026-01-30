@@ -144,7 +144,7 @@ async function probeIpfsAsset(
         return { ok: true, status: response.status, gateway };
       }
     } catch (err) {
-      return { ok: false, error: String(err) };
+      continue;
     }
   }
   return { ok: false, error: "fetch_failed" };

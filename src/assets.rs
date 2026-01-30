@@ -1134,7 +1134,11 @@ impl AssetResolver {
         let mut secondary_err: Option<anyhow::Error> = None;
 
         loop {
-            if let Some(fut) = secondary_future.as_mut() {
+            if primary_err.is_some() && secondary_err.is_some() {
+                break;
+            }
+            if secondary_future.is_some() {
+                let mut secondary_failed: Option<anyhow::Error> = None;
                 tokio::select! {
                     result = &mut primary, if primary_err.is_none() => {
                         match result {
@@ -1149,7 +1153,7 @@ impl AssetResolver {
                             }
                         }
                     }
-                    result = fut => {
+                    result = secondary_future.as_mut().unwrap() => {
                         match result {
                             Ok(bytes) => return Ok(bytes),
                             Err(err) => {
@@ -1158,10 +1162,14 @@ impl AssetResolver {
                                     attempt = secondary_attempt,
                                     "ipfs fetch failed, rotating gateway"
                                 );
-                                secondary_err = Some(err);
+                                secondary_failed = Some(err);
                             }
                         }
                     }
+                }
+                if let Some(err) = secondary_failed {
+                    secondary_err = Some(err);
+                    secondary_future = Some(Box::pin(std::future::pending()));
                 }
             } else {
                 tokio::select! {
@@ -1191,10 +1199,6 @@ impl AssetResolver {
                         )));
                     }
                 }
-            }
-
-            if primary_err.is_some() && secondary_err.is_some() {
-                break;
             }
         }
 

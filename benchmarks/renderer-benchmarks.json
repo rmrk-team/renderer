@@ -1525,5 +1525,4334 @@
         "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-06-50-760Z-3476b42/pinned.log"
       }
     }
+  },
+  {
+    "runId": "2026-01-30T11-26-56-365Z-6b991e4",
+    "timestamp": "2026-01-30T11:26:56.365Z",
+    "commit": "6b991e4a9aaa5c3661de7bb8a2411130a8a60330",
+    "dirty": true,
+    "configPath": "benchmarks/renderer-benchmark-config.json",
+    "baseUrl": "http://127.0.0.1:53378",
+    "port": 53378,
+    "format": "webp",
+    "width": "medium",
+    "iterations": 3,
+    "concurrency": 3,
+    "trimRatio": 0.1,
+    "timeoutMs": 60000,
+    "rustLog": "proj_renderer=debug,sqlx=warn",
+    "modes": {
+      "fresh": {
+        "mode": "fresh",
+        "warmupIterations": 0,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 6696.5,
+            "p95Ms": 12052,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 7100,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 3424,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 12030,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 12031,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 3487,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 3581,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 6293,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 5337,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 12084,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 12052,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 129,
+            "p95Ms": 12045,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 150,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 73,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 81,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 108,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 12011,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 12012,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 71,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 72,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 12045,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 12046,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 236.5,
+            "p95Ms": 12041,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 312,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 95,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 93,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 161,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 12009,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 12009,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 74,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 76,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 12043,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 12041,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 4459,
+        "iterationMedianMs": 236.5,
+        "tokenMedians": {
+          "chunkies-1": 312,
+          "chunkies-2": 95,
+          "kanaria-1": 12011,
+          "kanaria-3005": 12012,
+          "chunkies-3": 93,
+          "chunkies-4": 161,
+          "me-avatars-2": 76,
+          "me-avatars-3": 74,
+          "me-avatars-1": 12045,
+          "me-avatars-4": 12046
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-26-56-365Z-6b991e4/fresh.log"
+      },
+      "cached": {
+        "mode": "cached",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 41.5,
+            "p95Ms": 12005,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 64,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 10,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 19,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 12005,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 12006,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 12004,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 12004,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 71,
+            "p95Ms": 12039,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 91,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 43,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 37,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 51,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 39,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 39,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 12041,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 12039,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 71,
+            "p95Ms": 12008,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 134,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 8,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 12004,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 12004,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 57.5,
+        "iterationMedianMs": 71,
+        "tokenMedians": {
+          "chunkies-1": 6,
+          "chunkies-2": 64,
+          "chunkies-3": 10,
+          "chunkies-4": 19,
+          "kanaria-3005": 12008,
+          "kanaria-1": 12008,
+          "me-avatars-3": 4,
+          "me-avatars-2": 5,
+          "me-avatars-1": 12004,
+          "me-avatars-4": 12004
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-26-56-365Z-6b991e4/cached.log"
+      },
+      "pinned": {
+        "mode": "pinned",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 79,
+            "p95Ms": 12041,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 100,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 38,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 41,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 58,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 12010,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 38,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 44,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 12058,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 12041,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 68,
+            "p95Ms": 12008,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 117,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 19,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 12,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 12008,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 12004,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 12005,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 79.5,
+            "p95Ms": 12009,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 6,
+              "fallback": 4
+            },
+            "fallbackCounts": {
+              "none": 6,
+              "timeout_render": 4
+            },
+            "errorCodeCounts": {
+              "none": 6,
+              "render_timeout_render": 4
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 7,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 146,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 13,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 12009,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:53378/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 12009,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 12005,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:53378/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 12003,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 79,
+        "iterationMedianMs": 79,
+        "tokenMedians": {
+          "chunkies-1": 7,
+          "chunkies-2": 117,
+          "chunkies-3": 19,
+          "chunkies-4": 13,
+          "kanaria-3005": 12008,
+          "kanaria-1": 12009,
+          "me-avatars-3": 6,
+          "me-avatars-2": 6,
+          "me-avatars-1": 12005,
+          "me-avatars-4": 12005
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-26-56-365Z-6b991e4/pinned.log"
+      }
+    }
+  },
+  {
+    "runId": "2026-01-30T11-42-14-357Z-6b991e4",
+    "timestamp": "2026-01-30T11:42:14.357Z",
+    "commit": "6b991e4a9aaa5c3661de7bb8a2411130a8a60330",
+    "dirty": true,
+    "configPath": "benchmarks/renderer-benchmark-config.json",
+    "baseUrl": "http://127.0.0.1:55955",
+    "port": 55955,
+    "format": "webp",
+    "width": "medium",
+    "iterations": 3,
+    "concurrency": 3,
+    "trimRatio": 0.1,
+    "timeoutMs": 60000,
+    "rustLog": "proj_renderer=debug,sqlx=warn",
+    "modes": {
+      "fresh": {
+        "mode": "fresh",
+        "warmupIterations": 0,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 6960,
+            "p95Ms": 30015,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 8,
+              "fallback": 2
+            },
+            "fallbackCounts": {
+              "none": 8,
+              "timeout_render": 2
+            },
+            "errorCodeCounts": {
+              "none": 8,
+              "render_timeout_render": 2
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 6936,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 3491,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 3393,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 3385,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 30015,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 30015,
+                "status": 200,
+                "bytes": 376,
+                "result": "fallback",
+                "fallback": "timeout_render",
+                "fallbackReason": "render_timeout_render",
+                "complete": "false",
+                "errorCode": "render_timeout_render"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 14553,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 6142,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 6984,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 14329,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 119.5,
+            "p95Ms": 8882,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 234,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 166,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 124,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 106,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 113,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 115,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 101,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 102,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 8882,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 9788,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 92,
+            "p95Ms": 99,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 70,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 81,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 92,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 99,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 92,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 100,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 64,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 77,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 95,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 97,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 119.5,
+        "iterationMedianMs": 119.5,
+        "tokenMedians": {
+          "chunkies-1": 234,
+          "chunkies-2": 166,
+          "chunkies-3": 124,
+          "chunkies-4": 106,
+          "kanaria-1": 9788,
+          "kanaria-3005": 8882,
+          "me-avatars-1": 113,
+          "me-avatars-3": 101,
+          "me-avatars-2": 115,
+          "me-avatars-4": 102
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-42-14-357Z-6b991e4/fresh.log"
+      },
+      "cached": {
+        "mode": "cached",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 2,
+            "p95Ms": 5,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 2,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 2,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 2,
+        "iterationMedianMs": 2,
+        "tokenMedians": {
+          "chunkies-1": 3,
+          "kanaria-1": 5,
+          "kanaria-3005": 4,
+          "chunkies-2": 2,
+          "chunkies-3": 2,
+          "chunkies-4": 3,
+          "me-avatars-1": 2,
+          "me-avatars-2": 2,
+          "me-avatars-3": 1,
+          "me-avatars-4": 2
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-42-14-357Z-6b991e4/cached.log"
+      },
+      "pinned": {
+        "mode": "pinned",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3,
+            "p95Ms": 6,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55955/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 7,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55955/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 3,
+        "iterationMedianMs": 3,
+        "tokenMedians": {
+          "chunkies-1": 4,
+          "kanaria-1": 5,
+          "kanaria-3005": 5,
+          "chunkies-2": 3,
+          "chunkies-3": 3,
+          "chunkies-4": 3,
+          "me-avatars-1": 3,
+          "me-avatars-2": 2,
+          "me-avatars-3": 3,
+          "me-avatars-4": 2
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-42-14-357Z-6b991e4/pinned.log"
+      }
+    }
+  },
+  {
+    "runId": "2026-01-30T11-46-47-530Z-6b991e4",
+    "timestamp": "2026-01-30T11:46:47.530Z",
+    "commit": "6b991e4a9aaa5c3661de7bb8a2411130a8a60330",
+    "dirty": true,
+    "configPath": "benchmarks/renderer-benchmark-config.json",
+    "baseUrl": "http://127.0.0.1:56933",
+    "port": 56933,
+    "format": "webp",
+    "width": "medium",
+    "iterations": 3,
+    "concurrency": 3,
+    "trimRatio": 0.1,
+    "timeoutMs": 60000,
+    "rustLog": "proj_renderer=debug,sqlx=warn",
+    "modes": {
+      "fresh": {
+        "mode": "fresh",
+        "warmupIterations": 0,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 7127,
+            "p95Ms": 35239,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 8422,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 4080,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 3889,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 3544,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 14964,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 35239,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 36337,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 4903,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 5832,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 13549,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 90,
+            "p95Ms": 99,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 65,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 99,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 100,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 93,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 87,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 96,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 95,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 83,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 73,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 73,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 71.5,
+            "p95Ms": 83,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 40,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 42,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 70,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 83,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 86,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 73,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&fresh=1",
+                "durationMs": 65,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&fresh=1",
+                "durationMs": 79,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&fresh=1",
+                "durationMs": 65,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&fresh=1",
+                "durationMs": 76,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 90,
+        "iterationMedianMs": 90,
+        "tokenMedians": {
+          "chunkies-1": 99,
+          "chunkies-2": 93,
+          "chunkies-3": 87,
+          "chunkies-4": 96,
+          "me-avatars-1": 95,
+          "kanaria-3005": 65,
+          "kanaria-1": 100,
+          "me-avatars-3": 73,
+          "me-avatars-2": 83,
+          "me-avatars-4": 76
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-46-47-530Z-6b991e4/fresh.log"
+      },
+      "cached": {
+        "mode": "cached",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 2,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4.5,
+            "p95Ms": 8,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 7,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 8,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 10,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 3,
+        "iterationMedianMs": 3,
+        "tokenMedians": {
+          "chunkies-1": 3,
+          "kanaria-3005": 4,
+          "kanaria-1": 4,
+          "chunkies-2": 3,
+          "chunkies-3": 3,
+          "chunkies-4": 3,
+          "me-avatars-1": 3,
+          "me-avatars-2": 2,
+          "me-avatars-3": 2,
+          "me-avatars-4": 2
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-46-47-530Z-6b991e4/cached.log"
+      },
+      "pinned": {
+        "mode": "pinned",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3.5,
+            "p95Ms": 29,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 29,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 29,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 29,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3,
+            "p95Ms": 5,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 2,
+            "p95Ms": 5,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 156408,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:56933/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 154894,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 55280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-1",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-2",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 60992,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-3",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 47280,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "me-avatars-4",
+                "chain": "base",
+                "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:56933/render/base/0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 73154,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 3,
+        "iterationMedianMs": 3,
+        "tokenMedians": {
+          "chunkies-1": 3,
+          "kanaria-3005": 5,
+          "kanaria-1": 5,
+          "chunkies-2": 3,
+          "chunkies-3": 3,
+          "chunkies-4": 3,
+          "me-avatars-1": 2,
+          "me-avatars-3": 2,
+          "me-avatars-2": 2,
+          "me-avatars-4": 2
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-01-30T11-46-47-530Z-6b991e4/pinned.log"
+      }
+    }
   }
 ]
