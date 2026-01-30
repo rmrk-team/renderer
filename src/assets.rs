@@ -15,7 +15,7 @@ use mime::Mime;
 use reqwest::{StatusCode, header};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{Cursor, ErrorKind};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -39,6 +39,7 @@ pub struct AssetResolver {
     ipfs_semaphore: Arc<Semaphore>,
     nonrenderable_meta_cache: Arc<Mutex<NonRenderableMetaCache>>,
     ipfs_negative_cache: Arc<Mutex<IpfsNegativeCache>>,
+    ipfs_negative_cid_tracker: Arc<Mutex<IpfsNegativeCidTracker>>,
     metrics: Arc<Metrics>,
 }
 
@@ -63,6 +64,18 @@ struct NonRenderableMetaCache {
 struct IpfsNegativeCache {
     map: HashMap<String, Instant>,
     order: VecDeque<String>,
+}
+
+#[derive(Debug, Default)]
+struct IpfsNegativeCidTracker {
+    map: HashMap<String, CidFailureEntry>,
+    order: VecDeque<String>,
+}
+
+#[derive(Debug)]
+struct CidFailureEntry {
+    last_seen: Instant,
+    paths: HashSet<String>,
 }
 
 impl NonRenderableMetaCache {
@@ -110,29 +123,30 @@ impl NonRenderableMetaCache {
 }
 
 impl IpfsNegativeCache {
-    fn contains(&mut self, key: &str, ttl: Duration) -> bool {
-        let Some(when) = self.map.get(key).copied() else {
-            return false;
+    fn contains(&mut self, key: &str) -> Option<Duration> {
+        let Some(expires_at) = self.map.get(key).copied() else {
+            return None;
         };
-        if when.elapsed() <= ttl {
-            return true;
+        let now = Instant::now();
+        if now <= expires_at {
+            return Some(expires_at.saturating_duration_since(now));
         }
         self.map.remove(key);
-        false
+        None
     }
 
     fn insert(&mut self, key: String, ttl: Duration, capacity: usize) {
         if self.map.contains_key(&key) {
             return;
         }
-        self.map.insert(key.clone(), Instant::now());
+        self.map.insert(key.clone(), Instant::now() + ttl);
         self.order.push_back(key);
         while self.order.len() > capacity {
             if let Some(oldest) = self.order.pop_front() {
                 self.map.remove(&oldest);
             }
         }
-        self.evict_expired(ttl);
+        self.evict_expired();
     }
 
     fn remove(&mut self, key: &str) {
@@ -143,13 +157,14 @@ impl IpfsNegativeCache {
         }
     }
 
-    fn evict_expired(&mut self, ttl: Duration) {
+    fn evict_expired(&mut self) {
+        let now = Instant::now();
         let mut kept = VecDeque::with_capacity(self.order.len());
         while let Some(key) = self.order.pop_front() {
             let expired = self
                 .map
                 .get(&key)
-                .map(|when| when.elapsed() > ttl)
+                .map(|expires_at| now > *expires_at)
                 .unwrap_or(true);
             if expired {
                 self.map.remove(&key);
@@ -158,6 +173,53 @@ impl IpfsNegativeCache {
             }
         }
         self.order = kept;
+    }
+}
+
+impl IpfsNegativeCidTracker {
+    fn record_failure(
+        &mut self,
+        cid: &str,
+        path: &str,
+        window: Duration,
+        capacity: usize,
+        threshold: usize,
+    ) -> bool {
+        if threshold == 0 || window.is_zero() {
+            return false;
+        }
+        let now = Instant::now();
+        let reached_threshold = {
+            let entry = self.map.entry(cid.to_string()).or_insert_with(|| {
+                self.order.push_back(cid.to_string());
+                CidFailureEntry {
+                    last_seen: now,
+                    paths: HashSet::new(),
+                }
+            });
+            if now.saturating_duration_since(entry.last_seen) > window {
+                entry.paths.clear();
+            }
+            entry.last_seen = now;
+            if !path.is_empty() {
+                entry.paths.insert(path.to_string());
+            }
+            entry.paths.len() >= threshold
+        };
+        while self.order.len() > capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+        reached_threshold
+    }
+
+    fn reset(&mut self, cid: &str) {
+        if self.map.remove(cid).is_some() {
+            if let Some(pos) = self.order.iter().position(|item| item == cid) {
+                self.order.remove(pos);
+            }
+        }
     }
 }
 
@@ -210,6 +272,11 @@ struct FetchMetricsTimer {
     metrics: Arc<Metrics>,
     origin: FetchOrigin,
     started: Instant,
+}
+
+struct NegativeCacheHit {
+    key: String,
+    retry_after_seconds: u64,
 }
 
 impl FetchMetricsTimer {
@@ -296,6 +363,11 @@ pub enum AssetFetchError {
     Blocked,
     #[error("asset too large")]
     TooLarge,
+    #[error("asset fetch blocked by ipfs negative cache: {key}")]
+    NegativeCache {
+        key: String,
+        retry_after_seconds: u64,
+    },
     #[error("asset fetch failed from {url}: {status}")]
     UpstreamStatus { status: StatusCode, url: String },
     #[error("asset fetch failed from {url}")]
@@ -349,6 +421,7 @@ impl AssetResolver {
             ipfs_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
             ipfs_negative_cache: Arc::new(Mutex::new(IpfsNegativeCache::default())),
+            ipfs_negative_cid_tracker: Arc::new(Mutex::new(IpfsNegativeCidTracker::default())),
             metrics,
         })
     }
@@ -365,37 +438,85 @@ impl AssetResolver {
         self.pin_store.clone()
     }
 
-    fn ipfs_negative_cache_ttl(&self) -> Option<Duration> {
-        if self.config.ipfs_negative_cache_seconds == 0 {
-            None
-        } else {
-            Some(Duration::from_secs(self.config.ipfs_negative_cache_seconds))
+    fn ipfs_negative_cache_enabled(&self) -> bool {
+        self.config.ipfs_negative_cache_seconds > 0
+            || self.config.ipfs_negative_cache_not_found_seconds > 0
+    }
+
+    async fn ipfs_negative_cache_contains(
+        &self,
+        resolved: &ResolvedUri,
+    ) -> Option<NegativeCacheHit> {
+        if !self.ipfs_negative_cache_enabled() {
+            return None;
         }
-    }
-
-    async fn ipfs_negative_cache_contains(&self, key: &str) -> bool {
-        let Some(ttl) = self.ipfs_negative_cache_ttl() else {
-            return false;
-        };
+        let key = ipfs_negative_cache_key(resolved);
         let mut cache = self.ipfs_negative_cache.lock().await;
-        cache.contains(key, ttl)
+        if let Some(remaining) = cache.contains(&key) {
+            return Some(NegativeCacheHit {
+                key,
+                retry_after_seconds: remaining.as_secs().max(1),
+            });
+        }
+        if !resolved.path.is_empty() {
+            let root_key = ipfs_negative_cache_root_key(resolved);
+            if let Some(remaining) = cache.contains(&root_key) {
+                return Some(NegativeCacheHit {
+                    key: root_key,
+                    retry_after_seconds: remaining.as_secs().max(1),
+                });
+            }
+        }
+        None
     }
 
-    async fn ipfs_negative_cache_insert(&self, key: String) {
-        let Some(ttl) = self.ipfs_negative_cache_ttl() else {
+    async fn ipfs_negative_cache_insert(&self, key: String, ttl: Duration) {
+        if !self.ipfs_negative_cache_enabled() {
             return;
-        };
+        }
+        if ttl.is_zero() {
+            return;
+        }
         let capacity = self.config.ipfs_negative_cache_capacity.max(1);
         let mut cache = self.ipfs_negative_cache.lock().await;
         cache.insert(key, ttl, capacity);
     }
 
-    async fn ipfs_negative_cache_remove(&self, key: &str) {
-        if self.config.ipfs_negative_cache_seconds == 0 {
+    async fn ipfs_negative_cache_remove(&self, resolved: &ResolvedUri) {
+        if !self.ipfs_negative_cache_enabled() {
             return;
         }
+        let key = ipfs_negative_cache_key(resolved);
         let mut cache = self.ipfs_negative_cache.lock().await;
-        cache.remove(key);
+        cache.remove(&key);
+        if !resolved.path.is_empty() {
+            cache.remove(&ipfs_negative_cache_root_key(resolved));
+        }
+        drop(cache);
+        let mut tracker = self.ipfs_negative_cid_tracker.lock().await;
+        tracker.reset(&resolved.cid);
+    }
+
+    async fn ipfs_negative_cache_insert_root_if_needed(
+        &self,
+        resolved: &ResolvedUri,
+        ttl: Duration,
+    ) {
+        if !self.ipfs_negative_cache_enabled() {
+            return;
+        }
+        if resolved.path.is_empty() {
+            return;
+        }
+        let window = Duration::from_secs(self.config.ipfs_negative_cache_seconds);
+        let threshold = self.config.ipfs_negative_cache_cid_threshold;
+        let capacity = self.config.ipfs_negative_cache_capacity.max(1);
+        let mut tracker = self.ipfs_negative_cid_tracker.lock().await;
+        if tracker.record_failure(&resolved.cid, &resolved.path, window, capacity, threshold) {
+            drop(tracker);
+            self.ipfs_negative_cache_insert(ipfs_negative_cache_root_key(resolved), ttl)
+                .await;
+        }
     }
 
     pub async fn resolve_metadata(
@@ -873,19 +994,24 @@ impl AssetResolver {
                 }
             }
         }
-        let negative_key = resolved.cache_key.clone();
-        if self.ipfs_negative_cache_contains(&negative_key).await {
+        if let Some(hit) = self.ipfs_negative_cache_contains(resolved).await {
             debug!(
-                asset_key = %ipfs_asset_key(resolved),
+                asset_key = %hit.key,
                 "ipfs negative cache hit"
             );
-            return Err(AssetFetchError::Upstream {
-                url: ipfs_asset_key(resolved),
+            self.metrics.observe_upstream_failure("ipfs_negative_cache");
+            return Err(AssetFetchError::NegativeCache {
+                key: hit.key,
+                retry_after_seconds: hit.retry_after_seconds,
             }
             .into());
         }
         let gateways = &self.config.ipfs_gateways;
-        let hedge_delay = Duration::from_millis(self.config.ipfs_hedge_delay_ms);
+        let hedge_delay = if matches!(kind, FetchKind::Metadata) {
+            Duration::from_millis(self.config.ipfs_hedge_delay_ms)
+        } else {
+            Duration::from_millis(0)
+        };
         let mut last_err = None;
         let mut index = 0usize;
         while index < gateways.len() {
@@ -898,7 +1024,7 @@ impl AssetResolver {
                     .await
                 {
                     Ok(fetched) => {
-                        self.ipfs_negative_cache_remove(&negative_key).await;
+                        self.ipfs_negative_cache_remove(resolved).await;
                         return Ok(fetched);
                     }
                     Err(err) => {
@@ -912,7 +1038,7 @@ impl AssetResolver {
             }
             match self.fetch_http_bytes(&url, kind, FetchOrigin::Ipfs).await {
                 Ok(fetched) => {
-                    self.ipfs_negative_cache_remove(&negative_key).await;
+                    self.ipfs_negative_cache_remove(resolved).await;
                     return Ok(fetched);
                 }
                 Err(err) => {
@@ -929,8 +1055,11 @@ impl AssetResolver {
             }
         }
         if let Some(err) = last_err {
-            if should_negative_cache_error(&err) {
-                self.ipfs_negative_cache_insert(negative_key).await;
+            if let Some(ttl) = negative_cache_ttl_for_error(&err, &self.config) {
+                let key = ipfs_negative_cache_key(resolved);
+                self.ipfs_negative_cache_insert(key.clone(), ttl).await;
+                self.ipfs_negative_cache_insert_root_if_needed(resolved, ttl)
+                    .await;
             }
             return Err(err);
         }
@@ -1416,15 +1545,42 @@ fn ipfs_asset_key(resolved: &ResolvedUri) -> String {
     format!("ipfs://{}{}", resolved.cid, resolved.path)
 }
 
-fn should_negative_cache_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
+fn ipfs_negative_cache_key(resolved: &ResolvedUri) -> String {
+    ipfs_asset_key(resolved)
+}
+
+fn ipfs_negative_cache_root_key(resolved: &ResolvedUri) -> String {
+    format!("ipfs://{}", resolved.cid)
+}
+
+fn negative_cache_ttl_for_error(err: &anyhow::Error, config: &Config) -> Option<Duration> {
+    let short = Duration::from_secs(config.ipfs_negative_cache_seconds);
+    let long = Duration::from_secs(config.ipfs_negative_cache_not_found_seconds);
+    err.chain().find_map(|cause| {
         if let Some(fetch_error) = cause.downcast_ref::<AssetFetchError>() {
-            matches!(
-                fetch_error,
-                AssetFetchError::Upstream { .. } | AssetFetchError::UpstreamStatus { .. }
-            )
+            match fetch_error {
+                AssetFetchError::UpstreamStatus { status, .. } => {
+                    if *status == StatusCode::NOT_FOUND || *status == StatusCode::GONE {
+                        if long.is_zero() { None } else { Some(long) }
+                    } else if *status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                        if short.is_zero() { None } else { Some(short) }
+                    } else {
+                        None
+                    }
+                }
+                AssetFetchError::Upstream { .. } => {
+                    if short.is_zero() {
+                        None
+                    } else {
+                        Some(short)
+                    }
+                }
+                _ => None,
+            }
+        } else if cause.downcast_ref::<reqwest::Error>().is_some() {
+            if short.is_zero() { None } else { Some(short) }
         } else {
-            cause.downcast_ref::<reqwest::Error>().is_some()
+            None
         }
     })
 }

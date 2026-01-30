@@ -1151,9 +1151,18 @@ pub(crate) async fn render_token_uncached(
                 nonconforming_layers,
                 "layer load summary"
             );
+            let fetch_elapsed = fetch_started.elapsed();
             state
                 .metrics
-                .observe_render_duration("fetch_assets", fetch_started.elapsed());
+                .observe_render_duration("fetch_assets", fetch_elapsed);
+            debug!(
+                chain = %request.chain,
+                collection = %request.collection,
+                token_id = %request.token_id,
+                asset_id = %request.asset_id,
+                duration_ms = fetch_elapsed.as_millis(),
+                "render fetch_assets complete"
+            );
 
             let compose_started = Instant::now();
             let blocking = state.blocking_semaphore.clone();
@@ -1179,9 +1188,18 @@ pub(crate) async fn render_token_uncached(
                         return Err(err);
                     }
                 };
+            let compose_elapsed = compose_started.elapsed();
             state
                 .metrics
-                .observe_render_duration("compose", compose_started.elapsed());
+                .observe_render_duration("compose", compose_elapsed);
+            debug!(
+                chain = %request.chain,
+                collection = %request.collection,
+                token_id = %request.token_id,
+                asset_id = %request.asset_id,
+                duration_ms = compose_elapsed.as_millis(),
+                "render compose complete"
+            );
             canvas = Some(base);
         }
     }
@@ -1234,9 +1252,20 @@ pub(crate) async fn render_token_uncached(
             return Err(err);
         }
     };
+    let encode_elapsed = encode_started.elapsed();
     state
         .metrics
-        .observe_render_duration("encode", encode_started.elapsed());
+        .observe_render_duration("encode", encode_elapsed);
+    debug!(
+        chain = %request.chain,
+        collection = %request.collection,
+        token_id = %request.token_id,
+        asset_id = %request.asset_id,
+        duration_ms = encode_elapsed.as_millis(),
+        output_format = %request.format.extension(),
+        rendered_bytes = bytes.len(),
+        "render encode complete"
+    );
     if let (Some(key), Some(bytes)) = (composite_key, composite_bytes) {
         let _ = state.cache.store_file(&key.path, &bytes).await;
     }

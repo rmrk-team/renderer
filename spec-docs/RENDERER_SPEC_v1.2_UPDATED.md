@@ -498,11 +498,12 @@ GET /render/{chain}/{collection}/{tokenId}/{assetId}.{format}
 - `X-Renderer-Result: rendered|placeholder|cache-miss|fallback`
 - `X-Renderer-Cache-Hit: true|false`
 - `X-Cache: HIT|MISS`
-- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Action: retry|backoff|stop`
 - `X-Renderer-Fallback-Until: <unix_ts>` (present when backoff is advised)
 - `X-Renderer-Error-Code: <code>`
+- `X-Renderer-Error: ipfs_negative_cache` (set on negative-cache hits)
 - `Cache-Control: public, max-age=...` (safe due to cache busting in URL)
 
 ### 9.2 Primary Asset Convenience Endpoint (Token-only)

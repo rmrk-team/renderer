@@ -1,0 +1,69 @@
+{
+  "baseUrl": "http://127.0.0.1:8086",
+  "format": "webp",
+  "width": "medium",
+  "tokens": [
+    {
+      "label": "kanaria-1",
+      "chain": "base",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+      "tokenId": "1",
+      "assetId": "9987"
+    },
+    {
+      "label": "kanaria-3005",
+      "chain": "base",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+      "tokenId": "3005",
+      "assetId": "15528"
+    },
+    {
+      "label": "chunkies-1",
+      "chain": "base",
+      "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+      "tokenId": "1"
+    },
+    {
+      "label": "chunkies-2",
+      "chain": "base",
+      "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+      "tokenId": "2"
+    },
+    {
+      "label": "chunkies-3",
+      "chain": "base",
+      "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+      "tokenId": "3"
+    },
+    {
+      "label": "chunkies-4",
+      "chain": "base",
+      "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+      "tokenId": "4"
+    },
+    {
+      "label": "me-avatars-1",
+      "chain": "base",
+      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "tokenId": "1"
+    },
+    {
+      "label": "me-avatars-2",
+      "chain": "base",
+      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "tokenId": "2"
+    },
+    {
+      "label": "me-avatars-3",
+      "chain": "base",
+      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "tokenId": "3"
+    },
+    {
+      "label": "me-avatars-4",
+      "chain": "base",
+      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "tokenId": "4"
+    }
+  ]
+}

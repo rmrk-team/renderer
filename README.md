@@ -68,8 +68,10 @@ HTTP safety caps:
 - `MAX_CONCURRENT_RPC_CALLS` caps concurrent RPC calls (primary-route lookups + warmup fallbacks).
 - `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` caches failed primary-asset lookups briefly to avoid RPC hammering.
 - `DEFAULT_CACHE_TTL_SECONDS` sets a default HTTP cache TTL when `cache` is omitted.
-- `IPFS_HEDGE_DELAY_MS` races a second gateway after a short delay (0 disables).
-- `IPFS_NEGATIVE_CACHE_SECONDS` / `IPFS_NEGATIVE_CACHE_CAPACITY` cache repeated IPFS failures to avoid hammering.
+- `IPFS_HEDGE_DELAY_MS` races a second gateway after a short delay for metadata fetches (0 disables).
+- `IPFS_NEGATIVE_CACHE_SECONDS` / `IPFS_NEGATIVE_CACHE_NOT_FOUND_SECONDS` / `IPFS_NEGATIVE_CACHE_CAPACITY`
+  cache repeated IPFS failures to avoid hammering (short TTL for transient errors, long TTL for 404/410).
+- `IPFS_NEGATIVE_CACHE_CID_THRESHOLD` caches a CID root after repeated failures across paths.
 
 Render timeouts:
 
@@ -568,7 +570,7 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
-- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Reason: approval_required|queue_full|rate_limited` (dynamic fallbacks)
 - `X-Renderer-Fallback-Action: retry|backoff|stop`
@@ -579,7 +581,8 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `ETag` for conditional GET on cached renders
 
 When `onerror=placeholder` is set, failed renders return a tiny placeholder image
-with `X-Renderer-Error: true` instead of JSON.
+with `X-Renderer-Error: true` instead of JSON. IPFS negative-cache responses set
+`X-Renderer-Error: ipfs_negative_cache`.
 
 ## Admin API
 
@@ -765,6 +768,23 @@ cargo build --release
 ```bash
 cargo test
 ```
+
+### Renderer benchmark (pre-commit)
+
+The benchmark runs 10 NFTs across 3 collections in three modes:
+fresh (no render cache), cached (render cache warm), and pinned (local pins warmed).
+Results are appended to `benchmarks/renderer-benchmarks.json`, and renderer logs
+are captured under `benchmarks/runs/`.
+
+```bash
+bun run scripts/renderer-benchmark.ts --iterations 3 --concurrency 3
+```
+
+Notes:
+
+- Edit `benchmarks/renderer-benchmark-config.json` to adjust the token set.
+- The benchmark picks an ephemeral port unless `--port` or `--base-url` is set.
+- The renderer runs with `RUST_LOG=proj_renderer=debug,sqlx=warn` by default; override with `--rust-log`.
 
 ### Local smoke test (prod-style env)
 

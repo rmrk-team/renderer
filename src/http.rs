@@ -1893,6 +1893,18 @@ async fn fallback_text_response(
         "X-Renderer-Error-Code",
         HeaderValue::from_str(error_code).unwrap_or(HeaderValue::from_static("fallback")),
     );
+    if error_code == "ipfs_negative_cache" {
+        headers.insert(
+            "X-Renderer-Error",
+            HeaderValue::from_static("ipfs_negative_cache"),
+        );
+    }
+    if error_code == "ipfs_negative_cache" {
+        headers.insert(
+            "X-Renderer-Error",
+            HeaderValue::from_static("ipfs_negative_cache"),
+        );
+    }
     if let Ok(value) = HeaderValue::from_str(&bytes.len().to_string()) {
         headers.insert(header::CONTENT_LENGTH, value);
     }
@@ -1913,7 +1925,11 @@ fn fallback_action_for_kind(fallback_kind: &str, retry_after_seconds: Option<u64
     }
     match fallback_kind {
         "unapproved" | "token_override" => "stop",
-        "approval_stale" | "queued" | "timeout_queue" | "timeout_render" => "backoff",
+        "approval_stale"
+        | "queued"
+        | "timeout_queue"
+        | "timeout_render"
+        | "ipfs_negative_cache" => "backoff",
         "render_fallback" => "backoff",
         _ => "retry",
     }
@@ -2695,6 +2711,29 @@ async fn fallback_for_render_error(
         };
         return Some(response);
     }
+    if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
+        if let AssetFetchError::NegativeCache {
+            retry_after_seconds,
+            ..
+        } = fetch_error
+        {
+            let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+            return Some(
+                fallback_text_response(
+                    &request.format,
+                    width,
+                    height,
+                    &["IPFS NEGATIVE CACHE".to_string(), "RETRY LATER".to_string()],
+                    "ipfs_negative_cache",
+                    "ipfs_negative_cache",
+                    "ipfs_negative_cache",
+                    StatusCode::OK,
+                    Some(*retry_after_seconds),
+                )
+                .await,
+            );
+        }
+    }
     resolve_render_failure_fallback(state, request, headers).await
 }
 
@@ -2795,6 +2834,21 @@ async fn fallback_head_for_render_error(
                 Some(5),
             ),
         });
+    }
+    if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
+        if let AssetFetchError::NegativeCache {
+            retry_after_seconds,
+            ..
+        } = fetch_error
+        {
+            return Some(fallback_head_response(
+                &request.format,
+                "ipfs_negative_cache",
+                "ipfs_negative_cache",
+                "ipfs_negative_cache",
+                Some(*retry_after_seconds),
+            ));
+        }
     }
     None
 }
@@ -5025,6 +5079,30 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
                     .with_code("asset_too_large")
                     .with_log_detail(detail)
+            }
+            AssetFetchError::NegativeCache {
+                retry_after_seconds,
+                ..
+            } => {
+                let mut error = ApiError::new(
+                    StatusCode::BAD_GATEWAY,
+                    "asset fetch blocked by ipfs negative cache",
+                )
+                .with_code("ipfs_negative_cache")
+                .with_field("ipfs_negative_cache", Value::Bool(true))
+                .with_field(
+                    "retry_after_seconds",
+                    Value::Number((*retry_after_seconds).into()),
+                )
+                .with_log_detail(detail)
+                .with_header(
+                    header::HeaderName::from_static("x-renderer-error"),
+                    HeaderValue::from_static("ipfs_negative_cache"),
+                );
+                let retry_after = HeaderValue::from_str(&retry_after_seconds.to_string())
+                    .unwrap_or(HeaderValue::from_static("30"));
+                error = error.with_header(header::RETRY_AFTER, retry_after);
+                error
             }
             AssetFetchError::UpstreamStatus { .. } | AssetFetchError::Upstream { .. } => {
                 ApiError::new(StatusCode::BAD_GATEWAY, "asset fetch failed")

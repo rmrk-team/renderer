@@ -54,7 +54,9 @@ pub struct Config {
     pub ipfs_timeout_seconds: u64,
     pub ipfs_hedge_delay_ms: u64,
     pub ipfs_negative_cache_seconds: u64,
+    pub ipfs_negative_cache_not_found_seconds: u64,
     pub ipfs_negative_cache_capacity: usize,
+    pub ipfs_negative_cache_cid_threshold: usize,
     pub max_metadata_json_bytes: usize,
     pub max_svg_bytes: usize,
     pub max_svg_node_count: usize,
@@ -327,8 +329,11 @@ impl Config {
         }
         let ipfs_timeout_seconds = parse_u64("IPFS_TIMEOUT_SECONDS", 30);
         let ipfs_hedge_delay_ms = parse_u64("IPFS_HEDGE_DELAY_MS", 250);
-        let ipfs_negative_cache_seconds = parse_u64("IPFS_NEGATIVE_CACHE_SECONDS", 300);
+        let ipfs_negative_cache_seconds = parse_u64("IPFS_NEGATIVE_CACHE_SECONDS", 60);
+        let ipfs_negative_cache_not_found_seconds =
+            parse_u64("IPFS_NEGATIVE_CACHE_NOT_FOUND_SECONDS", 86400);
         let ipfs_negative_cache_capacity = parse_usize("IPFS_NEGATIVE_CACHE_CAPACITY", 10_000);
+        let ipfs_negative_cache_cid_threshold = parse_usize("IPFS_NEGATIVE_CACHE_CID_THRESHOLD", 3);
         let max_metadata_json_bytes = parse_usize("MAX_METADATA_JSON_BYTES", 524_288);
         let max_svg_bytes = parse_usize("MAX_SVG_BYTES", 2_097_152);
         let max_svg_node_count = parse_usize("MAX_SVG_NODE_COUNT", 200_000);
@@ -526,7 +531,9 @@ impl Config {
             ipfs_timeout_seconds,
             ipfs_hedge_delay_ms,
             ipfs_negative_cache_seconds,
+            ipfs_negative_cache_not_found_seconds,
             ipfs_negative_cache_capacity,
+            ipfs_negative_cache_cid_threshold,
             max_metadata_json_bytes,
             max_svg_bytes,
             max_svg_node_count,

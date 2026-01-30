@@ -27,3 +27,4 @@ AUDIT_*.md
 tmp/
 *.zip
 renderer-failures.log
+benchmarks/runs/
