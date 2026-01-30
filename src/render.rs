@@ -139,7 +139,9 @@ pub enum RenderQueueError {
 #[derive(Debug, Error)]
 pub enum RenderTimeoutError {
     #[error("render timed out after {seconds}s")]
-    Timeout { seconds: u64 },
+    RenderExec { seconds: u64 },
+    #[error("render queue wait timed out after {seconds}s")]
+    QueueWait { seconds: u64 },
 }
 
 #[derive(Debug, Error)]
@@ -389,7 +391,7 @@ async fn render_token_with_limit_internal(
                             timeout_seconds = request_timeout,
                             "render request timed out waiting for queue"
                         );
-                        return Err(RenderTimeoutError::Timeout {
+                        return Err(RenderTimeoutError::QueueWait {
                             seconds: request_timeout,
                         }
                         .into());
@@ -792,7 +794,7 @@ pub(crate) async fn render_token_uncached_with_timeout(
                 timeout_seconds,
                 "render timed out"
             );
-            Err(RenderTimeoutError::Timeout {
+            Err(RenderTimeoutError::RenderExec {
                 seconds: timeout_seconds,
             }
             .into())

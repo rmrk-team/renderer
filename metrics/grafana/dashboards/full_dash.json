@@ -327,6 +327,20 @@
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 88 }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Timeouts by type",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_top_failure_reasons_total{reason=~\"render_timeout_(queue|render)\"}[5m])) by (reason)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 96 }
     }
   ]
 }

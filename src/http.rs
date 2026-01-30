@@ -1740,19 +1740,20 @@ async fn render_timeout_fallback_response(
     width: u32,
     height: u32,
     retry_after_seconds: u64,
+    fallback_kind: &str,
+    reason: &str,
+    error_code: &str,
+    line1: &str,
 ) -> Response {
-    let lines = vec![
-        "RENDER TIMEOUT".to_string(),
-        "RETRY IN A MOMENT".to_string(),
-    ];
+    let lines = vec![line1.to_string(), "RETRY IN A MOMENT".to_string()];
     fallback_text_response(
         format,
         width,
         height,
         &lines,
-        "timeout",
-        "render_timeout",
-        "render_timeout",
+        fallback_kind,
+        reason,
+        error_code,
         StatusCode::OK,
         Some(retry_after_seconds),
     )
@@ -2642,9 +2643,37 @@ async fn fallback_for_render_error(
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return Some(queued_fallback_response(&request.format, width, height, 5).await);
     }
-    if error.downcast_ref::<RenderTimeoutError>().is_some() {
+    if let Some(timeout_error) = error.downcast_ref::<RenderTimeoutError>() {
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
-        return Some(render_timeout_fallback_response(&request.format, width, height, 5).await);
+        let response = match timeout_error {
+            RenderTimeoutError::QueueWait { .. } => {
+                render_timeout_fallback_response(
+                    &request.format,
+                    width,
+                    height,
+                    5,
+                    "timeout_queue",
+                    "render_timeout_queue",
+                    "render_timeout_queue",
+                    "QUEUE WAIT TIMEOUT",
+                )
+                .await
+            }
+            RenderTimeoutError::RenderExec { .. } => {
+                render_timeout_fallback_response(
+                    &request.format,
+                    width,
+                    height,
+                    5,
+                    "timeout_render",
+                    "render_timeout_render",
+                    "render_timeout_render",
+                    "RENDER TIMEOUT",
+                )
+                .await
+            }
+        };
+        return Some(response);
     }
     resolve_render_failure_fallback(state, request, headers).await
 }
@@ -2722,14 +2751,23 @@ async fn fallback_head_for_render_error(
             Some(5),
         ));
     }
-    if error.downcast_ref::<RenderTimeoutError>().is_some() {
-        return Some(fallback_head_response(
-            &request.format,
-            "timeout",
-            "render_timeout",
-            "render_timeout",
-            Some(5),
-        ));
+    if let Some(timeout_error) = error.downcast_ref::<RenderTimeoutError>() {
+        return Some(match timeout_error {
+            RenderTimeoutError::QueueWait { .. } => fallback_head_response(
+                &request.format,
+                "timeout_queue",
+                "render_timeout_queue",
+                "render_timeout_queue",
+                Some(5),
+            ),
+            RenderTimeoutError::RenderExec { .. } => fallback_head_response(
+                &request.format,
+                "timeout_render",
+                "render_timeout_render",
+                "render_timeout_render",
+                Some(5),
+            ),
+        });
     }
     None
 }
@@ -4905,12 +4943,18 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
             .with_log_detail(detail);
     }
     if let Some(timeout_error) = error.downcast_ref::<RenderTimeoutError>() {
-        let timeout_seconds = match timeout_error {
-            RenderTimeoutError::Timeout { seconds } => *seconds,
+        let (code, scope, seconds) = match timeout_error {
+            RenderTimeoutError::QueueWait { seconds } => {
+                ("render_timeout_queue", "queue_wait", *seconds)
+            }
+            RenderTimeoutError::RenderExec { seconds } => {
+                ("render_timeout_render", "render_exec", *seconds)
+            }
         };
         return ApiError::new(StatusCode::GATEWAY_TIMEOUT, "render timeout")
-            .with_code("render_timeout")
-            .with_field("timeout_seconds", Value::Number(timeout_seconds.into()))
+            .with_code(code)
+            .with_field("timeout_seconds", Value::Number(seconds.into()))
+            .with_field("timeout_scope", Value::String(scope.to_string()))
             .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
             .with_log_detail(detail);
     }
