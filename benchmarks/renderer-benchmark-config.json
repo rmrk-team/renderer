@@ -42,27 +42,27 @@
       "tokenId": "4"
     },
     {
-      "label": "me-avatars-1",
+      "label": "base-923c-1",
       "chain": "base",
-      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
       "tokenId": "1"
     },
     {
-      "label": "me-avatars-2",
+      "label": "base-923c-2",
       "chain": "base",
-      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
       "tokenId": "2"
     },
     {
-      "label": "me-avatars-3",
+      "label": "base-923c-3",
       "chain": "base",
-      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
       "tokenId": "3"
     },
     {
-      "label": "me-avatars-4",
+      "label": "base-923c-4",
       "chain": "base",
-      "collection": "0xb30b909c1fa58fd2b0f95eeea3fa0399b6f2382d",
+      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
       "tokenId": "4"
     }
   ]

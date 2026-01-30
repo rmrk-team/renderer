@@ -147,10 +147,13 @@ It:
    9. Return response
 
 **Non-composable fallback:** if `composeEquippables` reverts with
-`RMRKNotComposableAsset`, the renderer treats the asset as **single-layer**:
+`RMRKNotComposableAsset` or known non-composable revert selectors
+(`0x7a062578`, `0xdcc947e8`), the renderer treats the asset as **single-layer**:
 it fetches the asset metadata (`getAssetMetadata`), resolves the media URI, and
 renders it directly. Catalog/theme lookups are skipped (catalog address is zero),
 and canvas size is derived from that asset.
+This path allows approved ERC721 collections to render via the renderer when
+metadata resolves to a static asset.
 Original-size responses from this fallback are not cached; resized/OG variants
 remain cacheable to avoid becoming a large-asset CDN.
 Raster assets larger than `MAX_RASTER_BYTES` are resized (bounded by

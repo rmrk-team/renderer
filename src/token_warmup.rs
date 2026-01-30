@@ -13,6 +13,7 @@ use tokio::time::sleep;
 use tracing::{info, warn};
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
+const NON_COMPOSABLE_ASSET_REVERT_ALT: &str = "0xdcc947e8";
 const TOP_ASSET_REVERT: &str = "0x3456866f";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 
@@ -531,6 +532,7 @@ fn is_non_composable_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
         message.contains(NON_COMPOSABLE_ASSET_REVERT)
+            || message.contains(NON_COMPOSABLE_ASSET_REVERT_ALT)
             || message.contains(COMPOSE_EQUIP_REVERT)
             || message.contains("RMRKNotComposableAsset")
             || message.contains("execution reverted")

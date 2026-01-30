@@ -998,7 +998,9 @@ stable renders.
 - Canvas size is derived from the first fixed part’s art. If SVG sizing is invalid,
   defaults are used and the collection should be reviewed.
 - Raster layers that do not match the canonical canvas size are treated as nonconforming.
-- Non-composable primary assets fall back to a single-layer render using asset metadata.
+- Non-composable primary assets (including reverts `0x7a062578` and `0xdcc947e8`)
+  fall back to a single-layer render using asset metadata; this allows approved ERC721
+  collections to render via the renderer when metadata points at static media.
 - Original-size fallback renders are not cached; resized/OG variants are.
 - Fallback widths snap to preset buckets (64/128/256/512/1024/2048); numeric widths round to nearest.
 - If a raster asset exceeds size limits, the renderer attempts a resize; if it still fails and

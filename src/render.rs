@@ -73,6 +73,7 @@ macro_rules! layer_profile {
 }
 
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
+const NON_COMPOSABLE_ASSET_REVERT_ALT: &str = "0xdcc947e8";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
 
@@ -1394,6 +1395,7 @@ fn is_non_composable_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         let message = cause.to_string();
         message.contains(NON_COMPOSABLE_ASSET_REVERT)
+            || message.contains(NON_COMPOSABLE_ASSET_REVERT_ALT)
             || message.contains(COMPOSE_EQUIP_REVERT)
             || message.contains("RMRKNotComposableAsset")
             || message.contains("execution reverted")
@@ -2688,7 +2690,7 @@ fn derive_canvas_from_asset(
                 return Ok((width, height, false));
             }
         }
-        let tree = parse_svg(
+        let (tree, _) = parse_svg(
             bytes,
             max_svg_bytes,
             max_svg_nodes,
@@ -2788,6 +2790,7 @@ async fn load_layer(
             &blocking_semaphore,
             layer,
             layer_index,
+            None,
             debug_context.as_ref(),
         )
         .await?;
@@ -2822,8 +2825,9 @@ async fn load_layer(
     let resolve_result = assets
         .resolve_metadata(&layer.metadata_uri, prefer_thumb)
         .await;
-    let asset = match resolve_result {
+    let (asset, art_uri) = match resolve_result {
         Ok(Some(mut resolved)) => {
+            let mut art_uri = resolved.art_uri.clone();
             layer_profile!(
                 context,
                 layer,
@@ -2866,7 +2870,7 @@ async fn load_layer(
                         bytes = asset.bytes.len(),
                         art_uri = resolved.art_uri.as_str()
                     );
-                    asset
+                    (asset, art_uri)
                 }
                 Err(err) => {
                     layer_profile!(
@@ -2901,6 +2905,7 @@ async fn load_layer(
                                     resolved = thumb;
                                     let thumb_fetch_started = Instant::now();
                                     let asset = assets.fetch_asset(&resolved.art_uri).await?;
+                                    art_uri = resolved.art_uri.clone();
                                     layer_profile!(
                                         context,
                                         layer,
@@ -2910,7 +2915,7 @@ async fn load_layer(
                                         bytes = asset.bytes.len(),
                                         art_uri = resolved.art_uri.as_str()
                                     );
-                                    asset
+                                    (asset, art_uri)
                                 } else if is_optional_layer {
                                     warn!(
                                         error = ?err,
@@ -3082,7 +3087,7 @@ async fn load_layer(
                 fetch_direct_started.elapsed(),
                 bytes = asset.bytes.len()
             );
-            asset
+            (asset, layer.metadata_uri.clone())
         }
     };
     if let Some(context) = debug_context.as_ref() {
@@ -3103,6 +3108,7 @@ async fn load_layer(
         bytes = asset.bytes.len(),
         "fetched layer asset"
     );
+    let art_uri = Some(art_uri.as_str());
     let themed = apply_theme_if_svg(
         &asset.bytes,
         theme_replace.as_deref(),
@@ -3124,6 +3130,7 @@ async fn load_layer(
         &blocking_semaphore,
         layer,
         layer_index,
+        art_uri,
         debug_context.as_ref(),
     )
     .await?;
@@ -3168,6 +3175,7 @@ async fn rasterize_bytes(
     blocking_semaphore: &Arc<Semaphore>,
     layer: &Layer,
     layer_index: usize,
+    art_uri: Option<&str>,
     debug_context: Option<&DebugRenderContext>,
 ) -> Result<(RgbaImage, bool)> {
     let rasterize_started = Instant::now();
@@ -3185,6 +3193,7 @@ async fn rasterize_bytes(
             cache_lookup_started.elapsed(),
             cache_hit = cached.is_some(),
             bytes = bytes.len(),
+            art_uri = art_uri.unwrap_or("none"),
             canvas_width = canvas_width,
             canvas_height = canvas_height
         );
@@ -3226,50 +3235,82 @@ async fn rasterize_bytes(
         }
         let svg_bytes = bytes.to_vec();
         let blocking = blocking_semaphore.clone();
-        let (image, png_bytes, parse_ms, render_ms, image_ms, encode_ms) =
-            match spawn_blocking_with_semaphore(
-                blocking,
-                move || -> Result<(RgbaImage, Vec<u8>, u128, u128, u128, u128)> {
-                    let parse_started = Instant::now();
-                    let tree = parse_svg(
-                        &svg_bytes,
-                        max_svg_bytes,
-                        max_svg_nodes,
-                        max_raster_bytes,
-                        max_decoded_raster_pixels,
-                    )?;
-                    let parse_ms = parse_started.elapsed().as_millis();
-                    let render_started = Instant::now();
-                    let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
-                    let render_ms = render_started.elapsed().as_millis();
-                    let image_started = Instant::now();
-                    let image =
-                        RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
-                            .ok_or_else(|| anyhow!("failed to build raster image"))?;
-                    let image_ms = image_started.elapsed().as_millis();
-                    let encode_started = Instant::now();
-                    let mut png_bytes = Vec::new();
-                    image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
-                    let encode_ms = encode_started.elapsed().as_millis();
-                    Ok((image, png_bytes, parse_ms, render_ms, image_ms, encode_ms))
-                },
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    assets.observe_upstream_failure("svg_parse");
-                    layer_profile!(
-                        debug_context,
-                        layer,
-                        layer_index,
-                        "rasterize_svg_total",
-                        rasterize_started.elapsed(),
-                        status = "error"
-                    );
-                    return Err(err);
-                }
-            };
+        let (
+            image,
+            png_bytes,
+            parse_ms,
+            render_ms,
+            image_ms,
+            encode_ms,
+            stats,
+            svg_width,
+            svg_height,
+        ) = match spawn_blocking_with_semaphore(
+            blocking,
+            move || -> Result<(
+                RgbaImage,
+                Vec<u8>,
+                u128,
+                u128,
+                u128,
+                u128,
+                SvgComplexityStats,
+                u32,
+                u32,
+            )> {
+                let parse_started = Instant::now();
+                let (tree, stats) = parse_svg(
+                    &svg_bytes,
+                    max_svg_bytes,
+                    max_svg_nodes,
+                    max_raster_bytes,
+                    max_decoded_raster_pixels,
+                )?;
+                let parse_ms = parse_started.elapsed().as_millis();
+                let size = tree.size();
+                let svg_width = size.width().round() as u32;
+                let svg_height = size.height().round() as u32;
+                let render_started = Instant::now();
+                let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
+                let render_ms = render_started.elapsed().as_millis();
+                let image_started = Instant::now();
+                let image =
+                    RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
+                        .ok_or_else(|| anyhow!("failed to build raster image"))?;
+                let image_ms = image_started.elapsed().as_millis();
+                let encode_started = Instant::now();
+                let mut png_bytes = Vec::new();
+                image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+                let encode_ms = encode_started.elapsed().as_millis();
+                Ok((
+                    image,
+                    png_bytes,
+                    parse_ms,
+                    render_ms,
+                    image_ms,
+                    encode_ms,
+                    stats,
+                    svg_width,
+                    svg_height,
+                ))
+            },
+        )
+        .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                assets.observe_upstream_failure("svg_parse");
+                layer_profile!(
+                    debug_context,
+                    layer,
+                    layer_index,
+                    "rasterize_svg_total",
+                    rasterize_started.elapsed(),
+                    status = "error"
+                );
+                return Err(err);
+            }
+        };
         layer_profile!(
             debug_context,
             layer,
@@ -3277,6 +3318,19 @@ async fn rasterize_bytes(
             "svg_parse",
             Duration::from_millis(parse_ms as u64),
             bytes = bytes.len(),
+            svg_node_count = stats.node_count,
+            svg_width = svg_width,
+            svg_height = svg_height,
+            svg_linear_gradients = stats.linear_gradients,
+            svg_radial_gradients = stats.radial_gradients,
+            svg_gradient_stops = stats.gradient_stops,
+            svg_filter_defs = stats.filter_defs,
+            svg_filter_uses = stats.filter_uses,
+            svg_clip_paths = stats.clip_path_defs,
+            svg_clip_path_uses = stats.clip_path_uses,
+            svg_masks = stats.mask_defs,
+            svg_mask_uses = stats.mask_uses,
+            art_uri = art_uri.unwrap_or("none"),
             canvas_width = canvas_width,
             canvas_height = canvas_height
         );
@@ -3286,6 +3340,19 @@ async fn rasterize_bytes(
             layer_index,
             "svg_render",
             Duration::from_millis(render_ms as u64),
+            svg_node_count = stats.node_count,
+            svg_width = svg_width,
+            svg_height = svg_height,
+            svg_linear_gradients = stats.linear_gradients,
+            svg_radial_gradients = stats.radial_gradients,
+            svg_gradient_stops = stats.gradient_stops,
+            svg_filter_defs = stats.filter_defs,
+            svg_filter_uses = stats.filter_uses,
+            svg_clip_paths = stats.clip_path_defs,
+            svg_clip_path_uses = stats.clip_path_uses,
+            svg_masks = stats.mask_defs,
+            svg_mask_uses = stats.mask_uses,
+            art_uri = art_uri.unwrap_or("none"),
             canvas_width = canvas_width,
             canvas_height = canvas_height
         );
@@ -3487,13 +3554,27 @@ fn raster_limits(max_pixels: u64) -> image::Limits {
     limits
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct SvgComplexityStats {
+    node_count: usize,
+    linear_gradients: usize,
+    radial_gradients: usize,
+    gradient_stops: usize,
+    filter_defs: usize,
+    filter_uses: usize,
+    clip_path_defs: usize,
+    clip_path_uses: usize,
+    mask_defs: usize,
+    mask_uses: usize,
+}
+
 fn parse_svg(
     bytes: &[u8],
     max_svg_bytes: usize,
     max_svg_nodes: usize,
     max_raster_bytes: usize,
     max_decoded_raster_pixels: u64,
-) -> Result<usvg::Tree> {
+) -> Result<(usvg::Tree, SvgComplexityStats)> {
     if bytes.len() > max_svg_bytes {
         return Err(anyhow!("svg exceeds max size"));
     }
@@ -3528,11 +3609,56 @@ fn parse_svg(
         None
     });
     let tree = usvg::Tree::from_data(bytes, &options)?;
-    let node_count = count_nodes(tree.root());
-    if node_count > max_svg_nodes {
+    let stats = svg_complexity_stats(&tree);
+    if stats.node_count > max_svg_nodes {
         return Err(anyhow!("svg node count exceeds limit"));
     }
-    Ok(tree)
+    Ok((tree, stats))
+}
+
+fn svg_complexity_stats(tree: &usvg::Tree) -> SvgComplexityStats {
+    let gradient_stops = tree
+        .linear_gradients()
+        .iter()
+        .map(|gradient| gradient.stops().len())
+        .sum::<usize>()
+        .saturating_add(
+            tree.radial_gradients()
+                .iter()
+                .map(|gradient| gradient.stops().len())
+                .sum::<usize>(),
+        );
+    let mut stats = SvgComplexityStats {
+        node_count: 0,
+        linear_gradients: tree.linear_gradients().len(),
+        radial_gradients: tree.radial_gradients().len(),
+        gradient_stops,
+        filter_defs: tree.filters().len(),
+        filter_uses: 0,
+        clip_path_defs: tree.clip_paths().len(),
+        clip_path_uses: 0,
+        mask_defs: tree.masks().len(),
+        mask_uses: 0,
+    };
+    fn walk_group(group: &usvg::Group, stats: &mut SvgComplexityStats) {
+        stats.node_count = stats.node_count.saturating_add(1);
+        stats.filter_uses = stats.filter_uses.saturating_add(group.filters().len());
+        if group.clip_path().is_some() {
+            stats.clip_path_uses = stats.clip_path_uses.saturating_add(1);
+        }
+        if group.mask().is_some() {
+            stats.mask_uses = stats.mask_uses.saturating_add(1);
+        }
+        for child in group.children() {
+            stats.node_count = stats.node_count.saturating_add(1);
+            if let usvg::Node::Group(child_group) = child {
+                walk_group(child_group, stats);
+            }
+            child.subroots(|subroot| walk_group(subroot, stats));
+        }
+    }
+    walk_group(tree.root(), &mut stats);
+    stats
 }
 
 fn data_uri_raster_kind(data: Arc<Vec<u8>>, max_pixels: u64) -> Option<Arc<Vec<u8>>> {
@@ -4148,21 +4274,6 @@ fn parse_svg_length(lower: &str, name: &str) -> Option<u32> {
     let value = lower[start..end].trim();
     let trimmed = value.trim_end_matches("px");
     trimmed.parse::<f32>().ok().map(|v| v.round() as u32)
-}
-
-fn count_nodes(group: &usvg::Group) -> usize {
-    let mut count = 0usize;
-    let mut stack = vec![group];
-    while let Some(group) = stack.pop() {
-        count = count.saturating_add(1);
-        for child in group.children() {
-            count = count.saturating_add(1);
-            if let usvg::Node::Group(child_group) = child {
-                stack.push(child_group);
-            }
-        }
-    }
-    count
 }
 
 fn epoch_to_timestamp(epoch: Option<i64>, default: &Option<String>) -> Option<String> {
