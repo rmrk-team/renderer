@@ -1,5 +1,6 @@
 use crate::assets::AssetFetchError;
 use crate::canonical;
+use crate::chain::{is_contract_revert_error, revert_selector, SELECTOR_TOKEN_HAS_NO_ASSETS};
 use crate::config::{AccessMode, Config};
 use crate::failure_log::FailureLogEntry;
 use crate::fallbacks::{
@@ -50,7 +51,6 @@ const MAX_FORWARDED_IPS: usize = 20;
 const MIN_BEARER_TOKEN_LEN: usize = 20;
 const MAX_BEARER_TOKEN_LEN: usize = 128;
 const RATE_LIMIT_RETRY_AFTER_SECONDS: &str = "60";
-const TOP_ASSET_REVERT: &str = "0x3456866f";
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PlaceholderKey {
@@ -129,7 +129,14 @@ fn fallback_file_cache() -> &'static DashMap<FallbackFileCacheKey, FallbackFileC
 }
 
 fn is_top_asset_missing_error(err: &anyhow::Error) -> bool {
-    err.to_string().contains(TOP_ASSET_REVERT)
+    matches!(
+        revert_selector(err),
+        Some(selector) if selector == SELECTOR_TOKEN_HAS_NO_ASSETS
+    )
+}
+
+fn should_negative_cache_primary_asset(err: &anyhow::Error) -> bool {
+    is_contract_revert_error(err)
 }
 
 pub(crate) fn clear_fallback_file_cache() {
@@ -150,6 +157,70 @@ pub struct RenderQuery {
     pub fresh: Option<String>,
     pub debug: Option<String>,
     pub raw: Option<String>,
+}
+
+async fn apply_cache_policy(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+    provided: Option<String>,
+    cache_param_present: bool,
+    context: Option<&AccessContext>,
+) -> Result<(Option<String>, bool), ApiError> {
+    let mut cache_override = provided.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    let mut cache_param_present = cache_param_present && cache_override.is_some();
+    if cache_param_present {
+        let allow_cache = context.map(|ctx| ctx.allow_cache).unwrap_or(false);
+        if !allow_cache
+            && !anon_cache_epoch_allowed(state, chain, collection, cache_override.as_deref()).await?
+        {
+            cache_override = None;
+            cache_param_present = false;
+        }
+    }
+    let cache_timestamp = render::resolve_cache_timestamp(state, chain, collection, cache_override)
+        .await
+        .map_err(map_render_error_anyhow)?;
+    Ok((cache_timestamp, cache_param_present))
+}
+
+async fn anon_cache_epoch_allowed(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+    provided: Option<&str>,
+) -> Result<bool, ApiError> {
+    let Some(provided) = provided else {
+        return Ok(false);
+    };
+    let allowed = render::resolve_cache_timestamp(state, chain, collection, None)
+        .await
+        .map_err(map_render_error_anyhow)?;
+    let Some(allowed) = allowed else {
+        return Ok(false);
+    };
+    if provided == allowed {
+        return Ok(true);
+    }
+    let window = state.config.anon_cache_epoch_window_ms as i64;
+    if window == 0 {
+        return Ok(false);
+    }
+    let provided_value = provided.parse::<i64>().ok();
+    let allowed_value = allowed.parse::<i64>().ok();
+    match (provided_value, allowed_value) {
+        (Some(provided_value), Some(allowed_value)) => {
+            Ok((provided_value - allowed_value).abs() <= window)
+        }
+        _ => Ok(false),
+    }
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -329,8 +400,15 @@ async fn render_canonical(
     let started = Instant::now();
     let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
-    let cache_param_present = query.cache.is_some();
-    let cache_timestamp = query.cache;
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        query.cache.clone(),
+        query.cache.is_some(),
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
     let allow_fresh = context
         .as_ref()
@@ -521,8 +599,15 @@ async fn render_og(
     let started = Instant::now();
     let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
-    let cache_param_present = query.cache.is_some();
-    let cache_timestamp = query.cache;
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        query.cache.clone(),
+        query.cache.is_some(),
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
     let allow_fresh = context
         .as_ref()
@@ -694,7 +779,7 @@ async fn render_og(
 
 async fn render_legacy(
     State(state): State<Arc<AppState>>,
-    Path((chain, cache_timestamp, collection, token_id, asset_id, format)): Path<(
+    Path((chain, cache_epoch, collection, token_id, asset_id, format)): Path<(
         String,
         String,
         String,
@@ -757,14 +842,23 @@ async fn render_legacy(
     let raw_mode = debug_requested && allow_debug;
     let prefer_json = raw_mode || wants_json_response(&headers);
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        Some(cache_epoch),
+        true,
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let request = RenderRequest {
         chain,
         collection,
         token_id,
         asset_id,
         format,
-        cache_timestamp: Some(cache_timestamp),
-        cache_param_present: true,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -912,10 +1006,15 @@ async fn render_primary(
     let raw_mode = debug_requested && allow_debug;
     let prefer_json = raw_mode || wants_json_response(&headers);
     let approval_context = approval_context_from_access(context.as_ref().map(|ctx| &ctx.0));
-    let cache_timestamp =
-        render::resolve_cache_timestamp(&state, &chain, &collection, query.cache.clone())
-            .await
-            .map_err(map_render_error_anyhow)?;
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        query.cache.clone(),
+        query.cache.is_some(),
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let cache_stamp = cache_timestamp
         .clone()
         .unwrap_or_else(|| "none".to_string());
@@ -928,7 +1027,7 @@ async fn render_primary(
         asset_id: "primary".to_string(),
         format,
         cache_timestamp: cache_timestamp.clone(),
-        cache_param_present: query.cache.is_some(),
+        cache_param_present,
         width_param: width_param.clone(),
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay.clone(),
@@ -1008,6 +1107,12 @@ async fn render_primary(
                 asset_id
             }
             Err(err) => {
+                if should_negative_cache_primary_asset(&err) {
+                    state
+                        .primary_asset_cache
+                        .insert_negative(primary_cache_key.clone())
+                        .await;
+                }
                 if is_top_asset_missing_error(&err) {
                     warn!(
                         chain = %chain,
@@ -1031,10 +1136,6 @@ async fn render_primary(
                     )
                     .await;
                 }
-                state
-                    .primary_asset_cache
-                    .insert_negative(primary_cache_key.clone())
-                    .await;
                 let api_error = ApiError::from(err);
                 record_render_error_metrics(
                     &state,
@@ -1083,6 +1184,12 @@ async fn render_primary(
                         asset_id
                     }
                     Err(err) => {
+                        if should_negative_cache_primary_asset(&err) {
+                            state
+                                .primary_asset_cache
+                                .insert_negative(primary_cache_key.clone())
+                                .await;
+                        }
                         if is_top_asset_missing_error(&err) {
                             warn!(
                                 chain = %chain,
@@ -1106,10 +1213,6 @@ async fn render_primary(
                             )
                             .await;
                         }
-                        state
-                            .primary_asset_cache
-                            .insert_negative(primary_cache_key.clone())
-                            .await;
                         let api_error = ApiError::from(err);
                         record_render_error_metrics(
                             &state,
@@ -1286,8 +1389,15 @@ async fn head_render_canonical(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
-    let cache_param_present = query.cache.is_some();
-    let cache_timestamp = query.cache;
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        query.cache.clone(),
+        query.cache.is_some(),
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
     let debug_requested =
         parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
@@ -1330,8 +1440,15 @@ async fn head_render_og(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
-    let cache_param_present = query.cache.is_some();
-    let cache_timestamp = query.cache;
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        query.cache.clone(),
+        query.cache.is_some(),
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
     let debug_requested =
         parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
@@ -1361,7 +1478,7 @@ async fn head_render_og(
 
 async fn head_render_legacy(
     State(state): State<Arc<AppState>>,
-    Path((chain, cache_timestamp, collection, token_id, asset_id, format)): Path<(
+    Path((chain, cache_epoch, collection, token_id, asset_id, format)): Path<(
         String,
         String,
         String,
@@ -1375,6 +1492,15 @@ async fn head_render_legacy(
     let format = OutputFormat::from_extension(&format)
         .ok_or_else(|| ApiError::bad_request("unsupported image format"))?;
     let width_param = query.width.or(query.img_width);
+    let (cache_timestamp, cache_param_present) = apply_cache_policy(
+        &state,
+        &chain,
+        &collection,
+        Some(cache_epoch),
+        true,
+        context.as_ref().map(|ctx| &ctx.0),
+    )
+    .await?;
     let fresh = parse_fresh_flag(query.fresh.as_deref());
     let debug_requested =
         parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
@@ -1390,8 +1516,8 @@ async fn head_render_legacy(
         token_id,
         asset_id,
         format,
-        cache_timestamp: Some(cache_timestamp),
-        cache_param_present: true,
+        cache_timestamp,
+        cache_param_present,
         width_param,
         og_mode: query.og_image.unwrap_or(false),
         overlay: query.overlay,
@@ -3275,6 +3401,7 @@ struct AccessContext {
     identity_key: Arc<str>,
     client_key_id: Option<i64>,
     max_concurrent_renders_override: Option<usize>,
+    allow_cache: bool,
     allow_fresh: bool,
     allow_on_demand_approval: bool,
     allow_debug: bool,
@@ -3436,11 +3563,13 @@ pub async fn access_middleware(
     let key_active = key_info.as_ref().map(|key| key.active).unwrap_or(false);
     let allow_on_demand_approval = key_active || matches!(ip_rule.as_deref(), Some("allow"));
     let allow_debug = key_active || matches!(ip_rule.as_deref(), Some("allow"));
+    let allow_cache = key_active || matches!(ip_rule.as_deref(), Some("allow"));
 
     let ip_identity = ip.map(|ip| AccessContext {
         identity_key: ip_identity_key(&state.config, ip),
         client_key_id: None,
         max_concurrent_renders_override: None,
+        allow_cache,
         allow_fresh: false,
         allow_on_demand_approval,
         allow_debug,
@@ -3453,6 +3582,7 @@ pub async fn access_middleware(
             max_concurrent_renders_override: key
                 .max_concurrent_renders_override
                 .and_then(|value| value.try_into().ok()),
+            allow_cache,
             allow_fresh: key.allow_fresh,
             allow_on_demand_approval,
             allow_debug,
@@ -4231,6 +4361,7 @@ mod tests {
                 dir.path().join("fallbacks").to_string_lossy().to_string(),
             ),
             ("PINNING_ENABLED", "false".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let mut config = Config::from_env().unwrap();
         config.metrics_allow_ips = vec!["127.0.0.1/32".parse().unwrap()];
@@ -4288,6 +4419,7 @@ mod tests {
                 dir.path().join("fallbacks").to_string_lossy().to_string(),
             ),
             ("PINNING_ENABLED", "false".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;
@@ -4325,6 +4457,7 @@ mod tests {
             identity_key: Arc::from("client:1"),
             client_key_id: Some(1),
             max_concurrent_renders_override: None,
+            allow_cache: false,
             allow_fresh: false,
             allow_on_demand_approval: false,
             allow_debug: false,
@@ -4344,6 +4477,7 @@ mod tests {
             identity_key: Arc::from("client:1"),
             client_key_id: Some(1),
             max_concurrent_renders_override: None,
+            allow_cache: false,
             allow_fresh: false,
             allow_on_demand_approval: false,
             allow_debug: false,
@@ -4386,6 +4520,7 @@ mod tests {
             ("METRICS_PUBLIC", "false".to_string()),
             ("METRICS_ALLOW_IPS", "".to_string()),
             ("METRICS_REQUIRE_ADMIN_KEY", "false".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;
@@ -4422,6 +4557,7 @@ mod tests {
             ("METRICS_PUBLIC", "false".to_string()),
             ("METRICS_ALLOW_IPS", "".to_string()),
             ("METRICS_BEARER_TOKEN", "metrics-token-123".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;
@@ -4462,6 +4598,7 @@ mod tests {
             ("METRICS_PUBLIC", "false".to_string()),
             ("METRICS_ALLOW_IPS", "".to_string()),
             ("METRICS_REQUIRE_ADMIN_KEY", "false".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;
@@ -4508,6 +4645,7 @@ mod tests {
                 dir.path().join("fallbacks").to_string_lossy().to_string(),
             ),
             ("PINNING_ENABLED", "false".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let mut config = Config::from_env().unwrap();
         config.metrics_allow_ips = vec!["127.0.0.1/32".parse().unwrap()];
@@ -4548,6 +4686,7 @@ mod tests {
             ("METRICS_PUBLIC", "false".to_string()),
             ("METRICS_ALLOW_IPS", "".to_string()),
             ("METRICS_BEARER_TOKEN", "metrics-token-123".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
         let config = Config::from_env().unwrap();
         let state = build_state(config).await;

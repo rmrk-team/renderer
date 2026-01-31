@@ -2273,6 +2273,7 @@ mod tests {
             default_canvas_height: 1,
             default_cache_timestamp: None,
             default_cache_ttl: Duration::from_secs(0),
+            anon_cache_epoch_window_ms: 0,
             rpc_endpoints: HashMap::new(),
             render_utils_addresses: HashMap::new(),
             approval_contracts: HashMap::new(),

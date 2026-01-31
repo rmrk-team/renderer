@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::db::{Database, RpcEndpoint};
 use crate::metrics::Metrics;
 use anyhow::{Context, Result, anyhow};
+use ethers::contract::ContractError;
 use ethers::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,6 +10,7 @@ use std::future::Future;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use thiserror::Error;
 use tracing::warn;
 use url::Url;
 
@@ -135,6 +137,20 @@ abigen!(
     ]"#
 );
 
+pub(crate) const SELECTOR_TOKEN_HAS_NO_ASSETS: [u8; 4] = [0x34, 0x56, 0x86, 0x6f];
+pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET: [u8; 4] = [0x7a, 0x06, 0x25, 0x78];
+pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET_ALT: [u8; 4] = [0xdc, 0xc9, 0x47, 0xe8];
+pub(crate) const SELECTOR_COMPOSE_EQUIP_REVERT: [u8; 4] = [0x89, 0xba, 0x7e, 0x10];
+
+#[derive(Debug, Error)]
+#[error("contract call reverted")]
+pub struct ChainRevertError {
+    pub selector: Option<[u8; 4]>,
+    pub data: Vec<u8>,
+    #[source]
+    pub source: ContractError<Provider<Http>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FixedPart {
     pub part_id: u64,
@@ -185,6 +201,54 @@ struct EndpointHealth {
     cooldown_until: Option<Instant>,
 }
 
+fn selector_from_bytes(data: &[u8]) -> Option<[u8; 4]> {
+    if data.len() < 4 {
+        return None;
+    }
+    Some([data[0], data[1], data[2], data[3]])
+}
+
+fn map_contract_error(err: ContractError<Provider<Http>>) -> anyhow::Error {
+    if let ContractError::Revert(ref data) = err {
+        let bytes = data.to_vec();
+        let selector = selector_from_bytes(&bytes);
+        return anyhow::Error::new(ChainRevertError {
+            selector,
+            data: bytes,
+            source: err,
+        });
+    }
+    anyhow::Error::new(err)
+}
+
+pub(crate) fn revert_selector(err: &anyhow::Error) -> Option<[u8; 4]> {
+    for cause in err.chain() {
+        if let Some(revert) = cause.downcast_ref::<ChainRevertError>() {
+            return revert.selector;
+        }
+        if let Some(contract_err) = cause.downcast_ref::<ContractError<Provider<Http>>>() {
+            if let ContractError::Revert(data) = contract_err {
+                return selector_from_bytes(data.as_ref());
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn is_contract_revert_error(err: &anyhow::Error) -> bool {
+    for cause in err.chain() {
+        if cause.downcast_ref::<ChainRevertError>().is_some() {
+            return true;
+        }
+        if let Some(contract_err) = cause.downcast_ref::<ContractError<Provider<Http>>>() {
+            if matches!(contract_err, ContractError::Revert(_)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 impl ChainClient {
     pub fn new(config: Arc<Config>, db: Database, metrics: Arc<Metrics>) -> Self {
         Self {
@@ -219,7 +283,7 @@ impl ChainClient {
                         .compose_equippables(collection, token_id, asset_id)
                         .call()
                         .await
-                        .map_err(|err| err.into())
+                        .map_err(map_contract_error)
                 }
             })
             .await?;
@@ -284,7 +348,7 @@ impl ChainClient {
                             .get_asset_id_with_top_priority(collection, token_id)
                             .call()
                             .await
-                            .map_err(|err| err.into())
+                            .map_err(map_contract_error)
                     }
                 },
                 |err| !is_non_retryable_top_asset_error(err),
@@ -308,7 +372,7 @@ impl ChainClient {
                                     )
                                     .call()
                                     .await
-                                    .map_err(|err| err.into())
+                                    .map_err(map_contract_error)
                             }
                         },
                         |err| !is_non_retryable_top_asset_error(err),
@@ -340,7 +404,7 @@ impl ChainClient {
                         .get_asset_metadata(token_id, asset_id)
                         .call()
                         .await
-                        .map_err(|err| err.into())
+                        .map_err(map_contract_error)
                 }
             })
             .await?;
@@ -363,7 +427,7 @@ impl ChainClient {
                         .token_uri(token_id)
                         .call()
                         .await
-                        .map_err(|err| err.into())
+                        .map_err(map_contract_error)
                 }
             })
             .await?;
@@ -384,7 +448,7 @@ impl ChainClient {
                         .get_metadata_uri()
                         .call()
                         .await
-                        .map_err(|err| err.into())
+                        .map_err(map_contract_error)
                 }
             })
             .await?;
@@ -684,16 +748,7 @@ impl ChainClient {
 }
 
 fn is_non_retryable_top_asset_error(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("Contract call reverted")
-        || message.contains("execution reverted")
-        || message.contains("0x3456866f")
-        || message.contains("0x7a062578")
-}
-
-fn is_contract_revert_error(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("Contract call reverted") || message.contains("execution reverted")
+    is_contract_revert_error(err)
 }
 
 #[cfg(test)]
@@ -743,6 +798,7 @@ mod tests {
             default_canvas_height: 1,
             default_cache_timestamp: None,
             default_cache_ttl: Duration::from_secs(0),
+            anon_cache_epoch_window_ms: 0,
             rpc_endpoints,
             render_utils_addresses,
             approval_contracts: HashMap::new(),

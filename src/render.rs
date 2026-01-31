@@ -1,7 +1,10 @@
 use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
-use crate::chain::{ComposeResult, FixedPart, SlotPart};
+use crate::chain::{
+    ComposeResult, FixedPart, SlotPart, revert_selector, SELECTOR_COMPOSE_EQUIP_REVERT,
+    SELECTOR_NON_COMPOSABLE_ASSET, SELECTOR_NON_COMPOSABLE_ASSET_ALT,
+};
 use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
 #[cfg(test)]
@@ -72,9 +75,6 @@ macro_rules! layer_profile {
     }};
 }
 
-const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
-const NON_COMPOSABLE_ASSET_REVERT_ALT: &str = "0xdcc947e8";
-const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 pub const TOKEN_URI_FALLBACK_ASSET_ID: &str = "token_uri";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
 
@@ -1393,14 +1393,14 @@ fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
 }
 
 fn is_non_composable_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string();
-        message.contains(NON_COMPOSABLE_ASSET_REVERT)
-            || message.contains(NON_COMPOSABLE_ASSET_REVERT_ALT)
-            || message.contains(COMPOSE_EQUIP_REVERT)
-            || message.contains("RMRKNotComposableAsset")
-            || message.contains("execution reverted")
-    })
+    match revert_selector(err) {
+        Some(selector) => {
+            selector == SELECTOR_NON_COMPOSABLE_ASSET
+                || selector == SELECTOR_NON_COMPOSABLE_ASSET_ALT
+                || selector == SELECTOR_COMPOSE_EQUIP_REVERT
+        }
+        None => false,
+    }
 }
 
 fn is_asset_too_large_error(err: &anyhow::Error) -> bool {
@@ -4627,6 +4627,7 @@ mod tests {
                 serde_json::json!({ "base": render_utils }).to_string(),
             ),
             ("ACCESS_MODE", "open".to_string()),
+            ("I_KNOW_WHAT_I_AM_DOING", "true".to_string()),
         ]);
 
         let config = Config::from_env().context("config")?;

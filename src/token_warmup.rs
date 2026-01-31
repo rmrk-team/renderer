@@ -1,6 +1,10 @@
 use crate::assets::AssetFetchError;
 use crate::canonical;
-use crate::chain::{ComposeResult, FixedPart};
+use crate::chain::{
+    ComposeResult, FixedPart, is_contract_revert_error, revert_selector,
+    SELECTOR_COMPOSE_EQUIP_REVERT, SELECTOR_NON_COMPOSABLE_ASSET,
+    SELECTOR_NON_COMPOSABLE_ASSET_ALT, SELECTOR_TOKEN_HAS_NO_ASSETS,
+};
 use crate::db::TokenWarmupItem;
 use crate::pinning::PinnedAssetLocation;
 use crate::state::AppState;
@@ -11,11 +15,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
-
-const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
-const NON_COMPOSABLE_ASSET_REVERT_ALT: &str = "0xdcc947e8";
-const TOP_ASSET_REVERT: &str = "0x3456866f";
-const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
 
 #[derive(Debug, Deserialize)]
 pub struct TokenWarmupRequest {
@@ -529,26 +528,19 @@ fn resolve_tokens(state: &AppState, request: &TokenWarmupRequest) -> Result<Vec<
 }
 
 fn is_non_composable_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string();
-        message.contains(NON_COMPOSABLE_ASSET_REVERT)
-            || message.contains(NON_COMPOSABLE_ASSET_REVERT_ALT)
-            || message.contains(COMPOSE_EQUIP_REVERT)
-            || message.contains("RMRKNotComposableAsset")
-            || message.contains("execution reverted")
-    })
+    match revert_selector(err) {
+        Some(selector) => {
+            selector == SELECTOR_NON_COMPOSABLE_ASSET
+                || selector == SELECTOR_NON_COMPOSABLE_ASSET_ALT
+                || selector == SELECTOR_COMPOSE_EQUIP_REVERT
+        }
+        None => false,
+    }
 }
 
 fn is_top_asset_missing_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        let message = cause.to_string();
-        message.contains(TOP_ASSET_REVERT)
-            || message.contains("Contract call reverted")
-            || message.contains("execution reverted")
-    })
-}
-
-fn is_contract_revert_error(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("Contract call reverted") || message.contains("execution reverted")
+    matches!(
+        revert_selector(err),
+        Some(selector) if selector == SELECTOR_TOKEN_HAS_NO_ASSETS
+    )
 }

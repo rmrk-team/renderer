@@ -35,6 +35,7 @@ pub struct Config {
     pub default_canvas_height: u32,
     pub default_cache_timestamp: Option<String>,
     pub default_cache_ttl: Duration,
+    pub anon_cache_epoch_window_ms: u64,
     pub rpc_endpoints: HashMap<String, Vec<String>>,
     pub render_utils_addresses: HashMap<String, String>,
     pub approval_contracts: HashMap<String, String>,
@@ -280,6 +281,7 @@ impl Config {
         let default_cache_timestamp = parse_default_cache_timestamp()?;
         let default_cache_ttl =
             Duration::from_secs(parse_u64("DEFAULT_CACHE_TTL_SECONDS", 604_800));
+        let anon_cache_epoch_window_ms = parse_u64("ANON_CACHE_EPOCH_WINDOW_MS", 0);
 
         let rpc_endpoints = normalize_chain_map(
             parse_json_env::<HashMap<String, Vec<String>>>("RPC_ENDPOINTS").unwrap_or_default(),
@@ -394,6 +396,28 @@ impl Config {
         let api_key_cache_ttl = Duration::from_secs(parse_u64("API_KEY_CACHE_TTL_SECONDS", 300));
         let api_key_cache_capacity = parse_usize("API_KEY_CACHE_CAPACITY", 10_000);
         let track_keys_in_open_mode = parse_bool("TRACK_KEYS_IN_OPEN_MODE", false);
+        let allow_unsafe_open = parse_bool("I_KNOW_WHAT_I_AM_DOING", false);
+        let rate_limits_enabled = rate_limit_per_minute > 0
+            || rate_limit_burst > 0
+            || auth_failure_rate_limit_per_minute > 0
+            || auth_failure_rate_limit_burst > 0
+            || key_rate_limit_per_minute > 0
+            || key_rate_limit_burst > 0;
+        if access_mode == AccessMode::Open && !rate_limits_enabled {
+            if allow_unsafe_open {
+                warn!(
+                    "ACCESS_MODE=open with all rate limits disabled; \
+set RATE_LIMIT_* / AUTH_FAILURE_RATE_LIMIT_* / KEY_RATE_LIMIT_* or unset \
+I_KNOW_WHAT_I_AM_DOING"
+                );
+            } else {
+                return Err(anyhow!(
+                    "ACCESS_MODE=open requires at least one rate limiter; \
+set RATE_LIMIT_* / AUTH_FAILURE_RATE_LIMIT_* / KEY_RATE_LIMIT_* or \
+I_KNOW_WHAT_I_AM_DOING=true to bypass"
+                ));
+            }
+        }
         let trusted_proxies = parse_trusted_proxies("TRUSTED_PROXY_CIDRS")?;
         warn_on_broad_proxy_ranges(&trusted_proxies);
         let usage_tracking_enabled = parse_bool("USAGE_TRACKING_ENABLED", true);
@@ -512,6 +536,7 @@ impl Config {
             default_canvas_height,
             default_cache_timestamp,
             default_cache_ttl,
+            anon_cache_epoch_window_ms,
             rpc_endpoints,
             render_utils_addresses,
             approval_contracts,
@@ -1017,6 +1042,7 @@ mod tests {
             unsafe { env::set_var("ADMIN_PASSWORD", "test") };
             unsafe { env::set_var("RPC_ENDPOINTS", r#"{"base":["https://example.org"]}"#) };
             unsafe { env::set_var("RENDER_UTILS_ADDRESSES", r#"{"base":"0x123"}"#) };
+            unsafe { env::set_var("I_KNOW_WHAT_I_AM_DOING", "true") };
             let config = Config::from_env().unwrap();
             assert_eq!(
                 config.rpc_endpoints.get("base").unwrap(),
@@ -1025,6 +1051,7 @@ mod tests {
             unsafe { env::remove_var("ADMIN_PASSWORD") };
             unsafe { env::remove_var("RPC_ENDPOINTS") };
             unsafe { env::remove_var("RENDER_UTILS_ADDRESSES") };
+            unsafe { env::remove_var("I_KNOW_WHAT_I_AM_DOING") };
         });
     }
 }
