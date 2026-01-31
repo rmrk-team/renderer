@@ -161,6 +161,12 @@ Raster assets larger than `MAX_RASTER_BYTES` are resized (bounded by
 still too large and `thumbnailUri` is present, the renderer falls back to the
 thumbnail for both canvas derivation and render.
 
+**Top-asset lookup fallback:** if primary asset lookup reverts with
+`0x3456866f`, the renderer treats the token as **single-layer** by calling
+`tokenURI()` and rendering the resolved metadata URI directly (catalog address
+is zero). Caching behavior matches other fallback renders (original-size is not
+cached; resized/OG variants are cacheable).
+
 ### 4.2 Canonical Canvas Size Derivation
 
 **Goal:** determine the “native” coordinate system for the collection (e.g., Kanaria is **1080×1512**, not square).

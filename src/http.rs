@@ -12,7 +12,8 @@ use crate::metrics;
 use crate::rate_limit::RateLimitInfo;
 use crate::render::{
     ApprovalCheckContext, OutputFormat, RenderInputError, RenderKeyLimit, RenderLimitError,
-    RenderRequest, RenderTimeoutError, render_token_with_limit_checked,
+    RenderRequest, RenderTimeoutError, TOKEN_URI_FALLBACK_ASSET_ID,
+    render_token_with_limit_checked,
 };
 use crate::state::{AppState, TokenOverrideEntry, token_override_cache_key};
 use crate::usage::UsageEvent;
@@ -49,6 +50,7 @@ const MAX_FORWARDED_IPS: usize = 20;
 const MIN_BEARER_TOKEN_LEN: usize = 20;
 const MAX_BEARER_TOKEN_LEN: usize = 128;
 const RATE_LIMIT_RETRY_AFTER_SECONDS: &str = "60";
+const TOP_ASSET_REVERT: &str = "0x3456866f";
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PlaceholderKey {
@@ -124,6 +126,10 @@ fn fallback_cache() -> &'static DashMap<FallbackCacheKey, Arc<Vec<u8>>> {
 
 fn fallback_file_cache() -> &'static DashMap<FallbackFileCacheKey, FallbackFileCacheEntry> {
     FALLBACK_FILE_CACHE.get_or_init(DashMap::new)
+}
+
+fn is_top_asset_missing_error(err: &anyhow::Error) -> bool {
+    err.to_string().contains(TOP_ASSET_REVERT)
 }
 
 pub(crate) fn clear_fallback_file_cache() {
@@ -321,7 +327,7 @@ async fn render_canonical(
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let started = Instant::now();
-    let width_param = query.width.or(query.img_width);
+    let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
@@ -513,7 +519,7 @@ async fn render_og(
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let started = Instant::now();
-    let width_param = query.width.or(query.img_width);
+    let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
     let cache_param_present = query.cache.is_some();
     let cache_timestamp = query.cache;
@@ -706,7 +712,7 @@ async fn render_legacy(
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let started = Instant::now();
-    let width_param = query.width.or(query.img_width);
+    let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
     let allow_fresh = context
@@ -895,7 +901,7 @@ async fn render_primary(
         .map_err(map_render_error_anyhow)?;
     let (chain, collection) = canonicalize_chain_collection(&state, &chain, &collection)?;
     let started = Instant::now();
-    let width_param = query.width.or(query.img_width);
+    let width_param = query.width.clone().or_else(|| query.img_width.clone());
     let placeholder_width = width_param.clone();
     let debug_requested =
         parse_bool_flag(query.debug.as_deref()) || parse_bool_flag(query.raw.as_deref());
@@ -1002,6 +1008,29 @@ async fn render_primary(
                 asset_id
             }
             Err(err) => {
+                if is_top_asset_missing_error(&err) {
+                    warn!(
+                        chain = %chain,
+                        collection = %collection,
+                        token_id = %token_id,
+                        error = ?err,
+                        "top asset lookup reverted; falling back to token URI"
+                    );
+                    return render_canonical(
+                        State(state.clone()),
+                        Path((
+                            chain,
+                            collection,
+                            token_id,
+                            TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
+                            format.extension().to_string(),
+                        )),
+                        Query(query),
+                        headers,
+                        context,
+                    )
+                    .await;
+                }
                 state
                     .primary_asset_cache
                     .insert_negative(primary_cache_key.clone())
@@ -1054,6 +1083,29 @@ async fn render_primary(
                         asset_id
                     }
                     Err(err) => {
+                        if is_top_asset_missing_error(&err) {
+                            warn!(
+                                chain = %chain,
+                                collection = %collection,
+                                token_id = %token_id,
+                                error = ?err,
+                                "top asset lookup reverted; falling back to token URI"
+                            );
+                            return render_canonical(
+                                State(state.clone()),
+                                Path((
+                                    chain,
+                                    collection,
+                                    token_id,
+                                    TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
+                                    format.extension().to_string(),
+                                )),
+                                Query(query),
+                                headers,
+                                context,
+                            )
+                            .await;
+                        }
                         state
                             .primary_asset_cache
                             .insert_negative(primary_cache_key.clone())

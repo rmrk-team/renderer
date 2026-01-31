@@ -75,6 +75,7 @@ macro_rules! layer_profile {
 const NON_COMPOSABLE_ASSET_REVERT: &str = "0x7a062578";
 const NON_COMPOSABLE_ASSET_REVERT_ALT: &str = "0xdcc947e8";
 const COMPOSE_EQUIP_REVERT: &str = "0x89ba7e10";
+pub const TOKEN_URI_FALLBACK_ASSET_ID: &str = "token_uri";
 const SLOW_RENDER_WARN_SECS: u64 = 10;
 
 #[cfg(test)]
@@ -1506,87 +1507,136 @@ async fn load_compose_for_request(
         }
     }
 
-    let compose_started = Instant::now();
-    let refresh_result = state
-        .chain
-        .compose_equippables(chain, collection, token_id, asset_id)
-        .await;
-    debug!(
-        step = "compose_equippables",
-        elapsed_ms = compose_started.elapsed().as_millis(),
-        chain = %chain,
-        collection = %collection,
-        token_id = %token_id,
-        asset_id = %asset_id,
-        status = if refresh_result.is_ok() { "ok" } else { "error" },
-        "compose profile"
-    );
-    let (compose, fallback_used) = match refresh_result {
-        Ok(compose) => (compose, false),
-        Err(err) => {
-            if !is_non_composable_error(&err) {
-                let record_started = Instant::now();
-                let _ = state
-                    .db
-                    .record_token_state_error(
-                        chain,
-                        collection,
-                        token_id,
-                        asset_id,
-                        &err.to_string(),
-                        expires_at,
-                    )
-                    .await;
+    let (compose, fallback_used) = if asset_id == TOKEN_URI_FALLBACK_ASSET_ID {
+        let token_uri_started = Instant::now();
+        let token_uri = match state.chain.get_token_uri(chain, collection, token_id).await {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    error = ?err,
+                    "token URI lookup failed"
+                );
+                return Err(err);
+            }
+        };
+        let token_uri = token_uri.trim();
+        if token_uri.is_empty() {
+            warn!(
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                "token URI empty"
+            );
+            return Err(anyhow!("token URI empty"));
+        }
+        debug!(
+            step = "compose_fallback_token_uri",
+            elapsed_ms = token_uri_started.elapsed().as_millis(),
+            chain = %chain,
+            collection = %collection,
+            token_id = %token_id,
+            asset_id = %asset_id,
+            "compose profile"
+        );
+        (
+            ComposeResult {
+                metadata_uri: token_uri.to_string(),
+                catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                fixed_parts: vec![FixedPart {
+                    part_id: 0,
+                    z: 0,
+                    metadata_uri: token_uri.to_string(),
+                }],
+                slot_parts: Vec::<SlotPart>::new(),
+            },
+            true,
+        )
+    } else {
+        let compose_started = Instant::now();
+        let refresh_result = state
+            .chain
+            .compose_equippables(chain, collection, token_id, asset_id)
+            .await;
+        debug!(
+            step = "compose_equippables",
+            elapsed_ms = compose_started.elapsed().as_millis(),
+            chain = %chain,
+            collection = %collection,
+            token_id = %token_id,
+            asset_id = %asset_id,
+            status = if refresh_result.is_ok() { "ok" } else { "error" },
+            "compose profile"
+        );
+        match refresh_result {
+            Ok(compose) => (compose, false),
+            Err(err) => {
+                if !is_non_composable_error(&err) {
+                    let record_started = Instant::now();
+                    let _ = state
+                        .db
+                        .record_token_state_error(
+                            chain,
+                            collection,
+                            token_id,
+                            asset_id,
+                            &err.to_string(),
+                            expires_at,
+                        )
+                        .await;
+                    debug!(
+                        step = "compose_record_error",
+                        elapsed_ms = record_started.elapsed().as_millis(),
+                        chain = %chain,
+                        collection = %collection,
+                        token_id = %token_id,
+                        asset_id = %asset_id,
+                        "compose profile"
+                    );
+                    if let Some(compose) = cached_compose {
+                        return Ok((compose, cached_fallback));
+                    }
+                    return Err(err);
+                }
                 debug!(
-                    step = "compose_record_error",
-                    elapsed_ms = record_started.elapsed().as_millis(),
+                    error = ?err,
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    asset_id = %asset_id,
+                    "asset is non-composable; falling back to static asset metadata"
+                );
+                let metadata_started = Instant::now();
+                let metadata_uri = state
+                    .chain
+                    .get_asset_metadata(chain, collection, token_id, asset_id)
+                    .await?;
+                debug!(
+                    step = "compose_fallback_metadata",
+                    elapsed_ms = metadata_started.elapsed().as_millis(),
                     chain = %chain,
                     collection = %collection,
                     token_id = %token_id,
                     asset_id = %asset_id,
                     "compose profile"
                 );
-                if let Some(compose) = cached_compose {
-                    return Ok((compose, cached_fallback));
-                }
-                return Err(err);
+                let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
+                (
+                    ComposeResult {
+                        metadata_uri: metadata_uri.clone(),
+                        catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
+                        fixed_parts: vec![FixedPart {
+                            part_id,
+                            z: 0,
+                            metadata_uri,
+                        }],
+                        slot_parts: Vec::<SlotPart>::new(),
+                    },
+                    true,
+                )
             }
-            debug!(
-                error = ?err,
-                chain = %chain,
-                collection = %collection,
-                token_id = %token_id,
-                asset_id = %asset_id,
-                "asset is non-composable; falling back to static asset metadata"
-            );
-            let metadata_started = Instant::now();
-            let metadata_uri = state
-                .chain
-                .get_asset_metadata(chain, collection, token_id, asset_id)
-                .await?;
-            debug!(
-                step = "compose_fallback_metadata",
-                elapsed_ms = metadata_started.elapsed().as_millis(),
-                chain = %chain,
-                collection = %collection,
-                token_id = %token_id,
-                asset_id = %asset_id,
-                "compose profile"
-            );
-            let part_id = asset_id.parse::<u64>().context("invalid asset id")?;
-            (
-                ComposeResult {
-                    metadata_uri: metadata_uri.clone(),
-                    catalog_address: "0x0000000000000000000000000000000000000000".to_string(),
-                    fixed_parts: vec![FixedPart {
-                        part_id,
-                        z: 0,
-                        metadata_uri,
-                    }],
-                    slot_parts: Vec::<SlotPart>::new(),
-                },
-                true,
-            )
         }
     };
 
@@ -4021,7 +4071,9 @@ pub(crate) fn validate_render_params(
     validate_collection_address(collection)?;
     validate_numeric_param(token_id, 78, "token_id")?;
     if let Some(asset_id) = asset_id {
-        validate_numeric_param(asset_id, 20, "asset_id")?;
+        if asset_id != TOKEN_URI_FALLBACK_ASSET_ID {
+            validate_numeric_param(asset_id, 20, "asset_id")?;
+        }
     }
     Ok(())
 }
