@@ -250,7 +250,6 @@ async fn resolve_catalog_address(
     if let (Some(token_id), Some(asset_id)) =
         (request.token_id.as_deref(), request.asset_id.as_deref())
     {
-        let _permit = state.rpc_semaphore.acquire().await?;
         let compose = state
             .chain
             .compose_equippables(chain, collection, token_id, asset_id)

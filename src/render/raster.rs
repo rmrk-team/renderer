@@ -61,10 +61,25 @@ pub(super) async fn rasterize_bytes(
     if is_svg(bytes) {
         let normalized_svg = normalize_svg_bytes(bytes);
         let cache_key = sha256_hex_bytes(normalized_svg.as_ref());
+        let fast_path_dims =
+            svg_fast_path_dimensions(canvas_width, canvas_height, target_width, og_mode, config);
+        let fast_cache_key =
+            fast_path_dims.map(|(width, height)| format!("{cache_key}-fast-{width}x{height}"));
         let cache_lookup_started = Instant::now();
-        let cached = assets
+        let mut cached = assets
             .fetch_raster_cache(&cache_key, canvas_width, canvas_height)
             .await?;
+        let mut cache_key_used = cache_key.clone();
+        if cached.is_none() {
+            if let Some(fast_key) = fast_cache_key.as_deref() {
+                cached = assets
+                    .fetch_raster_cache(fast_key, canvas_width, canvas_height)
+                    .await?;
+                if cached.is_some() {
+                    cache_key_used = fast_key.to_string();
+                }
+            }
+        }
         layer_profile!(
             debug_context,
             layer,
@@ -109,7 +124,7 @@ pub(super) async fn rasterize_bytes(
                 Err(_) => {
                     assets.observe_upstream_failure("decode");
                     let _ = assets
-                        .remove_raster_cache(&cache_key, canvas_width, canvas_height)
+                        .remove_raster_cache(&cache_key_used, canvas_width, canvas_height)
                         .await;
                 }
             }
@@ -162,8 +177,6 @@ pub(super) async fn rasterize_bytes(
             config.heavy_svg_node_threshold,
             config.heavy_svg_feature_threshold,
         );
-        let fast_path_dims =
-            svg_fast_path_dimensions(canvas_width, canvas_height, target_width, og_mode, config);
         let heavy_permit = if is_heavy {
             Some(heavy_svg_semaphore.clone().acquire_owned().await?)
         } else {
@@ -300,8 +313,15 @@ pub(super) async fn rasterize_bytes(
             png_bytes = png_bytes.len()
         );
         let cache_store_started = Instant::now();
+        let cache_store_key = if fast_path {
+            fast_cache_key
+                .as_deref()
+                .unwrap_or(cache_key.as_str())
+        } else {
+            cache_key.as_str()
+        };
         assets
-            .store_raster_cache(&cache_key, canvas_width, canvas_height, &png_bytes)
+            .store_raster_cache(cache_store_key, canvas_width, canvas_height, &png_bytes)
             .await?;
         layer_profile!(
             debug_context,

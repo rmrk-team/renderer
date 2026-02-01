@@ -276,11 +276,17 @@ renders. When `cache=` is omitted, the renderer prefers a collection `cache_epoc
 
 ```env
 TOKEN_STATE_CHECK_TTL_SECONDS=86400
+TOKEN_STATE_ERROR_TTL_SECONDS=300
+TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS=3600
+COLLECTION_CAPABILITIES_TTL_SECONDS=86400
 FRESH_RATE_LIMIT_SECONDS=300
 FRESH_REQUEST_RETENTION_DAYS=7
 ```
 
 - `TOKEN_STATE_CHECK_TTL_SECONDS` controls how long token state is considered fresh.
+- `TOKEN_STATE_ERROR_TTL_SECONDS` is the short TTL for cached token-state failures.
+- `TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS` is the longer TTL for deterministic reverts.
+- `COLLECTION_CAPABILITIES_TTL_SECONDS` controls how long ERC-165 interface detection is cached.
 - `FRESH_RATE_LIMIT_SECONDS` enforces the per-NFT cooldown for `?fresh=1`.
 - `FRESH_REQUEST_RETENTION_DAYS` prunes old `fresh=1` limiter rows (0 disables cleanup).
 - `?fresh=1` forces an on-chain state refresh, returns `Cache-Control: no-store`, and
@@ -663,6 +669,9 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
   -d '{"chain":"base","collection_address":"0x...","approved":true}' \
   http://localhost:8080/admin/api/collections
 ```
+
+Optional `force_strategy` overrides interface detection for a collection. Values:
+`equippable`, `multiasset`, `erc721metadata`, `fallback_only` (use `auto` or omit to keep auto).
 
 ### Refresh canvas size
 

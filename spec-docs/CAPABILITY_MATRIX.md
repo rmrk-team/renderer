@@ -14,3 +14,4 @@ Additional behavior:
 - Token-only routes redirect to the resolved primary asset when possible.
 - The renderer uses the `token_uri` fallback asset ID when it must render from `tokenURI`.
 - Overlay and background variants are encoded into cache keys and do not affect interface selection.
+- Admin overrides can force a strategy per collection (`equippable`, `multiasset`, `erc721metadata`, `fallback_only`).

@@ -224,6 +224,12 @@ async fn upsert_collection(
     let (chain, collection_address) =
         canonicalize_chain_collection(&state, &payload.chain, &payload.collection_address)?;
     let collection_key = collection_address.clone();
+    let force_strategy = payload
+        .force_strategy
+        .as_deref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
     let input = AdminCollectionInput {
         chain,
         collection_address,
@@ -232,6 +238,7 @@ async fn upsert_collection(
         watermark_overlay_uri: payload.watermark_overlay_uri,
         warmup_strategy: payload.warmup_strategy,
         approved: payload.approved,
+        force_strategy,
     };
     state.db.upsert_collection_config(&input).await?;
     state
@@ -269,6 +276,7 @@ async fn approve_collection(
         watermark_overlay_uri: None,
         warmup_strategy: None,
         approved: Some(payload.approved),
+        force_strategy: None,
     };
     state.db.upsert_collection_config(&input).await?;
     state
@@ -2395,6 +2403,8 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
+            token_state_error_ttl_seconds: 0,
+            token_state_error_permanent_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
@@ -2411,6 +2421,7 @@ mod tests {
             status_public: false,
             landing_public: false,
             landing: None,
+            collection_capabilities_ttl_seconds: 0,
         }
     }
 

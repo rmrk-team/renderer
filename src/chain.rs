@@ -11,6 +11,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::Semaphore;
 use tracing::warn;
 use url::Url;
 
@@ -137,10 +138,28 @@ abigen!(
     ]"#
 );
 
+abigen!(
+    ERC721,
+    r#"[
+        function ownerOf(uint256) view returns (address)
+    ]"#
+);
+
+abigen!(
+    ERC165,
+    r#"[
+        function supportsInterface(bytes4 interfaceId) view returns (bool)
+    ]"#
+);
+
 pub(crate) const SELECTOR_TOKEN_HAS_NO_ASSETS: [u8; 4] = [0x34, 0x56, 0x86, 0x6f];
 pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET: [u8; 4] = [0x7a, 0x06, 0x25, 0x78];
 pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET_ALT: [u8; 4] = [0xdc, 0xc9, 0x47, 0xe8];
 pub(crate) const SELECTOR_COMPOSE_EQUIP_REVERT: [u8; 4] = [0x89, 0xba, 0x7e, 0x10];
+pub(crate) const INTERFACE_ID_ERC165: [u8; 4] = [0x01, 0xff, 0xc9, 0xa7];
+pub(crate) const INTERFACE_ID_ERC721_METADATA: [u8; 4] = [0x5b, 0x5e, 0x13, 0x9f];
+pub(crate) const INTERFACE_ID_ERC5773: [u8; 4] = [0x06, 0xb4, 0x32, 0x9a];
+pub(crate) const INTERFACE_ID_ERC6220: [u8; 4] = [0x28, 0xbc, 0x9a, 0xe4];
 
 #[derive(Debug, Error)]
 #[error("contract call reverted")]
@@ -193,6 +212,7 @@ pub struct ChainClient {
     endpoint_cache: Arc<Mutex<HashMap<String, Vec<RpcEndpoint>>>>,
     endpoint_health: Arc<Mutex<HashMap<String, EndpointHealth>>>,
     metrics: Arc<Metrics>,
+    rpc_semaphore: Arc<Semaphore>,
 }
 
 #[derive(Debug, Clone)]
@@ -257,7 +277,12 @@ pub(crate) fn is_contract_revert_error(err: &anyhow::Error) -> bool {
 }
 
 impl ChainClient {
-    pub fn new(config: Arc<Config>, db: Database, metrics: Arc<Metrics>) -> Self {
+    pub fn new(
+        config: Arc<Config>,
+        db: Database,
+        metrics: Arc<Metrics>,
+        rpc_semaphore: Arc<Semaphore>,
+    ) -> Self {
         Self {
             config,
             db,
@@ -265,7 +290,50 @@ impl ChainClient {
             endpoint_cache: Arc::new(Mutex::new(HashMap::new())),
             endpoint_health: Arc::new(Mutex::new(HashMap::new())),
             metrics,
+            rpc_semaphore,
         }
+    }
+
+    pub async fn supports_interface(
+        &self,
+        chain: &str,
+        collection: &str,
+        interface_id: [u8; 4],
+    ) -> Result<bool> {
+        let collection = Address::from_str(collection)?;
+        let result = self
+            .call_with_failover(chain, move |provider| {
+                let contract = ERC165::new(collection, provider);
+                async move {
+                    contract
+                        .supports_interface(interface_id)
+                        .call()
+                        .await
+                        .map_err(map_contract_error)
+                }
+            })
+            .await;
+        match result {
+            Ok(value) => Ok(value),
+            Err(err) if is_contract_revert_error(&err) => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub async fn owner_of(&self, chain: &str, collection: &str, token_id: &str) -> Result<Address> {
+        let collection = Address::from_str(collection)?;
+        let token_id = U256::from_dec_str(token_id)?;
+        self.call_with_failover(chain, move |provider| {
+            let contract = ERC721::new(collection, provider);
+            async move {
+                contract
+                    .owner_of(token_id)
+                    .call()
+                    .await
+                    .map_err(map_contract_error)
+            }
+        })
+        .await
     }
 
     pub async fn compose_equippables(
@@ -622,6 +690,7 @@ impl ChainClient {
         Fut: Future<Output = Result<T>>,
         C: Fn(&anyhow::Error) -> bool,
     {
+        let _permit = self.rpc_semaphore.clone().acquire_owned().await?;
         let endpoints = self.endpoints_for_chain(chain).await?;
         let now = Instant::now();
         let mut available = Vec::new();
@@ -911,6 +980,8 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
+            token_state_error_ttl_seconds: 0,
+            token_state_error_permanent_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
@@ -927,6 +998,7 @@ mod tests {
             status_public: false,
             landing_public: false,
             landing: None,
+            collection_capabilities_ttl_seconds: 0,
         }
     }
 
@@ -975,7 +1047,13 @@ mod tests {
         );
         let db = Database::new(&config).await.unwrap();
         let metrics = Arc::new(crate::metrics::Metrics::new(&config));
-        let client = ChainClient::new(Arc::new(config), db, metrics);
+        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+            usize::MAX
+        } else {
+            config.max_concurrent_rpc_calls
+        };
+        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+        let client = ChainClient::new(Arc::new(config), db, metrics, rpc_semaphore);
 
         let asset_id = client
             .get_top_asset_id("base", &collection, &token_id)

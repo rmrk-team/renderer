@@ -183,7 +183,18 @@ async fn main() -> anyhow::Result<()> {
         ipfs_semaphore.clone(),
         metrics.clone(),
     )?;
-    let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+    let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+        usize::MAX
+    } else {
+        config.max_concurrent_rpc_calls
+    };
+    let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+    let chain = ChainClient::new(
+        Arc::new(config.clone()),
+        db.clone(),
+        metrics.clone(),
+        rpc_semaphore.clone(),
+    );
     let (usage_tx, usage_rx) = if usage_tracking_enabled {
         let capacity = usage_channel_capacity.max(1);
         let (tx, rx) = mpsc::channel(capacity);
@@ -220,6 +231,7 @@ async fn main() -> anyhow::Result<()> {
         assets,
         chain,
         metrics,
+        rpc_semaphore,
         usage_tx,
         render_queue_tx,
         failure_log_tx,
@@ -464,6 +476,8 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
+            token_state_error_ttl_seconds: 0,
+            token_state_error_permanent_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,
             primary_asset_cache_ttl: Duration::from_secs(0),
@@ -484,6 +498,7 @@ mod tests {
                 file: "index.html".to_string(),
                 strict_headers: true,
             }),
+            collection_capabilities_ttl_seconds: 0,
         }
     }
 
@@ -514,9 +529,29 @@ mod tests {
             metrics.clone(),
         )
         .unwrap();
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+            usize::MAX
+        } else {
+            config.max_concurrent_rpc_calls
+        };
+        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+        let chain = ChainClient::new(
+            Arc::new(config.clone()),
+            db.clone(),
+            metrics.clone(),
+            rpc_semaphore.clone(),
+        );
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, metrics, None, None, None,
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            metrics,
+            rpc_semaphore,
+            None,
+            None,
+            None,
         ));
         let app = build_app(state);
         let response = app
@@ -546,9 +581,29 @@ mod tests {
             metrics.clone(),
         )
         .unwrap();
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+            usize::MAX
+        } else {
+            config.max_concurrent_rpc_calls
+        };
+        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+        let chain = ChainClient::new(
+            Arc::new(config.clone()),
+            db.clone(),
+            metrics.clone(),
+            rpc_semaphore.clone(),
+        );
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, metrics, None, None, None,
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            metrics,
+            rpc_semaphore,
+            None,
+            None,
+            None,
         ));
         let app = build_app(state);
         let response = app

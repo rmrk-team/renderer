@@ -1499,10 +1499,12 @@ async fn resolve_unapproved_fallback(
     )
 }
 
-async fn resolve_render_failure_fallback(
+async fn resolve_render_failure_fallback_with(
     state: &AppState,
     request: &RenderRequest,
     headers: &HeaderMap,
+    fallback_kind: &str,
+    retry_after_seconds: Option<u64>,
 ) -> Option<Response> {
     let config = state
         .db
@@ -1526,11 +1528,11 @@ async fn resolve_render_failure_fallback(
                     &request.format,
                     &request.width_param,
                     request.og_mode,
-                    "render_fallback",
+                    fallback_kind,
                     "collection",
                     "public, max-age=300",
                     false,
-                    None,
+                    retry_after_seconds,
                     headers,
                 )
                 .await;
@@ -1538,6 +1540,55 @@ async fn resolve_render_failure_fallback(
         }
     }
     None
+}
+
+async fn resolve_render_failure_fallback_head_with(
+    state: &AppState,
+    request: &RenderRequest,
+    fallback_kind: &str,
+    retry_after_seconds: Option<u64>,
+) -> Option<Response> {
+    let config = state
+        .db
+        .get_collection_fallback_config(&request.chain, &request.collection)
+        .await
+        .ok()
+        .flatten();
+    if let Some(config) = config {
+        if config.render_fallback_enabled {
+            if let Some(dir) = config.render_fallback_dir.as_ref() {
+                let dir_path = PathBuf::from(dir);
+                if !is_safe_fallback_dir(&state.config.fallbacks_dir, &dir_path) {
+                    warn!(
+                        path = %dir_path.display(),
+                        "render fallback dir outside fallbacks dir"
+                    );
+                    return None;
+                }
+                return fallback_head_from_dir(
+                    dir_path.as_path(),
+                    &request.format,
+                    &request.width_param,
+                    request.og_mode,
+                    fallback_kind,
+                    "collection",
+                    "public, max-age=300",
+                    false,
+                    retry_after_seconds,
+                )
+                .await;
+            }
+        }
+    }
+    None
+}
+
+async fn resolve_render_failure_fallback(
+    state: &AppState,
+    request: &RenderRequest,
+    headers: &HeaderMap,
+) -> Option<Response> {
+    resolve_render_failure_fallback_with(state, request, headers, "render_fallback", None).await
 }
 
 async fn resolve_token_override(
@@ -1607,6 +1658,89 @@ async fn fallback_for_render_error(
     headers: &HeaderMap,
     error: &anyhow::Error,
 ) -> Option<Response> {
+    if let Some(cached_error) = error.downcast_ref::<render::TokenStateCachedError>() {
+        let retry_after = cached_error.retry_after_seconds.max(1);
+        if let Some(response) = resolve_render_failure_fallback_with(
+            state,
+            request,
+            headers,
+            "token_state_cached",
+            Some(retry_after),
+        )
+        .await
+        {
+            return Some(response);
+        }
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(
+            fallback_text_response(
+                &request.format,
+                width,
+                height,
+                &["TOKEN STATE CACHED".to_string(), "RETRY LATER".to_string()],
+                "token_state_cached",
+                "token_state_cached",
+                "token_state_cached",
+                StatusCode::OK,
+                Some(retry_after),
+            )
+            .await,
+        );
+    }
+    if error.downcast_ref::<render::TokenNotFoundError>().is_some() {
+        if let Some(response) =
+            resolve_render_failure_fallback_with(state, request, headers, "token_not_found", None)
+                .await
+        {
+            return Some(response);
+        }
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(
+            fallback_text_response(
+                &request.format,
+                width,
+                height,
+                &["TOKEN NOT FOUND".to_string()],
+                "token_not_found",
+                "token_not_found",
+                "token_not_found",
+                StatusCode::OK,
+                None,
+            )
+            .await,
+        );
+    }
+    if error
+        .downcast_ref::<render::UnsupportedStrategyError>()
+        .is_some()
+    {
+        if let Some(response) = resolve_render_failure_fallback_with(
+            state,
+            request,
+            headers,
+            "unsupported_collection",
+            None,
+        )
+        .await
+        {
+            return Some(response);
+        }
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(
+            fallback_text_response(
+                &request.format,
+                width,
+                height,
+                &["UNSUPPORTED COLLECTION".to_string()],
+                "unsupported_collection",
+                "unsupported_collection",
+                "unsupported_collection",
+                StatusCode::OK,
+                None,
+            )
+            .await,
+        );
+    }
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
         return match approval_error {
@@ -1748,6 +1882,59 @@ async fn fallback_head_for_render_error(
     request: &RenderRequest,
     error: &anyhow::Error,
 ) -> Option<Response> {
+    if let Some(cached_error) = error.downcast_ref::<render::TokenStateCachedError>() {
+        let retry_after = cached_error.retry_after_seconds.max(1);
+        return resolve_render_failure_fallback_head_with(
+            state,
+            request,
+            "token_state_cached",
+            Some(retry_after),
+        )
+        .await
+        .or_else(|| {
+            Some(fallback_head_response(
+                &request.format,
+                "token_state_cached",
+                "token_state_cached",
+                "token_state_cached",
+                Some(retry_after),
+            ))
+        });
+    }
+    if error.downcast_ref::<render::TokenNotFoundError>().is_some() {
+        return resolve_render_failure_fallback_head_with(state, request, "token_not_found", None)
+            .await
+            .or_else(|| {
+                Some(fallback_head_response(
+                    &request.format,
+                    "token_not_found",
+                    "token_not_found",
+                    "token_not_found",
+                    None,
+                ))
+            });
+    }
+    if error
+        .downcast_ref::<render::UnsupportedStrategyError>()
+        .is_some()
+    {
+        return resolve_render_failure_fallback_head_with(
+            state,
+            request,
+            "unsupported_collection",
+            None,
+        )
+        .await
+        .or_else(|| {
+            Some(fallback_head_response(
+                &request.format,
+                "unsupported_collection",
+                "unsupported_collection",
+                "unsupported_collection",
+                None,
+            ))
+        });
+    }
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {
         return match approval_error {
             render::ApprovalCheckError::NotApproved => {
@@ -2555,9 +2742,29 @@ mod tests {
             metrics.clone(),
         )
         .unwrap();
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+            usize::MAX
+        } else {
+            config.max_concurrent_rpc_calls
+        };
+        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+        let chain = ChainClient::new(
+            Arc::new(config.clone()),
+            db.clone(),
+            metrics.clone(),
+            rpc_semaphore.clone(),
+        );
         Arc::new(AppState::new(
-            config, db, cache, assets, chain, metrics, None, None, None,
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            metrics,
+            rpc_semaphore,
+            None,
+            None,
+            None,
         ))
     }
 
@@ -3655,6 +3862,31 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
             .with_field("timeout_seconds", Value::Number(seconds.into()))
             .with_field("timeout_scope", Value::String(scope.to_string()))
             .with_header(header::RETRY_AFTER, HeaderValue::from_static("5"))
+            .with_log_detail(detail);
+    }
+    if let Some(cached_error) = error.downcast_ref::<render::TokenStateCachedError>() {
+        let retry_after = cached_error.retry_after_seconds.max(1);
+        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "token state cached")
+            .with_code("token_state_cached")
+            .with_field("retry_after_seconds", Value::Number(retry_after.into()))
+            .with_header(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(&retry_after.to_string())
+                    .unwrap_or(HeaderValue::from_static("30")),
+            )
+            .with_log_detail(detail);
+    }
+    if error.downcast_ref::<render::TokenNotFoundError>().is_some() {
+        return ApiError::new(StatusCode::NOT_FOUND, "token not found")
+            .with_code("token_not_found")
+            .with_log_detail(detail);
+    }
+    if error
+        .downcast_ref::<render::UnsupportedStrategyError>()
+        .is_some()
+    {
+        return ApiError::new(StatusCode::UNSUPPORTED_MEDIA_TYPE, "unsupported collection")
+            .with_code("unsupported_collection")
             .with_log_detail(detail);
     }
     if let Some(approval_error) = error.downcast_ref::<render::ApprovalCheckError>() {

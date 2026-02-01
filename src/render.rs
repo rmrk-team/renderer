@@ -2,8 +2,9 @@ use crate::assets::{AssetFetchError, AssetResolver, ResolvedMetadata};
 use crate::cache::{CacheManager, RenderCacheEntry};
 use crate::canonical;
 use crate::chain::{
-    ComposeResult, FixedPart, SELECTOR_COMPOSE_EQUIP_REVERT, SELECTOR_NON_COMPOSABLE_ASSET,
-    SELECTOR_NON_COMPOSABLE_ASSET_ALT, SlotPart, revert_selector,
+    ComposeResult, FixedPart, INTERFACE_ID_ERC165, INTERFACE_ID_ERC721_METADATA,
+    INTERFACE_ID_ERC5773, INTERFACE_ID_ERC6220, SELECTOR_COMPOSE_EQUIP_REVERT,
+    SELECTOR_NON_COMPOSABLE_ASSET, SELECTOR_NON_COMPOSABLE_ASSET_ALT, SlotPart, revert_selector,
 };
 use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
@@ -169,6 +170,14 @@ pub enum OutputFormat {
     Jpeg,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrimaryRenderStrategy {
+    Equippable,
+    MultiAsset,
+    Erc721Metadata,
+    FallbackOnly,
+}
+
 #[derive(Debug, Error)]
 pub enum RenderInputError {
     #[error("invalid {field} segment")]
@@ -200,6 +209,25 @@ pub enum RenderTimeoutError {
     #[error("render queue wait timed out after {seconds}s")]
     QueueWait { seconds: u64 },
 }
+
+#[derive(Debug, Error)]
+#[error("token not found")]
+pub struct TokenNotFoundError;
+
+#[derive(Debug, Error)]
+#[error("cached token state failure: {error}")]
+pub struct TokenStateCachedError {
+    pub error: String,
+    pub retry_after_seconds: u64,
+}
+
+#[derive(Debug, Error)]
+#[error("token URI empty")]
+pub struct TokenUriEmptyError;
+
+#[derive(Debug, Error)]
+#[error("unsupported collection strategy")]
+pub struct UnsupportedStrategyError;
 
 #[derive(Debug, Error)]
 pub enum ApprovalCheckError {
@@ -694,11 +722,6 @@ async fn on_demand_approval_check(
         .unwrap_or(chain);
     let collection = canonical::canonicalize_collection_address(collection)?;
     let address = ethers::types::Address::from_str(&collection)?;
-    let _permit = state
-        .rpc_semaphore
-        .acquire()
-        .await
-        .map_err(anyhow::Error::new)?;
     let result = state
         .chain
         .call_with_approvals(contract_chain, move |contract| async move {
@@ -883,6 +906,13 @@ pub(crate) async fn render_token_uncached(
                 warmup_strategy: "auto".to_string(),
                 cache_epoch: None,
                 catalog_address: None,
+                supports_erc165: None,
+                supports_erc5773: None,
+                supports_erc6220: None,
+                supports_erc721metadata: None,
+                capabilities_checked_at: None,
+                capabilities_expires_at: None,
+                force_strategy: None,
                 approved: true,
                 approved_until: None,
                 approval_source: None,
@@ -1953,6 +1983,13 @@ async fn compute_render_cache_key_for_request(
                 warmup_strategy: "auto".to_string(),
                 cache_epoch: None,
                 catalog_address: None,
+                supports_erc165: None,
+                supports_erc5773: None,
+                supports_erc6220: None,
+                supports_erc721metadata: None,
+                capabilities_checked_at: None,
+                capabilities_expires_at: None,
+                force_strategy: None,
                 approved: true,
                 approved_until: None,
                 approval_source: None,
@@ -2370,6 +2407,13 @@ pub async fn refresh_canvas_size(
             warmup_strategy: "auto".to_string(),
             cache_epoch: None,
             catalog_address: None,
+            supports_erc165: None,
+            supports_erc5773: None,
+            supports_erc6220: None,
+            supports_erc721metadata: None,
+            capabilities_checked_at: None,
+            capabilities_expires_at: None,
+            force_strategy: None,
             approved: true,
             approved_until: None,
             approval_source: None,
@@ -3130,6 +3174,195 @@ fn epoch_to_timestamp(epoch: Option<i64>, default: &Option<String>) -> Option<St
     default.clone()
 }
 
+pub(crate) async fn resolve_primary_strategy(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+) -> Result<PrimaryRenderStrategy> {
+    let config = get_collection_config_cached(state, chain, collection)
+        .await?
+        .unwrap_or(CollectionConfig {
+            chain: chain.to_string(),
+            collection_address: collection.to_string(),
+            canvas_width: None,
+            canvas_height: None,
+            canvas_fingerprint: None,
+            og_focal_point: 25,
+            og_overlay_uri: None,
+            watermark_overlay_uri: None,
+            warmup_strategy: "auto".to_string(),
+            cache_epoch: None,
+            catalog_address: None,
+            supports_erc165: None,
+            supports_erc5773: None,
+            supports_erc6220: None,
+            supports_erc721metadata: None,
+            capabilities_checked_at: None,
+            capabilities_expires_at: None,
+            force_strategy: None,
+            approved: true,
+            approved_until: None,
+            approval_source: None,
+            last_approval_sync_at: None,
+            last_approval_sync_block: None,
+            last_approval_check_at: None,
+            last_approval_check_result: None,
+        });
+    if let Some(force) = config.force_strategy.as_deref() {
+        if let Some(strategy) = parse_force_strategy(force) {
+            return Ok(strategy);
+        }
+        warn!(
+            chain = %chain,
+            collection = %collection,
+            force_strategy = %force,
+            "unknown force_strategy; falling back to auto"
+        );
+    }
+    let now = now_epoch();
+    let cached_caps = config
+        .capabilities_expires_at
+        .map(|expires_at| expires_at > now)
+        .unwrap_or(false);
+    if cached_caps {
+        return Ok(strategy_from_capabilities(&config));
+    }
+    let stale_caps = config.supports_erc165.is_some();
+    match refresh_collection_capabilities(state, chain, collection).await {
+        Ok(caps) => {
+            let ttl =
+                i64::try_from(state.config.collection_capabilities_ttl_seconds).unwrap_or(i64::MAX);
+            let expires_at = now.saturating_add(ttl.max(0));
+            let _ = state
+                .db
+                .set_collection_capabilities(
+                    chain,
+                    collection,
+                    caps.supports_erc165,
+                    caps.supports_erc5773,
+                    caps.supports_erc6220,
+                    caps.supports_erc721metadata,
+                    now,
+                    expires_at,
+                )
+                .await;
+            state.invalidate_collection_cache(chain, collection).await;
+            Ok(strategy_from_capabilities_values(&caps))
+        }
+        Err(err) => {
+            if stale_caps {
+                warn!(
+                    chain = %chain,
+                    collection = %collection,
+                    error = ?err,
+                    "capability refresh failed; using stale values"
+                );
+                Ok(strategy_from_capabilities(&config))
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CollectionCapabilities {
+    supports_erc165: bool,
+    supports_erc5773: bool,
+    supports_erc6220: bool,
+    supports_erc721metadata: bool,
+}
+
+async fn refresh_collection_capabilities(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+) -> Result<CollectionCapabilities> {
+    let supports_erc165 = state
+        .chain
+        .supports_interface(chain, collection, INTERFACE_ID_ERC165)
+        .await?;
+    let (supports_erc5773, supports_erc6220, supports_erc721metadata) = if supports_erc165 {
+        let supports_erc6220 = state
+            .chain
+            .supports_interface(chain, collection, INTERFACE_ID_ERC6220)
+            .await?;
+        let supports_erc5773 = state
+            .chain
+            .supports_interface(chain, collection, INTERFACE_ID_ERC5773)
+            .await?;
+        let supports_erc721metadata = state
+            .chain
+            .supports_interface(chain, collection, INTERFACE_ID_ERC721_METADATA)
+            .await?;
+        (supports_erc5773, supports_erc6220, supports_erc721metadata)
+    } else {
+        (false, false, false)
+    };
+    Ok(CollectionCapabilities {
+        supports_erc165,
+        supports_erc5773,
+        supports_erc6220,
+        supports_erc721metadata,
+    })
+}
+
+fn strategy_from_capabilities(config: &CollectionConfig) -> PrimaryRenderStrategy {
+    let supports_erc165 = config.supports_erc165.unwrap_or(false);
+    let supports_erc5773 = config.supports_erc5773.unwrap_or(false);
+    let supports_erc6220 = config.supports_erc6220.unwrap_or(false);
+    let supports_erc721metadata = config.supports_erc721metadata.unwrap_or(false);
+    strategy_from_flags(
+        supports_erc165,
+        supports_erc5773,
+        supports_erc6220,
+        supports_erc721metadata,
+    )
+}
+
+fn strategy_from_capabilities_values(caps: &CollectionCapabilities) -> PrimaryRenderStrategy {
+    strategy_from_flags(
+        caps.supports_erc165,
+        caps.supports_erc5773,
+        caps.supports_erc6220,
+        caps.supports_erc721metadata,
+    )
+}
+
+fn strategy_from_flags(
+    supports_erc165: bool,
+    supports_erc5773: bool,
+    supports_erc6220: bool,
+    supports_erc721metadata: bool,
+) -> PrimaryRenderStrategy {
+    if supports_erc165 {
+        if supports_erc6220 {
+            PrimaryRenderStrategy::Equippable
+        } else if supports_erc5773 {
+            PrimaryRenderStrategy::MultiAsset
+        } else if supports_erc721metadata {
+            PrimaryRenderStrategy::Erc721Metadata
+        } else {
+            PrimaryRenderStrategy::FallbackOnly
+        }
+    } else {
+        PrimaryRenderStrategy::Erc721Metadata
+    }
+}
+
+fn parse_force_strategy(value: &str) -> Option<PrimaryRenderStrategy> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "auto" => None,
+        "equippable" | "erc6220" => Some(PrimaryRenderStrategy::Equippable),
+        "multiasset" | "erc5773" => Some(PrimaryRenderStrategy::MultiAsset),
+        "erc721metadata" | "erc721" | "tokenuri" | "token_uri" => {
+            Some(PrimaryRenderStrategy::Erc721Metadata)
+        }
+        "fallback" | "fallback_only" => Some(PrimaryRenderStrategy::FallbackOnly),
+        _ => None,
+    }
+}
+
 async fn get_collection_config_cached(
     state: &AppState,
     chain: &str,
@@ -3435,9 +3668,29 @@ mod tests {
             metrics.clone(),
         )
         .context("assets")?;
-        let chain = ChainClient::new(Arc::new(config.clone()), db.clone(), metrics.clone());
+        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
+            usize::MAX
+        } else {
+            config.max_concurrent_rpc_calls
+        };
+        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
+        let chain = ChainClient::new(
+            Arc::new(config.clone()),
+            db.clone(),
+            metrics.clone(),
+            rpc_semaphore.clone(),
+        );
         let state = Arc::new(AppState::new(
-            config, db, cache, assets, chain, metrics, None, None, None,
+            config,
+            db,
+            cache,
+            assets,
+            chain,
+            metrics,
+            rpc_semaphore,
+            None,
+            None,
+            None,
         ));
 
         let collection = "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004".to_string();

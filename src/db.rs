@@ -25,6 +25,13 @@ pub struct CollectionConfig {
     pub warmup_strategy: String,
     pub cache_epoch: Option<i64>,
     pub catalog_address: Option<String>,
+    pub supports_erc165: Option<bool>,
+    pub supports_erc5773: Option<bool>,
+    pub supports_erc6220: Option<bool>,
+    pub supports_erc721metadata: Option<bool>,
+    pub capabilities_checked_at: Option<i64>,
+    pub capabilities_expires_at: Option<i64>,
+    pub force_strategy: Option<String>,
     pub approved: bool,
     pub approved_until: Option<i64>,
     pub approval_source: Option<String>,
@@ -242,6 +249,13 @@ impl Database {
           warmup_strategy TEXT DEFAULT 'auto',
           cache_epoch INTEGER,
           catalog_address TEXT,
+          supports_erc165 INTEGER,
+          supports_erc5773 INTEGER,
+          supports_erc6220 INTEGER,
+          supports_erc721metadata INTEGER,
+          capabilities_checked_at INTEGER,
+          capabilities_expires_at INTEGER,
+          force_strategy TEXT,
           approved INTEGER DEFAULT 0,
           approved_until INTEGER,
           approval_source TEXT,
@@ -514,6 +528,30 @@ impl Database {
         )
         .execute(&self.pool)
         .await;
+        let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN supports_erc165 INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN supports_erc5773 INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN supports_erc6220 INTEGER")
+            .execute(&self.pool)
+            .await;
+        let _ =
+            sqlx::query("ALTER TABLE collection_config ADD COLUMN supports_erc721metadata INTEGER")
+                .execute(&self.pool)
+                .await;
+        let _ =
+            sqlx::query("ALTER TABLE collection_config ADD COLUMN capabilities_checked_at INTEGER")
+                .execute(&self.pool)
+                .await;
+        let _ =
+            sqlx::query("ALTER TABLE collection_config ADD COLUMN capabilities_expires_at INTEGER")
+                .execute(&self.pool)
+                .await;
+        let _ = sqlx::query("ALTER TABLE collection_config ADD COLUMN force_strategy TEXT")
+            .execute(&self.pool)
+            .await;
         let _ = sqlx::query("ALTER TABLE client_keys ADD COLUMN allow_fresh INTEGER DEFAULT 0")
             .execute(&self.pool)
             .await;
@@ -618,8 +656,10 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT id, chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
-                   approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address,
+                   supports_erc165, supports_erc5773, supports_erc6220, supports_erc721metadata,
+                   capabilities_checked_at, capabilities_expires_at, force_strategy,
+                   approved, approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result, created_at, updated_at
             FROM collection_config
             "#,
@@ -644,6 +684,13 @@ impl Database {
             warmup_strategy: String,
             cache_epoch: Option<i64>,
             catalog_address: Option<String>,
+            supports_erc165: Option<bool>,
+            supports_erc5773: Option<bool>,
+            supports_erc6220: Option<bool>,
+            supports_erc721metadata: Option<bool>,
+            capabilities_checked_at: Option<i64>,
+            capabilities_expires_at: Option<i64>,
+            force_strategy: Option<String>,
             approved: bool,
             approved_until: Option<i64>,
             approval_source: Option<String>,
@@ -689,6 +736,21 @@ impl Database {
                 warmup_strategy: row.get::<String, _>("warmup_strategy"),
                 cache_epoch: row.get("cache_epoch"),
                 catalog_address: row.get("catalog_address"),
+                supports_erc165: row
+                    .get::<Option<i64>, _>("supports_erc165")
+                    .map(|value| value == 1),
+                supports_erc5773: row
+                    .get::<Option<i64>, _>("supports_erc5773")
+                    .map(|value| value == 1),
+                supports_erc6220: row
+                    .get::<Option<i64>, _>("supports_erc6220")
+                    .map(|value| value == 1),
+                supports_erc721metadata: row
+                    .get::<Option<i64>, _>("supports_erc721metadata")
+                    .map(|value| value == 1),
+                capabilities_checked_at: row.get("capabilities_checked_at"),
+                capabilities_expires_at: row.get("capabilities_expires_at"),
+                force_strategy: row.get("force_strategy"),
                 approved: row.get::<i64, _>("approved") == 1,
                 approved_until: row.get("approved_until"),
                 approval_source: row.get("approval_source"),
@@ -800,6 +862,35 @@ impl Database {
                 if merged.warmup_strategy == "auto" && row.warmup_strategy != "auto" {
                     merged.warmup_strategy = row.warmup_strategy.clone();
                 }
+                if merged.supports_erc165.is_none() {
+                    merged.supports_erc165 = row.supports_erc165;
+                }
+                if merged.supports_erc5773.is_none() {
+                    merged.supports_erc5773 = row.supports_erc5773;
+                }
+                if merged.supports_erc6220.is_none() {
+                    merged.supports_erc6220 = row.supports_erc6220;
+                }
+                if merged.supports_erc721metadata.is_none() {
+                    merged.supports_erc721metadata = row.supports_erc721metadata;
+                }
+                merged.capabilities_checked_at =
+                    match (merged.capabilities_checked_at, row.capabilities_checked_at) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        (None, Some(b)) => Some(b),
+                        (Some(a), None) => Some(a),
+                        _ => None,
+                    };
+                merged.capabilities_expires_at =
+                    match (merged.capabilities_expires_at, row.capabilities_expires_at) {
+                        (Some(a), Some(b)) => Some(a.max(b)),
+                        (None, Some(b)) => Some(b),
+                        (Some(a), None) => Some(a),
+                        _ => None,
+                    };
+                if merged.force_strategy.is_none() {
+                    merged.force_strategy = row.force_strategy.clone();
+                }
                 merged.created_at = match (merged.created_at, row.created_at) {
                     (Some(a), Some(b)) => Some(a.min(b)),
                     (None, Some(b)) => Some(b),
@@ -826,11 +917,13 @@ impl Database {
                 r#"
                 INSERT INTO collection_config (
                   chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                  og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
-                  approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
+                  og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address,
+                  supports_erc165, supports_erc5773, supports_erc6220, supports_erc721metadata,
+                  capabilities_checked_at, capabilities_expires_at, force_strategy,
+                  approved, approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                   last_approval_check_at, last_approval_check_result, created_at, updated_at
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27)
                 "#,
             )
             .bind(&chain)
@@ -844,6 +937,13 @@ impl Database {
             .bind(&merged.warmup_strategy)
             .bind(merged.cache_epoch)
             .bind(&merged.catalog_address)
+            .bind(merged.supports_erc165.map(|value| if value { 1 } else { 0 }))
+            .bind(merged.supports_erc5773.map(|value| if value { 1 } else { 0 }))
+            .bind(merged.supports_erc6220.map(|value| if value { 1 } else { 0 }))
+            .bind(merged.supports_erc721metadata.map(|value| if value { 1 } else { 0 }))
+            .bind(merged.capabilities_checked_at)
+            .bind(merged.capabilities_expires_at)
+            .bind(&merged.force_strategy)
             .bind(if merged.approved { 1 } else { 0 })
             .bind(merged.approved_until)
             .bind(&merged.approval_source)
@@ -1023,8 +1123,10 @@ impl Database {
         let rows = sqlx::query(
             r#"
             SELECT chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
-                   approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address,
+                   supports_erc165, supports_erc5773, supports_erc6220, supports_erc721metadata,
+                   capabilities_checked_at, capabilities_expires_at, force_strategy,
+                   approved, approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result
             FROM collection_config
             ORDER BY chain, collection_address
@@ -1046,6 +1148,21 @@ impl Database {
                 warmup_strategy: row.get::<String, _>("warmup_strategy"),
                 cache_epoch: row.get("cache_epoch"),
                 catalog_address: row.get("catalog_address"),
+                supports_erc165: row
+                    .get::<Option<i64>, _>("supports_erc165")
+                    .map(|value| value == 1),
+                supports_erc5773: row
+                    .get::<Option<i64>, _>("supports_erc5773")
+                    .map(|value| value == 1),
+                supports_erc6220: row
+                    .get::<Option<i64>, _>("supports_erc6220")
+                    .map(|value| value == 1),
+                supports_erc721metadata: row
+                    .get::<Option<i64>, _>("supports_erc721metadata")
+                    .map(|value| value == 1),
+                capabilities_checked_at: row.get("capabilities_checked_at"),
+                capabilities_expires_at: row.get("capabilities_expires_at"),
+                force_strategy: row.get("force_strategy"),
                 approved: row.get::<i64, _>("approved") == 1,
                 approved_until: row.get("approved_until"),
                 approval_source: row.get("approval_source"),
@@ -1085,8 +1202,10 @@ impl Database {
         let row = sqlx::query(
             r#"
             SELECT chain, collection_address, canvas_width, canvas_height, canvas_fingerprint,
-                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address, approved,
-                   approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
+                   og_focal_point, og_overlay_uri, watermark_overlay_uri, warmup_strategy, cache_epoch, catalog_address,
+                   supports_erc165, supports_erc5773, supports_erc6220, supports_erc721metadata,
+                   capabilities_checked_at, capabilities_expires_at, force_strategy,
+                   approved, approved_until, approval_source, last_approval_sync_at, last_approval_sync_block,
                    last_approval_check_at, last_approval_check_result
             FROM collection_config
             WHERE chain = ?1 AND collection_address = ?2
@@ -1108,6 +1227,21 @@ impl Database {
             warmup_strategy: row.get::<String, _>("warmup_strategy"),
             cache_epoch: row.get("cache_epoch"),
             catalog_address: row.get("catalog_address"),
+            supports_erc165: row
+                .get::<Option<i64>, _>("supports_erc165")
+                .map(|value| value == 1),
+            supports_erc5773: row
+                .get::<Option<i64>, _>("supports_erc5773")
+                .map(|value| value == 1),
+            supports_erc6220: row
+                .get::<Option<i64>, _>("supports_erc6220")
+                .map(|value| value == 1),
+            supports_erc721metadata: row
+                .get::<Option<i64>, _>("supports_erc721metadata")
+                .map(|value| value == 1),
+            capabilities_checked_at: row.get("capabilities_checked_at"),
+            capabilities_expires_at: row.get("capabilities_expires_at"),
+            force_strategy: row.get("force_strategy"),
             approved: row.get::<i64, _>("approved") == 1,
             approved_until: row.get("approved_until"),
             approval_source: row.get("approval_source"),
@@ -1425,6 +1559,51 @@ impl Database {
         Ok(())
     }
 
+    pub async fn set_collection_capabilities(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        supports_erc165: bool,
+        supports_erc5773: bool,
+        supports_erc6220: bool,
+        supports_erc721metadata: bool,
+        checked_at: i64,
+        expires_at: i64,
+    ) -> Result<()> {
+        let now = now_epoch();
+        sqlx::query(
+            r#"
+            INSERT INTO collection_config (
+              chain, collection_address, supports_erc165, supports_erc5773, supports_erc6220,
+              supports_erc721metadata, capabilities_checked_at, capabilities_expires_at,
+              created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            ON CONFLICT(chain, collection_address) DO UPDATE SET
+              supports_erc165 = excluded.supports_erc165,
+              supports_erc5773 = excluded.supports_erc5773,
+              supports_erc6220 = excluded.supports_erc6220,
+              supports_erc721metadata = excluded.supports_erc721metadata,
+              capabilities_checked_at = excluded.capabilities_checked_at,
+              capabilities_expires_at = excluded.capabilities_expires_at,
+              updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(if supports_erc165 { 1 } else { 0 })
+        .bind(if supports_erc5773 { 1 } else { 0 })
+        .bind(if supports_erc6220 { 1 } else { 0 })
+        .bind(if supports_erc721metadata { 1 } else { 0 })
+        .bind(checked_at)
+        .bind(expires_at)
+        .bind(now)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn upsert_collection_config(&self, input: &AdminCollectionInput) -> Result<()> {
         let now = now_epoch();
         let approved_until = match input.approved {
@@ -1438,9 +1617,9 @@ impl Database {
             INSERT INTO collection_config (
               chain, collection_address, og_focal_point, og_overlay_uri,
               watermark_overlay_uri, warmup_strategy, approved, approved_until,
-              approval_source, created_at, updated_at
+              approval_source, force_strategy, created_at, updated_at
             )
-            VALUES (?1, ?2, COALESCE(?3, 25), ?4, ?5, COALESCE(?6, 'auto'), COALESCE(?7, 0), ?8, ?9, ?10, ?11)
+            VALUES (?1, ?2, COALESCE(?3, 25), ?4, ?5, COALESCE(?6, 'auto'), COALESCE(?7, 0), ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(chain, collection_address) DO UPDATE SET
               og_focal_point = COALESCE(excluded.og_focal_point, collection_config.og_focal_point),
               og_overlay_uri = COALESCE(excluded.og_overlay_uri, collection_config.og_overlay_uri),
@@ -1449,6 +1628,7 @@ impl Database {
               approved = COALESCE(excluded.approved, collection_config.approved),
               approved_until = COALESCE(excluded.approved_until, collection_config.approved_until),
               approval_source = COALESCE(excluded.approval_source, collection_config.approval_source),
+              force_strategy = COALESCE(excluded.force_strategy, collection_config.force_strategy),
               updated_at = excluded.updated_at
             "#,
         )
@@ -1461,6 +1641,7 @@ impl Database {
         .bind(input.approved.map(|value| if value { 1 } else { 0 }))
         .bind(approved_until)
         .bind(approval_source)
+        .bind(&input.force_strategy)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -3481,6 +3662,8 @@ mod tests {
             warmup_max_concurrent_asset_pins: 1,
             heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
+            token_state_error_ttl_seconds: 0,
+            token_state_error_permanent_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,
             primary_asset_cache_ttl: std::time::Duration::from_secs(0),
@@ -3497,6 +3680,7 @@ mod tests {
             status_public: false,
             landing_public: false,
             landing: None,
+            collection_capabilities_ttl_seconds: 0,
         }
     }
 

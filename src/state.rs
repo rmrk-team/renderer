@@ -67,6 +67,7 @@ impl AppState {
         assets: AssetResolver,
         chain: ChainClient,
         metrics: Arc<Metrics>,
+        rpc_semaphore: Arc<Semaphore>,
         usage_tx: Option<mpsc::Sender<UsageEvent>>,
         render_queue_tx: Option<mpsc::Sender<RenderJob>>,
         failure_log_tx: Option<mpsc::Sender<FailureLogEntry>>,
@@ -76,12 +77,6 @@ impl AppState {
         let render_semaphore = Arc::new(Semaphore::new(config.max_concurrent_renders));
         let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
         let heavy_svg_semaphore = Arc::new(Semaphore::new(config.heavy_svg_concurrency));
-        let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
-            usize::MAX
-        } else {
-            config.max_concurrent_rpc_calls
-        };
-        let rpc_semaphore = Arc::new(Semaphore::new(rpc_limit));
         let warmup_notify = Arc::new(Notify::new());
         let catalog_warmup_notify = Arc::new(Notify::new());
         let token_warmup_notify = Arc::new(Notify::new());

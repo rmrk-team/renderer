@@ -41,7 +41,7 @@ pub fn spawn_workers(state: Arc<AppState>, receiver: mpsc::Receiver<RenderJob>, 
                     key_limit,
                     respond_to,
                 } = job;
-                if respond_to.is_closed() {
+                if respond_to.is_closed() && request.cache_timestamp.is_none() {
                     debug!(
                         chain = %request.chain,
                         collection = %request.collection,

@@ -140,6 +140,8 @@ pub struct Config {
     pub warmup_max_concurrent_asset_pins: usize,
     pub heavy_warmup_max_assets: usize,
     pub token_state_check_ttl_seconds: u64,
+    pub token_state_error_ttl_seconds: u64,
+    pub token_state_error_permanent_ttl_seconds: u64,
     pub fresh_rate_limit_seconds: u64,
     pub fresh_request_retention_days: u64,
     pub primary_asset_cache_ttl: Duration,
@@ -153,6 +155,7 @@ pub struct Config {
     pub status_public: bool,
     pub landing_public: bool,
     pub landing: Option<LandingConfig>,
+    pub collection_capabilities_ttl_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -499,6 +502,9 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
         let warmup_max_concurrent_asset_pins = parse_usize("WARMUP_MAX_CONCURRENT_ASSET_PINS", 4);
         let heavy_warmup_max_assets = parse_usize("HEAVY_WARMUP_MAX_ASSETS", 50);
         let token_state_check_ttl_seconds = parse_u64("TOKEN_STATE_CHECK_TTL_SECONDS", 86400);
+        let token_state_error_ttl_seconds = parse_u64("TOKEN_STATE_ERROR_TTL_SECONDS", 300);
+        let token_state_error_permanent_ttl_seconds =
+            parse_u64("TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS", 3600);
         let fresh_rate_limit_seconds = parse_u64("FRESH_RATE_LIMIT_SECONDS", 300);
         let fresh_request_retention_days = parse_u64("FRESH_REQUEST_RETENTION_DAYS", 7);
         let primary_asset_cache_ttl =
@@ -525,6 +531,8 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
         };
         let collection_render_overrides =
             parse_collection_render_overrides("COLLECTION_RENDER_OVERRIDES")?;
+        let collection_capabilities_ttl_seconds =
+            parse_u64("COLLECTION_CAPABILITIES_TTL_SECONDS", 86400);
 
         Ok(Self {
             host,
@@ -656,6 +664,8 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             warmup_max_concurrent_asset_pins,
             heavy_warmup_max_assets,
             token_state_check_ttl_seconds,
+            token_state_error_ttl_seconds,
+            token_state_error_permanent_ttl_seconds,
             fresh_rate_limit_seconds,
             fresh_request_retention_days,
             primary_asset_cache_ttl,
@@ -669,6 +679,7 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             status_public,
             landing_public,
             landing,
+            collection_capabilities_ttl_seconds,
         })
     }
 
@@ -994,6 +1005,7 @@ pub struct AdminCollectionInput {
     pub watermark_overlay_uri: Option<String>,
     pub warmup_strategy: Option<String>,
     pub approved: Option<bool>,
+    pub force_strategy: Option<String>,
 }
 
 #[cfg(test)]

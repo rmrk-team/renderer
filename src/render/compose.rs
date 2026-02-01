@@ -102,6 +102,10 @@ pub(super) async fn load_compose_for_request(
         .as_ref()
         .map(|entry| entry.expires_at > now)
         .unwrap_or(false);
+    let cached_error = cached_entry
+        .as_ref()
+        .and_then(|entry| entry.last_error.as_ref())
+        .map(|value| value.to_string());
     if !fresh {
         if let Some(compose) = cached_compose.clone() {
             if cached_valid {
@@ -115,6 +119,25 @@ pub(super) async fn load_compose_for_request(
                     "compose profile"
                 );
                 return Ok((compose, cached_fallback));
+            }
+        }
+        if cached_valid && cached_compose.is_none() {
+            if let (Some(error), Some(entry)) = (cached_error.clone(), cached_entry.as_ref()) {
+                let retry_after_seconds = entry.expires_at.saturating_sub(now).max(0) as u64;
+                debug!(
+                    step = "compose_cache_error_hit",
+                    chain = %chain,
+                    collection = %collection,
+                    token_id = %token_id,
+                    asset_id = %asset_id,
+                    retry_after_seconds,
+                    "compose profile"
+                );
+                return Err(TokenStateCachedError {
+                    error,
+                    retry_after_seconds,
+                }
+                .into());
             }
         }
     }
@@ -155,6 +178,25 @@ pub(super) async fn load_compose_for_request(
                     return Ok((compose, entry.fallback_used));
                 }
             }
+            if entry.expires_at > now {
+                if let Some(error) = entry.last_error.as_ref() {
+                    let retry_after_seconds = entry.expires_at.saturating_sub(now).max(0) as u64;
+                    debug!(
+                        step = "compose_singleflight_error_hit",
+                        chain = %chain,
+                        collection = %collection,
+                        token_id = %token_id,
+                        asset_id = %asset_id,
+                        retry_after_seconds,
+                        "compose profile"
+                    );
+                    return Err(TokenStateCachedError {
+                        error: error.to_string(),
+                        retry_after_seconds,
+                    }
+                    .into());
+                }
+            }
         }
     }
 
@@ -170,6 +212,18 @@ pub(super) async fn load_compose_for_request(
                     error = ?err,
                     "token URI lookup failed"
                 );
+                let error_expires_at = token_state_error_expires_at(state, &err);
+                let _ = state
+                    .db
+                    .record_token_state_error(
+                        chain,
+                        collection,
+                        token_id,
+                        asset_id,
+                        &err.to_string(),
+                        error_expires_at,
+                    )
+                    .await;
                 return Err(err);
             }
         };
@@ -181,7 +235,20 @@ pub(super) async fn load_compose_for_request(
                 token_id = %token_id,
                 "token URI empty"
             );
-            return Err(anyhow!("token URI empty"));
+            let err = anyhow::Error::new(TokenUriEmptyError);
+            let error_expires_at = token_state_error_expires_at(state, &err);
+            let _ = state
+                .db
+                .record_token_state_error(
+                    chain,
+                    collection,
+                    token_id,
+                    asset_id,
+                    "token URI empty",
+                    error_expires_at,
+                )
+                .await;
+            return Err(err);
         }
         debug!(
             step = "compose_fallback_token_uri",
@@ -226,6 +293,7 @@ pub(super) async fn load_compose_for_request(
             Err(err) => {
                 if !is_non_composable_error(&err) {
                     let record_started = Instant::now();
+                    let error_expires_at = token_state_error_expires_at(state, &err);
                     let _ = state
                         .db
                         .record_token_state_error(
@@ -234,7 +302,7 @@ pub(super) async fn load_compose_for_request(
                             token_id,
                             asset_id,
                             &err.to_string(),
-                            expires_at,
+                            error_expires_at,
                         )
                         .await;
                     debug!(
@@ -335,4 +403,19 @@ pub(super) async fn load_compose_for_request(
         );
     }
     Ok((compose, fallback_used))
+}
+
+fn token_state_error_expires_at(state: &AppState, err: &anyhow::Error) -> i64 {
+    let ttl_seconds = if is_permanent_token_state_error(err) {
+        state.config.token_state_error_permanent_ttl_seconds
+    } else {
+        state.config.token_state_error_ttl_seconds
+    };
+    let ttl = i64::try_from(ttl_seconds).unwrap_or(i64::MAX);
+    now_epoch().saturating_add(ttl.max(0))
+}
+
+fn is_permanent_token_state_error(err: &anyhow::Error) -> bool {
+    crate::chain::is_contract_revert_error(err)
+        || err.downcast_ref::<TokenUriEmptyError>().is_some()
 }

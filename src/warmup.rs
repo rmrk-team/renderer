@@ -149,7 +149,6 @@ async fn run_job(state: Arc<AppState>, job: WarmupJob) -> Result<()> {
     let asset_id = match job.asset_id.clone() {
         Some(asset_id) => asset_id,
         None => {
-            let _permit = state.rpc_semaphore.acquire().await?;
             let asset_id = state
                 .chain
                 .get_top_asset_id(&job.chain, &job.collection_address, &job.token_id)

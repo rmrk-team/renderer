@@ -153,7 +153,6 @@ async fn run_item(state: Arc<AppState>, item: &TokenWarmupItem) -> Result<()> {
     let asset_id = match item.asset_id.as_deref() {
         Some(value) => Some(value.to_string()),
         None => {
-            let _permit = state.rpc_semaphore.acquire().await?;
             match state
                 .chain
                 .get_top_asset_id(&item.chain, &item.collection_address, &item.token_id)
@@ -306,7 +305,6 @@ async fn load_compose(
             if !is_non_composable_error(&err) {
                 return Err(err);
             }
-            let _permit = state.rpc_semaphore.acquire().await?;
             let metadata_uri = state
                 .chain
                 .get_asset_metadata(

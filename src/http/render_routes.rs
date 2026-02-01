@@ -641,7 +641,7 @@ pub(super) async fn render_primary(
         .unwrap_or_else(|| "none".to_string());
     let primary_cache_key = format!("{chain}:{collection}:{token_id}:{cache_stamp}");
     let fresh_requested = parse_fresh_flag(query.fresh.as_deref());
-    let request = RenderRequest {
+    let mut request = RenderRequest {
         chain: chain.clone(),
         collection: collection.clone(),
         token_id: token_id.clone(),
@@ -709,12 +709,140 @@ pub(super) async fn render_primary(
             return Ok(response);
         }
     }
+    let strategy = render::resolve_primary_strategy(&state, &chain, &collection)
+        .await
+        .map_err(map_render_error_anyhow)?;
+    if matches!(strategy, render::PrimaryRenderStrategy::Erc721Metadata) {
+        request.asset_id = TOKEN_URI_FALLBACK_ASSET_ID.to_string();
+        match state.chain.owner_of(&chain, &collection, &token_id).await {
+            Ok(owner) => {
+                if owner == ethers::types::Address::zero() {
+                    let err = anyhow::Error::new(render::TokenNotFoundError);
+                    if !prefer_json {
+                        if let Some(response) = fallback_for_render_error(
+                            &state,
+                            &request,
+                            &placeholder_width,
+                            &headers,
+                            &err,
+                        )
+                        .await
+                        {
+                            record_render_metrics(
+                                &state,
+                                &response,
+                                started.elapsed(),
+                                &request.chain,
+                                &request.collection,
+                                source_label.as_deref(),
+                            );
+                            return Ok(response);
+                        }
+                    }
+                    let api_error = map_render_error(err);
+                    record_render_error_metrics(
+                        &state,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                        source_label.as_deref(),
+                        api_error.code.as_deref(),
+                    );
+                    return Err(api_error);
+                }
+            }
+            Err(err) => {
+                if is_contract_revert_error(&err) {
+                    let err = anyhow::Error::new(render::TokenNotFoundError);
+                    if !prefer_json {
+                        if let Some(response) = fallback_for_render_error(
+                            &state,
+                            &request,
+                            &placeholder_width,
+                            &headers,
+                            &err,
+                        )
+                        .await
+                        {
+                            record_render_metrics(
+                                &state,
+                                &response,
+                                started.elapsed(),
+                                &request.chain,
+                                &request.collection,
+                                source_label.as_deref(),
+                            );
+                            return Ok(response);
+                        }
+                    }
+                    let api_error = map_render_error(err);
+                    record_render_error_metrics(
+                        &state,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                        source_label.as_deref(),
+                        api_error.code.as_deref(),
+                    );
+                    return Err(api_error);
+                }
+                let api_error = map_render_error(err);
+                record_render_error_metrics(
+                    &state,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                    source_label.as_deref(),
+                    api_error.code.as_deref(),
+                );
+                return Err(api_error);
+            }
+        }
+        return render_canonical(
+            State(state),
+            Path((
+                chain,
+                collection,
+                token_id,
+                TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
+                format.extension().to_string(),
+            )),
+            Query(query),
+            headers,
+            context,
+        )
+        .await;
+    }
+    if matches!(strategy, render::PrimaryRenderStrategy::FallbackOnly) {
+        let err = anyhow::Error::new(render::UnsupportedStrategyError);
+        if !prefer_json {
+            if let Some(response) =
+                fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                    .await
+            {
+                record_render_metrics(
+                    &state,
+                    &response,
+                    started.elapsed(),
+                    &request.chain,
+                    &request.collection,
+                    source_label.as_deref(),
+                );
+                return Ok(response);
+            }
+        }
+        let api_error = map_render_error(err);
+        record_render_error_metrics(
+            &state,
+            started.elapsed(),
+            &request.chain,
+            &request.collection,
+            source_label.as_deref(),
+            api_error.code.as_deref(),
+        );
+        return Err(api_error);
+    }
     let asset_id = if fresh_requested {
-        let _permit = state
-            .rpc_semaphore
-            .acquire()
-            .await
-            .map_err(|err| ApiError::from(anyhow::Error::new(err)))?;
         match state
             .chain
             .get_top_asset_id(&chain, &collection, &token_id)
@@ -787,11 +915,6 @@ pub(super) async fn render_primary(
                 return Err(api_error);
             }
             None => {
-                let _permit = state
-                    .rpc_semaphore
-                    .acquire()
-                    .await
-                    .map_err(|err| ApiError::from(anyhow::Error::new(err)))?;
                 match state
                     .chain
                     .get_top_asset_id(&chain, &collection, &token_id)
