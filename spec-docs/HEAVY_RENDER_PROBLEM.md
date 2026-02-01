@@ -106,6 +106,14 @@ Observations:
    - Use higher `MAX_BLOCKING_TASKS` or separate instances for heavy collections
      if workload isolation is required.
 
+## Mitigations applied
+
+- Render timeouts now record a token-state timeout error (TTL controlled by
+  `TOKEN_STATE_ERROR_TTL_SECONDS`) so subsequent requests short-circuit to
+  fallback instead of redoing heavy CPU work immediately.
+- Timeout events enqueue a token warmup job (best-effort) to populate caches in
+  the background.
+
 ## Notes
 
 - These issues are expected for SVGs with heavy gradients and clip paths.

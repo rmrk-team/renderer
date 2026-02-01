@@ -161,11 +161,21 @@ Raster assets larger than `MAX_RASTER_BYTES` are resized (bounded by
 still too large and `thumbnailUri` is present, the renderer falls back to the
 thumbnail for both canvas derivation and render.
 
+Non-composable selectors (observed + handled):
+
+| Selector | Known signature | Source | Reason for inclusion |
+| --- | --- | --- | --- |
+| `0x7a062578` | `RMRKNotComposableAsset()` | RMRK equip utils | Canonical non-composable error. |
+| `0xdcc947e8` | (unknown) | Observed in production logs | Alternate non-composable revert selector. |
+| `0x89ba7e10` | (unknown) | See `spec-docs/FALLBACK_PROBLEM.md` | Observed revert selector treated as non-composable to allow static asset fallback. |
+
 **Top-asset lookup fallback:** if primary asset lookup reverts with
 `0x3456866f`, the renderer treats the token as **single-layer** by calling
 `tokenURI()` and rendering the resolved metadata URI directly (catalog address
-is zero). Caching behavior matches other fallback renders (original-size is not
-cached; resized/OG variants are cacheable).
+is zero) **only when ERC721Metadata is supported**. If the collection does not
+advertise ERC721Metadata support, the renderer skips tokenURI and returns the
+render-failure fallback instead. Caching behavior matches other fallback renders
+(original-size is not cached; resized/OG variants are cacheable).
 
 ### 4.2 Canonical Canvas Size Derivation
 

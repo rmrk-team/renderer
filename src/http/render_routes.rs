@@ -863,27 +863,87 @@ pub(super) async fn render_primary(
                         .await;
                 }
                 if is_top_asset_missing_error(&err) {
+                    let supports_metadata = match render::collection_supports_erc721metadata(
+                        &state,
+                        &chain,
+                        &collection,
+                    )
+                    .await
+                    {
+                        Ok(Some(true)) => true,
+                        Ok(_) => false,
+                        Err(check_err) => {
+                            warn!(
+                                chain = %chain,
+                                collection = %collection,
+                                token_id = %token_id,
+                                error = ?check_err,
+                                "metadata capability lookup failed; skipping token URI fallback"
+                            );
+                            false
+                        }
+                    };
+                    if supports_metadata {
+                        warn!(
+                            chain = %chain,
+                            collection = %collection,
+                            token_id = %token_id,
+                            error = ?err,
+                            "top asset lookup reverted; falling back to token URI"
+                        );
+                        return render_canonical(
+                            State(state.clone()),
+                            Path((
+                                chain,
+                                collection,
+                                token_id,
+                                TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
+                                format.extension().to_string(),
+                            )),
+                            Query(query),
+                            headers,
+                            context,
+                        )
+                        .await;
+                    }
                     warn!(
                         chain = %chain,
                         collection = %collection,
                         token_id = %token_id,
                         error = ?err,
-                        "top asset lookup reverted; falling back to token URI"
+                        "top asset lookup reverted; ERC721 metadata unsupported; using render fallback"
                     );
-                    return render_canonical(
-                        State(state.clone()),
-                        Path((
-                            chain,
-                            collection,
-                            token_id,
-                            TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
-                            format.extension().to_string(),
-                        )),
-                        Query(query),
-                        headers,
-                        context,
-                    )
-                    .await;
+                    if !prefer_json {
+                        if let Some(response) = fallback_for_render_error(
+                            &state,
+                            &request,
+                            &placeholder_width,
+                            &headers,
+                            &err,
+                        )
+                        .await
+                        {
+                            record_render_metrics(
+                                &state,
+                                &response,
+                                started.elapsed(),
+                                &request.chain,
+                                &request.collection,
+                                source_label.as_deref(),
+                            );
+                            return Ok(response);
+                        }
+                    }
+                    let api_error = ApiError::from(err);
+                    record_render_error_metrics(
+                        &state,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                        source_label.as_deref(),
+                        api_error.code.as_deref(),
+                    );
+                    return Err(api_error);
                 }
                 let api_error = ApiError::from(err);
                 record_render_error_metrics(
@@ -935,27 +995,88 @@ pub(super) async fn render_primary(
                                 .await;
                         }
                         if is_top_asset_missing_error(&err) {
+                            let supports_metadata =
+                                match render::collection_supports_erc721metadata(
+                                    &state,
+                                    &chain,
+                                    &collection,
+                                )
+                                .await
+                                {
+                                    Ok(Some(true)) => true,
+                                    Ok(_) => false,
+                                    Err(check_err) => {
+                                        warn!(
+                                            chain = %chain,
+                                            collection = %collection,
+                                            token_id = %token_id,
+                                            error = ?check_err,
+                                            "metadata capability lookup failed; skipping token URI fallback"
+                                        );
+                                        false
+                                    }
+                                };
+                            if supports_metadata {
+                                warn!(
+                                    chain = %chain,
+                                    collection = %collection,
+                                    token_id = %token_id,
+                                    error = ?err,
+                                    "top asset lookup reverted; falling back to token URI"
+                                );
+                                return render_canonical(
+                                    State(state.clone()),
+                                    Path((
+                                        chain,
+                                        collection,
+                                        token_id,
+                                        TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
+                                        format.extension().to_string(),
+                                    )),
+                                    Query(query),
+                                    headers,
+                                    context,
+                                )
+                                .await;
+                            }
                             warn!(
                                 chain = %chain,
                                 collection = %collection,
                                 token_id = %token_id,
                                 error = ?err,
-                                "top asset lookup reverted; falling back to token URI"
+                                "top asset lookup reverted; ERC721 metadata unsupported; using render fallback"
                             );
-                            return render_canonical(
-                                State(state.clone()),
-                                Path((
-                                    chain,
-                                    collection,
-                                    token_id,
-                                    TOKEN_URI_FALLBACK_ASSET_ID.to_string(),
-                                    format.extension().to_string(),
-                                )),
-                                Query(query),
-                                headers,
-                                context,
-                            )
-                            .await;
+                            if !prefer_json {
+                                if let Some(response) = fallback_for_render_error(
+                                    &state,
+                                    &request,
+                                    &placeholder_width,
+                                    &headers,
+                                    &err,
+                                )
+                                .await
+                                {
+                                    record_render_metrics(
+                                        &state,
+                                        &response,
+                                        started.elapsed(),
+                                        &request.chain,
+                                        &request.collection,
+                                        source_label.as_deref(),
+                                    );
+                                    return Ok(response);
+                                }
+                            }
+                            let api_error = ApiError::from(err);
+                            record_render_error_metrics(
+                                &state,
+                                started.elapsed(),
+                                &request.chain,
+                                &request.collection,
+                                source_label.as_deref(),
+                                api_error.code.as_deref(),
+                            );
+                            return Err(api_error);
                         }
                         let api_error = ApiError::from(err);
                         record_render_error_metrics(

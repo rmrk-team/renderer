@@ -23,6 +23,12 @@ This document summarizes the renderer caching layers and when cache epochs are r
 - Keyed by chain/collection/token/asset + cache epoch + variant key + format.
 - This is what `HEAD` cache probes are checking.
 
+### Token-state cache (negative caching)
+- Stores token compose failures and tokenURI failures with TTLs.
+- Transient errors use `TOKEN_STATE_ERROR_TTL_SECONDS`.
+- Permanent errors (contract reverts, empty tokenURI) apply backoff:
+  `1x` → `6x` → `24x` of `TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS` for repeated failures.
+
 ## What goes into a cache key
 
 - Chain + collection + token ID + asset ID.

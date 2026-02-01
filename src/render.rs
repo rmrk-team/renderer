@@ -11,6 +11,7 @@ use crate::db::CollectionConfig;
 #[cfg(test)]
 use crate::pinning::PinnedAssetStore;
 use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
+use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
 use anyhow::{Context, Result, anyhow};
 use image::codecs::png::{CompressionType, FilterType as PngFilterType, PngEncoder};
 use image::imageops::FilterType;
@@ -874,6 +875,7 @@ pub(crate) async fn render_token_uncached_with_timeout(
                 timeout_seconds,
                 "render timed out"
             );
+            record_render_timeout(state, request, timeout_seconds).await;
             Err(RenderTimeoutError::RenderExec {
                 seconds: timeout_seconds,
             }
@@ -3307,6 +3309,15 @@ async fn refresh_collection_capabilities(
     })
 }
 
+pub(crate) async fn collection_supports_erc721metadata(
+    state: &AppState,
+    chain: &str,
+    collection: &str,
+) -> Result<Option<bool>> {
+    let config = get_collection_config_cached(state, chain, collection).await?;
+    Ok(config.and_then(|config| config.supports_erc721metadata))
+}
+
 fn strategy_from_capabilities(config: &CollectionConfig) -> PrimaryRenderStrategy {
     let supports_erc165 = config.supports_erc165.unwrap_or(false);
     let supports_erc5773 = config.supports_erc5773.unwrap_or(false);
@@ -3378,6 +3389,52 @@ async fn get_collection_config_cached(
         .insert(key, fetched.clone())
         .await;
     Ok(fetched)
+}
+
+async fn record_render_timeout(state: &AppState, request: &RenderRequest, timeout_seconds: u64) {
+    if state.config.token_state_error_ttl_seconds > 0 {
+        let ttl = i64::try_from(state.config.token_state_error_ttl_seconds).unwrap_or(i64::MAX);
+        let expires_at = now_epoch().saturating_add(ttl.max(0));
+        let error = RenderTimeoutError::RenderExec {
+            seconds: timeout_seconds,
+        };
+        let error_string = error.to_string();
+        let _ = state
+            .db
+            .record_token_state_error(
+                &request.chain,
+                &request.collection,
+                &request.token_id,
+                &request.asset_id,
+                &error_string,
+                expires_at,
+            )
+            .await;
+    }
+    if state.config.warmup_max_tokens == 0 {
+        return;
+    }
+    let request_state = Arc::new(state.clone());
+    let warmup_request = TokenWarmupRequest {
+        chain: request.chain.clone(),
+        collection: request.collection.clone(),
+        start_token: None,
+        end_token: None,
+        step: None,
+        token_ids: Some(vec![request.token_id.clone()]),
+        asset_id: Some(request.asset_id.clone()),
+        force: Some(false),
+    };
+    if let Err(err) = enqueue_token_warmup(request_state, warmup_request).await {
+        warn!(
+            chain = %request.chain,
+            collection = %request.collection,
+            token_id = %request.token_id,
+            asset_id = %request.asset_id,
+            error = ?err,
+            "timeout warmup enqueue failed"
+        );
+    }
 }
 
 #[cfg(test)]

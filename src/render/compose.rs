@@ -1,4 +1,5 @@
 use super::*;
+use crate::db::TokenStateCacheEntry;
 
 pub(super) fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
     let mut layers = Vec::new();
@@ -212,7 +213,9 @@ pub(super) async fn load_compose_for_request(
                     error = ?err,
                     "token URI lookup failed"
                 );
-                let error_expires_at = token_state_error_expires_at(state, &err);
+                let error_string = err.to_string();
+                let error_expires_at =
+                    token_state_error_expires_at(state, &err, cached_entry.as_ref(), &error_string);
                 let _ = state
                     .db
                     .record_token_state_error(
@@ -220,7 +223,7 @@ pub(super) async fn load_compose_for_request(
                         collection,
                         token_id,
                         asset_id,
-                        &err.to_string(),
+                        &error_string,
                         error_expires_at,
                     )
                     .await;
@@ -236,7 +239,9 @@ pub(super) async fn load_compose_for_request(
                 "token URI empty"
             );
             let err = anyhow::Error::new(TokenUriEmptyError);
-            let error_expires_at = token_state_error_expires_at(state, &err);
+            let error_string = err.to_string();
+            let error_expires_at =
+                token_state_error_expires_at(state, &err, cached_entry.as_ref(), &error_string);
             let _ = state
                 .db
                 .record_token_state_error(
@@ -244,7 +249,7 @@ pub(super) async fn load_compose_for_request(
                     collection,
                     token_id,
                     asset_id,
-                    "token URI empty",
+                    &error_string,
                     error_expires_at,
                 )
                 .await;
@@ -293,7 +298,13 @@ pub(super) async fn load_compose_for_request(
             Err(err) => {
                 if !is_non_composable_error(&err) {
                     let record_started = Instant::now();
-                    let error_expires_at = token_state_error_expires_at(state, &err);
+                    let error_string = err.to_string();
+                    let error_expires_at = token_state_error_expires_at(
+                        state,
+                        &err,
+                        cached_entry.as_ref(),
+                        &error_string,
+                    );
                     let _ = state
                         .db
                         .record_token_state_error(
@@ -301,7 +312,7 @@ pub(super) async fn load_compose_for_request(
                             collection,
                             token_id,
                             asset_id,
-                            &err.to_string(),
+                            &error_string,
                             error_expires_at,
                         )
                         .await;
@@ -405,9 +416,18 @@ pub(super) async fn load_compose_for_request(
     Ok((compose, fallback_used))
 }
 
-fn token_state_error_expires_at(state: &AppState, err: &anyhow::Error) -> i64 {
+fn token_state_error_expires_at(
+    state: &AppState,
+    err: &anyhow::Error,
+    cached_entry: Option<&TokenStateCacheEntry>,
+    error_label: &str,
+) -> i64 {
     let ttl_seconds = if is_permanent_token_state_error(err) {
-        state.config.token_state_error_permanent_ttl_seconds
+        permanent_error_backoff_ttl(
+            state.config.token_state_error_permanent_ttl_seconds,
+            cached_entry,
+            error_label,
+        )
     } else {
         state.config.token_state_error_ttl_seconds
     };
@@ -418,4 +438,34 @@ fn token_state_error_expires_at(state: &AppState, err: &anyhow::Error) -> i64 {
 fn is_permanent_token_state_error(err: &anyhow::Error) -> bool {
     crate::chain::is_contract_revert_error(err)
         || err.downcast_ref::<TokenUriEmptyError>().is_some()
+}
+
+fn permanent_error_backoff_ttl(
+    base_ttl_seconds: u64,
+    cached_entry: Option<&TokenStateCacheEntry>,
+    error_label: &str,
+) -> u64 {
+    if base_ttl_seconds == 0 {
+        return 0;
+    }
+    let mut ttl = base_ttl_seconds;
+    if let Some(entry) = cached_entry {
+        if entry.last_error.as_deref() == Some(error_label) {
+            let previous_ttl = entry
+                .expires_at
+                .saturating_sub(entry.last_checked_at)
+                .max(0) as u64;
+            let step_one = base_ttl_seconds;
+            let step_two = base_ttl_seconds.saturating_mul(6);
+            let step_three = base_ttl_seconds.saturating_mul(24);
+            ttl = if previous_ttl >= step_two {
+                step_three
+            } else if previous_ttl >= step_one {
+                step_two
+            } else {
+                step_one
+            };
+        }
+    }
+    ttl
 }

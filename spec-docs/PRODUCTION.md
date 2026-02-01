@@ -25,6 +25,13 @@ shipping a public instance.
 - Keep `IDENTITY_IP_LABEL_MODE=sha256_prefix` unless you explicitly want raw IPs.
   - Consider `PRIMARY_ASSET_NEGATIVE_TTL_SECONDS` to reduce RPC hammering.
 
+## Open mode hardening (ACCESS_MODE=open)
+
+- Keep rate limits enabled (`RATE_LIMIT_*`, `AUTH_FAILURE_RATE_LIMIT_*`, `KEY_RATE_LIMIT_*`).
+- Leave debug/fresh paths gated (they already require API keys or allowlisted IPs).
+- Keep admin endpoints private; do not expose `/admin` or `/metrics` publicly.
+- Consider lowering `METRICS_TOP_*` (or setting them to `0`) to reduce label churn at scale.
+
 ## Reverse proxy / CDN
 
 - Enforce max URL length, header size, and body size upstream.

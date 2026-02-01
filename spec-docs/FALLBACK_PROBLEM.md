@@ -56,3 +56,9 @@ These tokens appear to require an **interface-based fallback decision** rather
 than mapping individual revert selectors. The collection may not implement
 ERC721 `tokenURI()` for every token (or at all), so the fallback must be chosen
 based on supported interfaces instead of revert codes alone.
+
+## Fix applied
+
+- TokenURI fallback is now gated by cached ERC721Metadata capability checks.
+- If the collection does not advertise metadata support, the renderer skips
+  `tokenURI()` and returns the render-failure fallback instead.

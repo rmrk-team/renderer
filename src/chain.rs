@@ -157,6 +157,7 @@ pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET: [u8; 4] = [0x7a, 0x06, 0x25, 0x7
 pub(crate) const SELECTOR_NON_COMPOSABLE_ASSET_ALT: [u8; 4] = [0xdc, 0xc9, 0x47, 0xe8];
 pub(crate) const SELECTOR_COMPOSE_EQUIP_REVERT: [u8; 4] = [0x89, 0xba, 0x7e, 0x10];
 pub(crate) const INTERFACE_ID_ERC165: [u8; 4] = [0x01, 0xff, 0xc9, 0xa7];
+pub(crate) const INTERFACE_ID_ERC165_INVALID: [u8; 4] = [0xff, 0xff, 0xff, 0xff];
 pub(crate) const INTERFACE_ID_ERC721_METADATA: [u8; 4] = [0x5b, 0x5e, 0x13, 0x9f];
 pub(crate) const INTERFACE_ID_ERC5773: [u8; 4] = [0x06, 0xb4, 0x32, 0x9a];
 pub(crate) const INTERFACE_ID_ERC6220: [u8; 4] = [0x28, 0xbc, 0x9a, 0xe4];
@@ -301,6 +302,28 @@ impl ChainClient {
         interface_id: [u8; 4],
     ) -> Result<bool> {
         let collection = Address::from_str(collection)?;
+        if interface_id == INTERFACE_ID_ERC165 {
+            let supports_erc165 = self
+                .supports_interface_raw(chain, collection, INTERFACE_ID_ERC165)
+                .await?;
+            if !supports_erc165 {
+                return Ok(false);
+            }
+            let supports_invalid = self
+                .supports_interface_raw(chain, collection, INTERFACE_ID_ERC165_INVALID)
+                .await?;
+            return Ok(!supports_invalid);
+        }
+        self.supports_interface_raw(chain, collection, interface_id)
+            .await
+    }
+
+    async fn supports_interface_raw(
+        &self,
+        chain: &str,
+        collection: Address,
+        interface_id: [u8; 4],
+    ) -> Result<bool> {
         let result = self
             .call_with_failover(chain, move |provider| {
                 let contract = ERC165::new(collection, provider);

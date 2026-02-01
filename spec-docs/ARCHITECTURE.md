@@ -25,3 +25,5 @@
 ## Metrics guidance
 - If adding Prometheus metrics, bound label cardinality (avoid raw IPs and unbounded collection labels).
 - Keep `METRICS_REQUIRE_ADMIN_KEY=true` and use `METRICS_ALLOW_IPS` or `METRICS_BEARER_TOKEN`.
+- Use the Top‑K metrics (`METRICS_TOP_*`) to cap collection/IP label fan‑out.
+- Prefer `METRICS_IP_LABEL_MODE=sha256_prefix` in production.

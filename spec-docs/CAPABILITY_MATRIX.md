@@ -15,3 +15,5 @@ Additional behavior:
 - The renderer uses the `token_uri` fallback asset ID when it must render from `tokenURI`.
 - Overlay and background variants are encoded into cache keys and do not affect interface selection.
 - Admin overrides can force a strategy per collection (`equippable`, `multiasset`, `erc721metadata`, `fallback_only`).
+- ERC-165 detection uses the strict `0xffffffff` negative check to avoid false positives.
+- TokenURI fallback on top-asset lookup failures is only attempted when ERC721Metadata support is cached.

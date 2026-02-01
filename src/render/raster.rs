@@ -314,9 +314,7 @@ pub(super) async fn rasterize_bytes(
         );
         let cache_store_started = Instant::now();
         let cache_store_key = if fast_path {
-            fast_cache_key
-                .as_deref()
-                .unwrap_or(cache_key.as_str())
+            fast_cache_key.as_deref().unwrap_or(cache_key.as_str())
         } else {
             cache_key.as_str()
         };
