@@ -107,6 +107,12 @@ Render safety caps:
 - `MAX_CACHE_VARIANTS_PER_KEY` limits cached timestamps per token/variant (evicts oldest).
 - `MAX_OVERLAY_LENGTH` and `MAX_BG_LENGTH` cap query param length.
 
+Heavy render controls:
+
+- `HEAVY_SVG_NODE_THRESHOLD` / `HEAVY_SVG_FEATURE_THRESHOLD` define when SVGs are treated as heavy.
+- `HEAVY_SVG_CONCURRENCY` caps concurrent heavy SVG rasterization (separate from `MAX_BLOCKING_TASKS`).
+- `SVG_FAST_PATH_MAX_WIDTH` / `SVG_FAST_PATH_TARGET_WIDTH` enable lower internal SVG raster sizes for small widths.
+
 HTTP safety caps:
 
 - `MAX_IN_FLIGHT_REQUESTS` limits total concurrent HTTP requests.
@@ -256,6 +262,7 @@ WARMUP_MAX_TOKENS=1000
 WARMUP_MAX_RENDERS_PER_JOB=6
 WARMUP_JOB_TIMEOUT_SECONDS=600
 WARMUP_MAX_BLOCK_SPAN=0
+HEAVY_WARMUP_MAX_ASSETS=50
 ```
 
 `WARMUP_MAX_BLOCK_SPAN` caps transfer-log block ranges (0 disables the guardrail).
@@ -677,12 +684,13 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
 
 Omit `epoch` to auto-bump by 1.
 
-### Recommended ops flow (Phases A/B/C)
+### Recommended ops flow (Phases A/B/C/D)
 
 1. Approve the collection (if approvals are required).
 2. Phase A: catalog warmup (pins shared assets).
 3. Phase B: token scan warmup (pins token-specific assets).
 4. Phase C: render warmup (optional pre-render of thumbnails/OG).
+5. Phase D: heavy SVG warmup (optional pre-rasterization of heavy assets).
 
 ### Catalog warmup (Phase A)
 
@@ -725,6 +733,19 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
   http://localhost:8080/admin/api/warmup
 ```
 
+### Heavy SVG warmup (Phase D, optional)
+
+Heavy warmup scans pinned catalog SVGs, detects heavy assets by complexity thresholds, and pre-rasterizes
+up to `max_assets` into the raster cache. It requires `PINNING_ENABLED=true` and a completed catalog
+warmup; if canvas size is missing, run a render or `/admin/api/collections/.../refresh-canvas` first.
+
+```bash
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","max_assets":50}' \
+  http://localhost:8080/admin/api/warmup/heavy
+```
+
 ### Warmup status (Phases A/B)
 
 ```bash
@@ -741,6 +762,8 @@ curl -H "Authorization: Bearer $ADMIN_PASSWORD" \
 curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
   http://localhost:8080/admin/api/warmup/jobs/123/cancel
 ```
+
+Note: heavy warmup is fire-and-forget and is not tracked in the warmup jobs list.
 
 ### Cache purge
 
@@ -824,7 +847,7 @@ cargo test
 
 ### Renderer benchmark (pre-commit)
 
-The benchmark runs 10 NFTs across 3 collections in three modes:
+The benchmark runs 10 NFTs across 2 collections in three modes:
 fresh (no render cache), cached (render cache warm), and pinned (local pins warmed).
 Results are appended to `benchmarks/renderer-benchmarks.json`, and renderer logs
 are captured under `benchmarks/runs/`.
@@ -851,7 +874,7 @@ cargo run
 ```
 
 ```bash
-# Terminal 2 (warmup A + B + optional C)
+# Terminal 2 (warmup A + B + optional C/D)
 curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{"chain":"base","collection":"0x...","token_id":"1","asset_id":"100"}' \
@@ -866,6 +889,11 @@ curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
   -H "Content-Type: application/json" \
   -d '{"chain":"base","collection":"0x...","token_ids":["1","2","3"],"widths":["medium"],"cache_timestamp":"1700000000000"}' \
   http://localhost:8085/admin/api/warmup
+
+curl -X POST -H "Authorization: Bearer $ADMIN_PASSWORD" \
+  -H "Content-Type: application/json" \
+  -d '{"chain":"base","collection":"0x...","max_assets":50}' \
+  http://localhost:8085/admin/api/warmup/heavy
 ```
 
 ```bash

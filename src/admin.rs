@@ -12,8 +12,9 @@ use crate::fallbacks::{
 };
 use crate::http::{clear_fallback_file_cache, client_ip, is_safe_fallback_dir};
 use crate::rate_limit::RateLimitInfo;
-use crate::render::OutputFormat;
-use crate::render::refresh_canvas_size;
+use crate::render::{
+    HeavyWarmupRequest, HeavyWarmupSummary, OutputFormat, enqueue_heavy_warmup, refresh_canvas_size,
+};
 use crate::state::AppState;
 use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
 use crate::warmup::{WarmupRequest, enqueue_warmup};
@@ -76,6 +77,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/api/warmup/catalog", post(start_catalog_warmup))
         .route("/api/warmup/tokens", post(start_token_warmup_range))
         .route("/api/warmup/tokens/manual", post(start_token_warmup_manual))
+        .route("/api/warmup/heavy", post(start_heavy_warmup))
         .route("/api/warmup/status", get(catalog_warmup_status))
         .route("/api/warmup/jobs", get(list_warmup_jobs))
         .route("/api/warmup/jobs/{id}/cancel", post(cancel_warmup_job))
@@ -372,6 +374,21 @@ async fn start_warmup(
     };
     let count = enqueue_warmup(state.clone(), request).await?;
     Ok(Json(serde_json::json!({ "status": "ok", "jobs": count })))
+}
+
+async fn start_heavy_warmup(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<HeavyWarmupRequest>,
+) -> Result<Json<HeavyWarmupSummary>, AdminError> {
+    let (chain, collection) =
+        canonicalize_chain_collection(&state, &payload.chain, &payload.collection)?;
+    let request = HeavyWarmupRequest {
+        chain,
+        collection,
+        max_assets: payload.max_assets,
+    };
+    let summary = enqueue_heavy_warmup(state.clone(), request).await?;
+    Ok(Json(summary))
 }
 
 async fn warmup_stats(
@@ -2269,6 +2286,7 @@ mod tests {
             max_concurrent_ipfs_fetches: 1,
             max_concurrent_rpc_calls: 1,
             max_blocking_tasks: 1,
+            heavy_svg_concurrency: 1,
             default_canvas_width: 1,
             default_canvas_height: 1,
             default_cache_timestamp: None,
@@ -2299,6 +2317,10 @@ mod tests {
             max_metadata_json_bytes: 1,
             max_svg_bytes: 1,
             max_svg_node_count: 1,
+            heavy_svg_node_threshold: 1,
+            heavy_svg_feature_threshold: 1,
+            svg_fast_path_max_width: 1,
+            svg_fast_path_target_width: 1,
             max_raster_bytes: 1,
             max_raster_resize_bytes: 1,
             max_raster_resize_dim: 1,
@@ -2371,6 +2393,7 @@ mod tests {
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
             warmup_max_concurrent_asset_pins: 1,
+            heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,

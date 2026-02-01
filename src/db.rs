@@ -139,6 +139,13 @@ pub struct PinnedAssetCounts {
     pub total: i64,
 }
 
+#[derive(Debug, Clone)]
+pub struct CollectionPinnedAsset {
+    pub asset_key: String,
+    pub path: String,
+    pub content_type: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogWarmupItem {
     pub id: i64,
@@ -2418,6 +2425,40 @@ impl Database {
         Ok((total, pinned, failed))
     }
 
+    pub async fn list_collection_pinned_assets(
+        &self,
+        chain: &str,
+        collection_address: &str,
+        source: &str,
+    ) -> Result<Vec<CollectionPinnedAsset>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT refs.asset_key, pinned.path, pinned.content_type
+            FROM collection_asset_refs refs
+            JOIN pinned_assets pinned ON refs.asset_key = pinned.asset_key
+            WHERE refs.chain = ?1
+              AND refs.collection_address = ?2
+              AND refs.source = ?3
+              AND pinned.status = 'pinned'
+            ORDER BY pinned.size_bytes DESC
+            "#,
+        )
+        .bind(chain)
+        .bind(collection_address)
+        .bind(source)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut assets = Vec::with_capacity(rows.len());
+        for row in rows {
+            assets.push(CollectionPinnedAsset {
+                asset_key: row.get::<String, _>("asset_key"),
+                path: row.get::<String, _>("path"),
+                content_type: row.get::<Option<String>, _>("content_type"),
+            });
+        }
+        Ok(assets)
+    }
+
     pub async fn upsert_token_asset_ref(
         &self,
         chain: &str,
@@ -3331,6 +3372,7 @@ mod tests {
             max_concurrent_ipfs_fetches: 1,
             max_concurrent_rpc_calls: 1,
             max_blocking_tasks: 1,
+            heavy_svg_concurrency: 1,
             default_canvas_width: 1,
             default_canvas_height: 1,
             default_cache_timestamp: None,
@@ -3361,6 +3403,10 @@ mod tests {
             max_metadata_json_bytes: 1,
             max_svg_bytes: 1,
             max_svg_node_count: 1,
+            heavy_svg_node_threshold: 1,
+            heavy_svg_feature_threshold: 1,
+            svg_fast_path_max_width: 1,
+            svg_fast_path_target_width: 1,
             max_raster_bytes: 1,
             max_raster_resize_bytes: 1,
             max_raster_resize_dim: 1,
@@ -3433,6 +3479,7 @@ mod tests {
             warmup_job_timeout_seconds: 0,
             warmup_max_block_span: 0,
             warmup_max_concurrent_asset_pins: 1,
+            heavy_warmup_max_assets: 1,
             token_state_check_ttl_seconds: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,

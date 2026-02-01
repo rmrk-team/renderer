@@ -1,5 +1,7 @@
 use super::*;
 use crate::layer_profile;
+use image::imageops::FilterType;
+use std::borrow::Cow;
 
 pub(super) fn derive_canvas_from_asset(
     bytes: &[u8],
@@ -44,12 +46,12 @@ pub(super) async fn rasterize_bytes(
     bytes: &[u8],
     canvas_width: u32,
     canvas_height: u32,
-    max_svg_bytes: usize,
-    max_svg_nodes: usize,
-    max_raster_bytes: usize,
-    max_decoded_raster_pixels: u64,
+    target_width: Option<u32>,
+    og_mode: bool,
     assets: &AssetResolver,
+    config: &Config,
     blocking_semaphore: &Arc<Semaphore>,
+    heavy_svg_semaphore: &Arc<Semaphore>,
     layer: &Layer,
     layer_index: usize,
     art_uri: Option<&str>,
@@ -57,7 +59,8 @@ pub(super) async fn rasterize_bytes(
 ) -> Result<(RgbaImage, bool)> {
     let rasterize_started = Instant::now();
     if is_svg(bytes) {
-        let cache_key = sha256_hex_bytes(bytes);
+        let normalized_svg = normalize_svg_bytes(bytes);
+        let cache_key = sha256_hex_bytes(normalized_svg.as_ref());
         let cache_lookup_started = Instant::now();
         let cached = assets
             .fetch_raster_cache(&cache_key, canvas_width, canvas_height)
@@ -78,8 +81,9 @@ pub(super) async fn rasterize_bytes(
             let raster_len = raster.len();
             let decode_started = Instant::now();
             let blocking = blocking_semaphore.clone();
+            let max_decoded = config.max_decoded_raster_pixels;
             match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
-                decode_raster(&raster, max_decoded_raster_pixels)
+                decode_raster(&raster, max_decoded)
             })
             .await
             {
@@ -112,66 +116,31 @@ pub(super) async fn rasterize_bytes(
         }
         let svg_bytes = bytes.to_vec();
         let blocking = blocking_semaphore.clone();
-        let (
-            image,
-            png_bytes,
-            parse_ms,
-            render_ms,
-            image_ms,
-            encode_ms,
-            stats,
-            svg_width,
-            svg_height,
-        ) = match spawn_blocking_with_semaphore(
-            blocking,
-            move || -> Result<(
-                RgbaImage,
-                Vec<u8>,
-                u128,
-                u128,
-                u128,
-                u128,
-                SvgComplexityStats,
-                u32,
-                u32,
-            )> {
-                let parse_started = Instant::now();
-                let (tree, stats) = parse_svg(
-                    &svg_bytes,
-                    max_svg_bytes,
-                    max_svg_nodes,
-                    max_raster_bytes,
-                    max_decoded_raster_pixels,
-                )?;
-                let parse_ms = parse_started.elapsed().as_millis();
-                let size = tree.size();
-                let svg_width = size.width().round() as u32;
-                let svg_height = size.height().round() as u32;
-                let render_started = Instant::now();
-                let pixmap = render_svg_to_pixmap(&tree, canvas_width, canvas_height)?;
-                let render_ms = render_started.elapsed().as_millis();
-                let image_started = Instant::now();
-                let image =
-                    RgbaImage::from_raw(canvas_width, canvas_height, pixmap.data().to_vec())
-                        .ok_or_else(|| anyhow!("failed to build raster image"))?;
-                let image_ms = image_started.elapsed().as_millis();
-                let encode_started = Instant::now();
-                let mut png_bytes = Vec::new();
-                image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
-                let encode_ms = encode_started.elapsed().as_millis();
-                Ok((
-                    image,
-                    png_bytes,
-                    parse_ms,
-                    render_ms,
-                    image_ms,
-                    encode_ms,
-                    stats,
-                    svg_width,
-                    svg_height,
-                ))
-            },
-        )
+        let max_svg_bytes = config.max_svg_bytes;
+        let max_svg_nodes = config.max_svg_node_count;
+        let max_raster_bytes = config.max_raster_bytes;
+        let max_decoded = config.max_decoded_raster_pixels;
+        let parsed = match spawn_blocking_with_semaphore(blocking, move || -> Result<ParsedSvg> {
+            let parse_started = Instant::now();
+            let (tree, stats) = parse_svg(
+                &svg_bytes,
+                max_svg_bytes,
+                max_svg_nodes,
+                max_raster_bytes,
+                max_decoded,
+            )?;
+            let parse_ms = parse_started.elapsed().as_millis();
+            let size = tree.size();
+            let svg_width = size.width().round() as u32;
+            let svg_height = size.height().round() as u32;
+            Ok(ParsedSvg {
+                tree,
+                stats,
+                parse_ms,
+                svg_width,
+                svg_height,
+            })
+        })
         .await
         {
             Ok(result) => result,
@@ -188,25 +157,102 @@ pub(super) async fn rasterize_bytes(
                 return Err(err);
             }
         };
+        let feature_count = parsed.stats.feature_count();
+        let is_heavy = parsed.stats.is_heavy(
+            config.heavy_svg_node_threshold,
+            config.heavy_svg_feature_threshold,
+        );
+        let fast_path_dims =
+            svg_fast_path_dimensions(canvas_width, canvas_height, target_width, og_mode, config);
+        let heavy_permit = if is_heavy {
+            Some(heavy_svg_semaphore.clone().acquire_owned().await?)
+        } else {
+            None
+        };
+        let blocking = blocking_semaphore.clone();
+        let (
+            image,
+            png_bytes,
+            render_ms,
+            image_ms,
+            encode_ms,
+            raster_width,
+            raster_height,
+            fast_path,
+        ) = match spawn_blocking_with_semaphore(blocking, move || -> Result<RasterizeSvgResult> {
+            let _heavy_permit = heavy_permit;
+            let (raster_width, raster_height, fast_path) = match fast_path_dims {
+                Some((width, height)) => (width, height, true),
+                None => (canvas_width, canvas_height, false),
+            };
+            let render_started = Instant::now();
+            let pixmap = render_svg_to_pixmap(&parsed.tree, raster_width, raster_height)?;
+            let render_ms = render_started.elapsed().as_millis();
+            let image_started = Instant::now();
+            let mut image =
+                RgbaImage::from_raw(raster_width, raster_height, pixmap.data().to_vec())
+                    .ok_or_else(|| anyhow!("failed to build raster image"))?;
+            if raster_width != canvas_width || raster_height != canvas_height {
+                image = image::imageops::resize(
+                    &image,
+                    canvas_width,
+                    canvas_height,
+                    FilterType::Lanczos3,
+                );
+            }
+            let image_ms = image_started.elapsed().as_millis();
+            let encode_started = Instant::now();
+            let mut png_bytes = Vec::new();
+            image.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)?;
+            let encode_ms = encode_started.elapsed().as_millis();
+            Ok((
+                image,
+                png_bytes,
+                render_ms,
+                image_ms,
+                encode_ms,
+                raster_width,
+                raster_height,
+                fast_path,
+            ))
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                assets.observe_upstream_failure("svg_render");
+                layer_profile!(
+                    debug_context,
+                    layer,
+                    layer_index,
+                    "rasterize_svg_total",
+                    rasterize_started.elapsed(),
+                    status = "error"
+                );
+                return Err(err);
+            }
+        };
         layer_profile!(
             debug_context,
             layer,
             layer_index,
             "svg_parse",
-            Duration::from_millis(parse_ms as u64),
+            Duration::from_millis(parsed.parse_ms as u64),
             bytes = bytes.len(),
-            svg_node_count = stats.node_count,
-            svg_width = svg_width,
-            svg_height = svg_height,
-            svg_linear_gradients = stats.linear_gradients,
-            svg_radial_gradients = stats.radial_gradients,
-            svg_gradient_stops = stats.gradient_stops,
-            svg_filter_defs = stats.filter_defs,
-            svg_filter_uses = stats.filter_uses,
-            svg_clip_paths = stats.clip_path_defs,
-            svg_clip_path_uses = stats.clip_path_uses,
-            svg_masks = stats.mask_defs,
-            svg_mask_uses = stats.mask_uses,
+            svg_node_count = parsed.stats.node_count,
+            svg_feature_count = feature_count,
+            svg_heavy = is_heavy,
+            svg_width = parsed.svg_width,
+            svg_height = parsed.svg_height,
+            svg_linear_gradients = parsed.stats.linear_gradients,
+            svg_radial_gradients = parsed.stats.radial_gradients,
+            svg_gradient_stops = parsed.stats.gradient_stops,
+            svg_filter_defs = parsed.stats.filter_defs,
+            svg_filter_uses = parsed.stats.filter_uses,
+            svg_clip_paths = parsed.stats.clip_path_defs,
+            svg_clip_path_uses = parsed.stats.clip_path_uses,
+            svg_masks = parsed.stats.mask_defs,
+            svg_mask_uses = parsed.stats.mask_uses,
             art_uri = art_uri.unwrap_or("none"),
             canvas_width = canvas_width,
             canvas_height = canvas_height
@@ -217,18 +263,23 @@ pub(super) async fn rasterize_bytes(
             layer_index,
             "svg_render",
             Duration::from_millis(render_ms as u64),
-            svg_node_count = stats.node_count,
-            svg_width = svg_width,
-            svg_height = svg_height,
-            svg_linear_gradients = stats.linear_gradients,
-            svg_radial_gradients = stats.radial_gradients,
-            svg_gradient_stops = stats.gradient_stops,
-            svg_filter_defs = stats.filter_defs,
-            svg_filter_uses = stats.filter_uses,
-            svg_clip_paths = stats.clip_path_defs,
-            svg_clip_path_uses = stats.clip_path_uses,
-            svg_masks = stats.mask_defs,
-            svg_mask_uses = stats.mask_uses,
+            svg_node_count = parsed.stats.node_count,
+            svg_feature_count = feature_count,
+            svg_heavy = is_heavy,
+            svg_width = parsed.svg_width,
+            svg_height = parsed.svg_height,
+            svg_raster_width = raster_width,
+            svg_raster_height = raster_height,
+            svg_fast_path = fast_path,
+            svg_linear_gradients = parsed.stats.linear_gradients,
+            svg_radial_gradients = parsed.stats.radial_gradients,
+            svg_gradient_stops = parsed.stats.gradient_stops,
+            svg_filter_defs = parsed.stats.filter_defs,
+            svg_filter_uses = parsed.stats.filter_uses,
+            svg_clip_paths = parsed.stats.clip_path_defs,
+            svg_clip_path_uses = parsed.stats.clip_path_uses,
+            svg_masks = parsed.stats.mask_defs,
+            svg_mask_uses = parsed.stats.mask_uses,
             art_uri = art_uri.unwrap_or("none"),
             canvas_width = canvas_width,
             canvas_height = canvas_height
@@ -274,8 +325,9 @@ pub(super) async fn rasterize_bytes(
     let bytes_len = bytes.len();
     let blocking = blocking_semaphore.clone();
     let decode_started = Instant::now();
+    let max_decoded = config.max_decoded_raster_pixels;
     let image = match spawn_blocking_with_semaphore(blocking, move || -> Result<RgbaImage> {
-        decode_raster(&bytes, max_decoded_raster_pixels)
+        decode_raster(&bytes, max_decoded)
     })
     .await
     {
@@ -445,6 +497,34 @@ pub(super) struct SvgComplexityStats {
     mask_uses: usize,
 }
 
+struct ParsedSvg {
+    tree: usvg::Tree,
+    stats: SvgComplexityStats,
+    parse_ms: u128,
+    svg_width: u32,
+    svg_height: u32,
+}
+
+type RasterizeSvgResult = (RgbaImage, Vec<u8>, u128, u128, u128, u32, u32, bool);
+
+impl SvgComplexityStats {
+    pub(super) fn feature_count(&self) -> usize {
+        self.linear_gradients
+            .saturating_add(self.radial_gradients)
+            .saturating_add(self.gradient_stops)
+            .saturating_add(self.filter_defs)
+            .saturating_add(self.filter_uses)
+            .saturating_add(self.clip_path_defs)
+            .saturating_add(self.clip_path_uses)
+            .saturating_add(self.mask_defs)
+            .saturating_add(self.mask_uses)
+    }
+
+    pub(super) fn is_heavy(&self, node_threshold: usize, feature_threshold: usize) -> bool {
+        self.node_count >= node_threshold || self.feature_count() >= feature_threshold
+    }
+}
+
 pub(super) fn parse_svg(
     bytes: &[u8],
     max_svg_bytes: usize,
@@ -608,6 +688,50 @@ fn contains_external_svg_url(raw: &str) -> bool {
 pub(super) fn is_svg(bytes: &[u8]) -> bool {
     let sample = std::str::from_utf8(bytes).unwrap_or("");
     sample.contains("<svg") || sample.contains("<?xml")
+}
+
+fn normalize_svg_bytes(bytes: &[u8]) -> Cow<'_, [u8]> {
+    let Ok(raw) = std::str::from_utf8(bytes) else {
+        return Cow::Borrowed(bytes);
+    };
+    let trimmed = raw.trim();
+    let normalized = if trimmed.contains("\r\n") {
+        trimmed.replace("\r\n", "\n")
+    } else {
+        trimmed.to_string()
+    };
+    if normalized.as_bytes() == bytes {
+        Cow::Borrowed(bytes)
+    } else {
+        Cow::Owned(normalized.into_bytes())
+    }
+}
+
+fn svg_fast_path_dimensions(
+    canvas_width: u32,
+    canvas_height: u32,
+    target_width: Option<u32>,
+    og_mode: bool,
+    config: &Config,
+) -> Option<(u32, u32)> {
+    let target_width = target_width?;
+    if og_mode || target_width > config.svg_fast_path_max_width {
+        return None;
+    }
+    let raster_width = config.svg_fast_path_target_width.min(canvas_width);
+    if raster_width >= canvas_width {
+        return None;
+    }
+    let raster_height = scale_height(canvas_height, canvas_width, raster_width);
+    Some((raster_width, raster_height))
+}
+
+fn scale_height(original_height: u32, original_width: u32, target_width: u32) -> u32 {
+    if original_width == 0 {
+        return original_height;
+    }
+    let ratio = target_width as f64 / original_width as f64;
+    (original_height as f64 * ratio).round().max(1.0) as u32
 }
 
 pub(super) fn extract_svg_dimensions(raw: &str) -> Option<(u32, u32)> {

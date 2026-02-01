@@ -30,6 +30,7 @@ pub struct AppState {
     pub token_state_singleflight: RenderSingleflight,
     pub render_semaphore: Arc<Semaphore>,
     pub blocking_semaphore: Arc<Semaphore>,
+    pub heavy_svg_semaphore: Arc<Semaphore>,
     pub rpc_semaphore: Arc<Semaphore>,
     pub warmup_notify: Arc<Notify>,
     pub catalog_warmup_notify: Arc<Notify>,
@@ -74,6 +75,7 @@ impl AppState {
         let token_state_singleflight = RenderSingleflight::new();
         let render_semaphore = Arc::new(Semaphore::new(config.max_concurrent_renders));
         let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
+        let heavy_svg_semaphore = Arc::new(Semaphore::new(config.heavy_svg_concurrency));
         let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
             usize::MAX
         } else {
@@ -133,6 +135,7 @@ impl AppState {
             token_state_singleflight,
             render_semaphore,
             blocking_semaphore,
+            heavy_svg_semaphore,
             rpc_semaphore,
             warmup_notify,
             catalog_warmup_notify,

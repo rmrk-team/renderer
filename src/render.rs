@@ -34,6 +34,7 @@ use usvg::ImageKind;
 mod cache_keys;
 mod compose;
 mod fallbacks;
+mod heavy_warmup;
 mod raster;
 
 use cache_keys::{CompositeCacheKey, composite_cache_key, safe_segment};
@@ -42,6 +43,7 @@ pub(crate) use cache_keys::{
 };
 use compose::{build_layers, layer_sort_key, load_compose_for_request, overlay_layer};
 use fallbacks::{is_asset_too_large_error, is_non_composable_error};
+pub(crate) use heavy_warmup::{HeavyWarmupRequest, HeavyWarmupSummary, enqueue_heavy_warmup};
 use raster::{
     apply_raster_mismatch_policy, decode_raster, derive_canvas_from_asset, is_svg,
     raster_policy_for_layer, rasterize_bytes,
@@ -1107,30 +1109,30 @@ pub(crate) async fn render_token_uncached(
                 let permit = semaphore.clone().acquire_owned().await?;
                 let assets = state.assets.clone();
                 let blocking_semaphore = state.blocking_semaphore.clone();
+                let heavy_svg_semaphore = state.heavy_svg_semaphore.clone();
+                let config = state.config.clone();
                 let layer = layer.clone();
-                let max_svg_bytes = state.config.max_svg_bytes;
-                let max_svg_nodes = state.config.max_svg_node_count;
-                let max_decoded = state.config.max_decoded_raster_pixels;
-                let max_raster_bytes = state.config.max_raster_bytes;
                 let raster_fixed = render_policy.raster_mismatch_fixed;
                 let raster_child = render_policy.raster_mismatch_child;
                 let theme_replace = theme_replace.clone();
                 let theme_source_cache = theme_source_cache.clone();
                 let debug_context = debug_context.clone();
+                let target_width = width;
+                let og_mode = request.og_mode;
                 join_set.spawn(async move {
                     let _permit = permit;
                     let result = load_layer(
                         &assets,
                         blocking_semaphore,
+                        heavy_svg_semaphore,
+                        config.as_ref(),
                         &layer,
                         debug_context,
                         idx,
                         canvas_width,
                         canvas_height,
-                        max_svg_bytes,
-                        max_svg_nodes,
-                        max_raster_bytes,
-                        max_decoded,
+                        target_width,
+                        og_mode,
                         raster_fixed,
                         raster_child,
                         theme_replace,
@@ -2391,15 +2393,15 @@ pub async fn refresh_canvas_size(
 async fn load_layer(
     assets: &AssetResolver,
     blocking_semaphore: Arc<Semaphore>,
+    heavy_svg_semaphore: Arc<Semaphore>,
+    config: &Config,
     layer: &Layer,
     debug_context: Option<DebugRenderContext>,
     layer_index: usize,
     canvas_width: u32,
     canvas_height: u32,
-    max_svg_bytes: usize,
-    max_svg_nodes: usize,
-    max_raster_bytes: usize,
-    max_decoded_raster_pixels: u64,
+    target_width: Option<u32>,
+    og_mode: bool,
     raster_mismatch_fixed: RasterMismatchPolicy,
     raster_mismatch_child: RasterMismatchPolicy,
     theme_replace: Option<Arc<ThemeReplaceMap>>,
@@ -2457,12 +2459,12 @@ async fn load_layer(
             themed.as_ref(),
             canvas_width,
             canvas_height,
-            max_svg_bytes,
-            max_svg_nodes,
-            max_raster_bytes,
-            max_decoded_raster_pixels,
+            target_width,
+            og_mode,
             assets,
+            config,
             &blocking_semaphore,
+            &heavy_svg_semaphore,
             layer,
             layer_index,
             None,
@@ -2797,12 +2799,12 @@ async fn load_layer(
         themed.as_ref(),
         canvas_width,
         canvas_height,
-        max_svg_bytes,
-        max_svg_nodes,
-        max_raster_bytes,
-        max_decoded_raster_pixels,
+        target_width,
+        og_mode,
         assets,
+        config,
         &blocking_semaphore,
+        &heavy_svg_semaphore,
         layer,
         layer_index,
         art_uri,

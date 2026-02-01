@@ -42,28 +42,28 @@
       "tokenId": "4"
     },
     {
-      "label": "base-923c-1",
+      "label": "kanaria-2",
       "chain": "base",
-      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
-      "tokenId": "1"
-    },
-    {
-      "label": "base-923c-2",
-      "chain": "base",
-      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
       "tokenId": "2"
     },
     {
-      "label": "base-923c-3",
+      "label": "kanaria-3",
       "chain": "base",
-      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
       "tokenId": "3"
     },
     {
-      "label": "base-923c-4",
+      "label": "kanaria-4",
       "chain": "base",
-      "collection": "0x923c768ac53b24a188333f3709b71cb343db20b2",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
       "tokenId": "4"
+    },
+    {
+      "label": "kanaria-5",
+      "chain": "base",
+      "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+      "tokenId": "5"
     }
   ]
 }

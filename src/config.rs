@@ -31,6 +31,7 @@ pub struct Config {
     pub max_concurrent_ipfs_fetches: usize,
     pub max_concurrent_rpc_calls: usize,
     pub max_blocking_tasks: usize,
+    pub heavy_svg_concurrency: usize,
     pub default_canvas_width: u32,
     pub default_canvas_height: u32,
     pub default_cache_timestamp: Option<String>,
@@ -61,6 +62,10 @@ pub struct Config {
     pub max_metadata_json_bytes: usize,
     pub max_svg_bytes: usize,
     pub max_svg_node_count: usize,
+    pub heavy_svg_node_threshold: usize,
+    pub heavy_svg_feature_threshold: usize,
+    pub svg_fast_path_max_width: u32,
+    pub svg_fast_path_target_width: u32,
     pub max_raster_bytes: usize,
     pub max_raster_resize_bytes: usize,
     pub max_raster_resize_dim: u32,
@@ -133,6 +138,7 @@ pub struct Config {
     pub warmup_job_timeout_seconds: u64,
     pub warmup_max_block_span: u64,
     pub warmup_max_concurrent_asset_pins: usize,
+    pub heavy_warmup_max_assets: usize,
     pub token_state_check_ttl_seconds: u64,
     pub fresh_rate_limit_seconds: u64,
     pub fresh_request_retention_days: u64,
@@ -275,6 +281,7 @@ impl Config {
             .map(|count| count.get())
             .unwrap_or(4);
         let max_blocking_tasks = parse_usize("MAX_BLOCKING_TASKS", default_blocking_tasks).max(1);
+        let heavy_svg_concurrency = parse_usize("HEAVY_SVG_CONCURRENCY", 1).max(1);
 
         let default_canvas_width = parse_u32("DEFAULT_CANVAS_WIDTH", 1080);
         let default_canvas_height = parse_u32("DEFAULT_CANVAS_HEIGHT", 1512);
@@ -339,6 +346,13 @@ impl Config {
         let max_metadata_json_bytes = parse_usize("MAX_METADATA_JSON_BYTES", 524_288);
         let max_svg_bytes = parse_usize("MAX_SVG_BYTES", 2_097_152);
         let max_svg_node_count = parse_usize("MAX_SVG_NODE_COUNT", 200_000);
+        let heavy_svg_node_threshold = parse_usize(
+            "HEAVY_SVG_NODE_THRESHOLD",
+            (max_svg_node_count / 10).max(1000),
+        );
+        let heavy_svg_feature_threshold = parse_usize("HEAVY_SVG_FEATURE_THRESHOLD", 200);
+        let svg_fast_path_max_width = parse_u32("SVG_FAST_PATH_MAX_WIDTH", 256);
+        let svg_fast_path_target_width = parse_u32("SVG_FAST_PATH_TARGET_WIDTH", 512);
         let max_raster_bytes = parse_usize("MAX_RASTER_BYTES", 10 * 1024 * 1024);
         let max_raster_resize_bytes = parse_usize(
             "MAX_RASTER_RESIZE_BYTES",
@@ -483,6 +497,7 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
         let warmup_job_timeout_seconds = parse_u64("WARMUP_JOB_TIMEOUT_SECONDS", 600);
         let warmup_max_block_span = parse_u64("WARMUP_MAX_BLOCK_SPAN", 0);
         let warmup_max_concurrent_asset_pins = parse_usize("WARMUP_MAX_CONCURRENT_ASSET_PINS", 4);
+        let heavy_warmup_max_assets = parse_usize("HEAVY_WARMUP_MAX_ASSETS", 50);
         let token_state_check_ttl_seconds = parse_u64("TOKEN_STATE_CHECK_TTL_SECONDS", 86400);
         let fresh_rate_limit_seconds = parse_u64("FRESH_RATE_LIMIT_SECONDS", 300);
         let fresh_request_retention_days = parse_u64("FRESH_REQUEST_RETENTION_DAYS", 7);
@@ -532,6 +547,7 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             max_concurrent_ipfs_fetches,
             max_concurrent_rpc_calls,
             max_blocking_tasks,
+            heavy_svg_concurrency,
             default_canvas_width,
             default_canvas_height,
             default_cache_timestamp,
@@ -562,6 +578,10 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             max_metadata_json_bytes,
             max_svg_bytes,
             max_svg_node_count,
+            heavy_svg_node_threshold,
+            heavy_svg_feature_threshold,
+            svg_fast_path_max_width,
+            svg_fast_path_target_width,
             max_raster_bytes,
             max_raster_resize_bytes,
             max_raster_resize_dim,
@@ -634,6 +654,7 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             warmup_job_timeout_seconds,
             warmup_max_block_span,
             warmup_max_concurrent_asset_pins,
+            heavy_warmup_max_assets,
             token_state_check_ttl_seconds,
             fresh_rate_limit_seconds,
             fresh_request_retention_days,
