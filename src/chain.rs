@@ -208,6 +208,13 @@ fn selector_from_bytes(data: &[u8]) -> Option<[u8; 4]> {
     Some([data[0], data[1], data[2], data[3]])
 }
 
+fn wrap_rpc_endpoint_error(err: anyhow::Error, endpoint: &str) -> anyhow::Error {
+    let result: Result<(), anyhow::Error> = Err(err);
+    result
+        .with_context(|| format!("rpc endpoint {} failed", endpoint))
+        .unwrap_err()
+}
+
 fn map_contract_error(err: ContractError<Provider<Http>>) -> anyhow::Error {
     if let ContractError::Revert(ref data) = err {
         let bytes = data.to_vec();
@@ -661,11 +668,12 @@ impl ChainClient {
                 Err(err) => {
                     self.metrics.observe_upstream_failure("rpc_call");
                     warn!(endpoint = %endpoint.url, error = ?err, "rpc endpoint call failed");
-                    if !should_retry(&err) {
-                        return Err(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
+                    let wrapped = wrap_rpc_endpoint_error(err, &endpoint.url);
+                    if !should_retry(&wrapped) {
+                        return Err(wrapped);
                     }
                     self.record_endpoint_failure(&endpoint.url);
-                    last_err = Some(anyhow!("rpc endpoint {} failed: {}", endpoint.url, err));
+                    last_err = Some(wrapped);
                 }
             }
         }

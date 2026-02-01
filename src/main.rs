@@ -90,7 +90,8 @@ fn build_app(state: Arc<AppState>) -> Router {
     if let Some(landing) = state.config.landing.as_ref() {
         app = app.fallback_service(landing::router(landing).into_service());
     }
-    app.layer(CompressionLayer::new().compress_when(NoImageCompression::new()))
+    let app = app
+        .layer(CompressionLayer::new().compress_when(NoImageCompression::new()))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().include_headers(false)),
@@ -104,7 +105,8 @@ fn build_app(state: Arc<AppState>) -> Router {
             let state = access_state.clone();
             async move { http::access_middleware(state, request, next).await }
         }))
-        .layer(ConcurrencyLimitLayer::new(max_in_flight))
+        .layer(ConcurrencyLimitLayer::new(max_in_flight));
+    app.with_state(state)
 }
 
 #[tokio::main]

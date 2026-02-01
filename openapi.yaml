@@ -71,6 +71,9 @@ paths:
           name: width
           schema: { type: string }
         - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
           name: ogImage
           schema: { type: boolean }
         - in: query
@@ -85,14 +88,87 @@ paths:
         - in: query
           name: fresh
           schema: { type: string, enum: ["1", "true", "false"] }
-        - in: query
-          name: fresh
-          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
         "304":
           description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check render cache status
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+      responses:
+        "200":
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /render/{chain}/{collection}/{tokenId}/{assetId}.{format}:
     get:
       summary: Render token asset (legacy dotted path)
@@ -128,6 +204,9 @@ paths:
           name: width
           schema: { type: string }
         - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
           name: ogImage
           schema: { type: boolean }
         - in: query
@@ -142,14 +221,88 @@ paths:
         - in: query
           name: fresh
           schema: { type: string, enum: ["1", "true", "false"] }
-        - in: query
-          name: fresh
-          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
         "304":
           description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check render cache status (legacy dotted path)
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+      responses:
+        "200":
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /render/{chain}/{collection}/{tokenId}/{format}:
     get:
       summary: Redirect to top asset render
@@ -177,6 +330,18 @@ paths:
       responses:
         "307":
           description: Redirect
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /render/{chain}/{collection}/{tokenId}.{format}:
     get:
       summary: Redirect to top asset render (legacy dotted path)
@@ -205,6 +370,18 @@ paths:
       responses:
         "307":
           description: Redirect
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /production/create/{chain}/{cacheTimestamp}/{collection}/{tokenId}/{assetId}/{format}:
     get:
       summary: Render token asset with cache timestamp
@@ -262,6 +439,83 @@ paths:
           description: Rendered image
         "304":
           description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check render cache status (with cache timestamp)
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: cacheTimestamp
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+      responses:
+        "200":
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /production/create/{chain}/{cacheTimestamp}/{collection}/{tokenId}/{assetId}.{format}:
     get:
       summary: Render token asset with cache timestamp (legacy dotted path)
@@ -320,6 +574,84 @@ paths:
           description: Rendered image
         "304":
           description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check render cache status (legacy dotted path)
+      deprecated: true
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: cacheTimestamp
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: width
+          schema: { type: string }
+        - in: query
+          name: img-width
+          schema: { type: string }
+        - in: query
+          name: ogImage
+          schema: { type: boolean }
+        - in: query
+          name: overlay
+          schema: { type: string }
+        - in: query
+          name: bg
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+      responses:
+        "200":
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /og/{chain}/{collection}/{tokenId}/{assetId}/{format}:
     get:
       summary: Render OG image
@@ -353,9 +685,75 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check OG render cache status
+      security:
+        - apiKeyAuth: []
+        - {}
+      parameters:
+        - in: path
+          name: chain
+          required: true
+          schema: { type: string }
+        - in: path
+          name: collection
+          required: true
+          schema: { type: string }
+        - in: path
+          name: tokenId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: assetId
+          required: true
+          schema: { type: string }
+        - in: path
+          name: format
+          required: true
+          schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
+      responses:
+        "200":
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /og/{chain}/{collection}/{tokenId}/{assetId}.{format}:
     get:
       summary: Render OG image (legacy dotted path)
@@ -390,20 +788,29 @@ paths:
         - in: query
           name: onerror
           schema: { type: string, enum: [placeholder] }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
           description: Rendered image
-  /admin/api/collections:
-    get:
-      summary: List collections
-      security:
-        - adminAuth: []
-      responses:
-        "200":
-          description: OK
-  /og/{chain}/{collection}/{tokenId}/{assetId}/{format}:
-    get:
-      summary: Render OpenGraph image (explicit format)
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    head:
+      summary: Check OG render cache status (legacy dotted path)
+      deprecated: true
       security:
         - apiKeyAuth: []
         - {}
@@ -428,32 +835,34 @@ paths:
           name: format
           required: true
           schema: { type: string, enum: [webp, png, jpg, jpeg] }
+        - in: query
+          name: cache
+          schema: { type: string }
+        - in: query
+          name: fresh
+          schema: { type: string, enum: ["1", "true", "false"] }
       responses:
         "200":
-          description: OK
-  /og/{chain}/{collection}/{tokenId}/{asset}:
+          description: Cache hit metadata
+        "304":
+          description: Not modified
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /admin/api/collections:
     get:
-      summary: Render OpenGraph image (legacy format suffix)
+      summary: List collections
       security:
-        - apiKeyAuth: []
-        - {}
-      parameters:
-        - in: path
-          name: chain
-          required: true
-          schema: { type: string }
-        - in: path
-          name: collection
-          required: true
-          schema: { type: string }
-        - in: path
-          name: tokenId
-          required: true
-          schema: { type: string }
-        - in: path
-          name: asset
-          required: true
-          schema: { type: string }
+        - adminAuth: []
       responses:
         "200":
           description: OK
@@ -819,3 +1228,55 @@ components:
       scheme: bearer
       bearerFormat: MetricsToken
       description: "Use Authorization: Bearer <metrics bearer token>"
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, error]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+        retry_after_seconds:
+          type: integer
+          format: int64
+      additionalProperties: true
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    TooManyRequests:
+      description: Rate limited
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

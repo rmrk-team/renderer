@@ -1,9 +1,9 @@
 use crate::assets::AssetFetchError;
 use crate::canonical;
 use crate::chain::{
-    ComposeResult, FixedPart, is_contract_revert_error, revert_selector,
-    SELECTOR_COMPOSE_EQUIP_REVERT, SELECTOR_NON_COMPOSABLE_ASSET,
-    SELECTOR_NON_COMPOSABLE_ASSET_ALT, SELECTOR_TOKEN_HAS_NO_ASSETS,
+    ComposeResult, FixedPart, SELECTOR_COMPOSE_EQUIP_REVERT, SELECTOR_NON_COMPOSABLE_ASSET,
+    SELECTOR_NON_COMPOSABLE_ASSET_ALT, SELECTOR_TOKEN_HAS_NO_ASSETS, is_contract_revert_error,
+    revert_selector,
 };
 use crate::db::TokenWarmupItem;
 use crate::pinning::PinnedAssetLocation;

@@ -35,6 +35,59 @@ Health check:
 curl http://localhost:8080/healthz
 ```
 
+## Debugging renders
+
+There are two debug modes available:
+
+- Render debug logging: set `DEBUG_RENDER_TOKENS` to a comma-separated list of token IDs and
+  (optionally) `DEBUG_RENDER_COLLECTIONS` to a comma-separated list of collection addresses.
+  When a render matches, the renderer emits detailed compose/layer logs. Use `RUST_LOG=debug`
+  to see the full debug output.
+- Raw/debug responses: add `debug=1` or `raw=1` to render/og endpoints to bypass fallback images
+  and return JSON errors instead. This is gated by `allow_debug` (active API key or allowlisted IP rule).
+
+## Marketplace test
+
+Run a local renderer and the marketplace sim against known-good collections. This uses the same
+collections as `benchmarks/renderer-benchmark-config.json`, with a longer token list.
+
+Start the renderer with open access and Base RPCs:
+
+```bash
+export ADMIN_PASSWORD="local-dev"
+export DB_PATH="/tmp/renderer-marketplace/renderer.db"
+export CACHE_DIR="/tmp/renderer-marketplace/cache"
+export FALLBACKS_DIR="/tmp/renderer-marketplace/fallbacks"
+export REQUIRE_APPROVAL=false
+export I_KNOW_WHAT_I_AM_DOING=true
+export RPC_ENDPOINTS='{"base":["https://1rpc.io/base","https://base.blockpi.network/v1/rpc/public","https://base-rpc.publicnode.com","https://mainnet.base.org"]}'
+export RENDER_UTILS_ADDRESSES='{"base":"0x8c2CA0412c2bf5974535fb8Fcb12bE3B7F36d6aD"}'
+
+cargo run
+```
+
+Configure a render fallback for the banners collection (required; see
+`spec-docs/FALLBACK_PROBLEM.md`):
+
+```bash
+bun -e 'const data=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVQYV2NgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=","base64"); await Bun.write("/tmp/renderer-marketplace/fallback.png", data);'
+curl -s -H "Authorization: Bearer ${ADMIN_PASSWORD}" \
+  -F "file=@/tmp/renderer-marketplace/fallback.png" \
+  http://127.0.0.1:8080/admin/api/collections/base/0x923c768ac53b24a188333f3709b71cb343db20b2/fallbacks/render
+```
+
+Run the marketplace sim (use low concurrency to avoid RPC rate limits):
+
+```bash
+bun run scripts/marketplace-sim.ts --collection 0x011ff409bc4803ec5cfab41c3fd1db99fd05c004 --tokens 1,2,3,4,5,6,7,8,9,10,11 --concurrency 1 --base-url http://127.0.0.1:8080
+bun run scripts/marketplace-sim.ts --collection 0x7d5f40b1f94e27f3e6d676d28254252f65efd60c --tokens 1,2,3,4,5,6,7,8,9,10 --concurrency 1 --base-url http://127.0.0.1:8080
+bun run scripts/marketplace-sim.ts --collection 0x923c768ac53b24a188333f3709b71cb343db20b2 --tokens 1,2,3,4,5,7,8,9,10,11 --concurrency 1 --base-url http://127.0.0.1:8080
+```
+
+Expected results: all requests return `200`. The banners list excludes token `6` because it still
+reverts on chain. If Kanaria token `1` returns `500`, check `FAILURE_LOG_PATH` for
+`contract call reverted` errors from the RPC.
+
 ## Configuration
 
 All configuration is done via environment variables. See env.example for possibilities.
