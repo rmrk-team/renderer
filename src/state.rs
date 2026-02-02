@@ -67,6 +67,7 @@ impl AppState {
         assets: AssetResolver,
         chain: ChainClient,
         metrics: Arc<Metrics>,
+        blocking_semaphore: Arc<Semaphore>,
         rpc_semaphore: Arc<Semaphore>,
         usage_tx: Option<mpsc::Sender<UsageEvent>>,
         render_queue_tx: Option<mpsc::Sender<RenderJob>>,
@@ -75,7 +76,6 @@ impl AppState {
         let render_singleflight = RenderSingleflight::new();
         let token_state_singleflight = RenderSingleflight::new();
         let render_semaphore = Arc::new(Semaphore::new(config.max_concurrent_renders));
-        let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
         let heavy_svg_semaphore = Arc::new(Semaphore::new(config.heavy_svg_concurrency));
         let warmup_notify = Arc::new(Notify::new());
         let catalog_warmup_notify = Arc::new(Notify::new());

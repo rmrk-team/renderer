@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::net::lookup_host;
 use tokio::sync::{Mutex, Semaphore};
+use tokio::task;
 use tokio::time::sleep;
 use tracing::{debug, warn};
 use url::{Host, Url};
@@ -38,6 +39,7 @@ pub struct AssetResolver {
     db: Database,
     pin_store: Option<Arc<PinnedAssetStore>>,
     ipfs_semaphore: Arc<Semaphore>,
+    blocking_semaphore: Arc<Semaphore>,
     nonrenderable_meta_cache: Arc<Mutex<NonRenderableMetaCache>>,
     ipfs_negative_cache: Arc<Mutex<IpfsNegativeCache>>,
     ipfs_negative_cid_tracker: Arc<Mutex<IpfsNegativeCidTracker>>,
@@ -450,6 +452,7 @@ impl AssetResolver {
         db: Database,
         pin_store: Option<Arc<PinnedAssetStore>>,
         ipfs_semaphore: Arc<Semaphore>,
+        blocking_semaphore: Arc<Semaphore>,
         metrics: Arc<Metrics>,
     ) -> Result<Self> {
         let client = reqwest::Client::builder()
@@ -475,6 +478,7 @@ impl AssetResolver {
             db,
             pin_store,
             ipfs_semaphore,
+            blocking_semaphore,
             nonrenderable_meta_cache: Arc::new(Mutex::new(NonRenderableMetaCache::default())),
             ipfs_negative_cache: Arc::new(Mutex::new(IpfsNegativeCache::default())),
             ipfs_negative_cid_tracker: Arc::new(Mutex::new(IpfsNegativeCidTracker::default())),
@@ -741,14 +745,13 @@ impl AssetResolver {
                 parse_data_uri(uri, DataUriKind::Asset, self.config.max_raster_resize_bytes)?;
             let bytes = if bytes.len() > self.config.max_raster_bytes {
                 if let Some(format) = infer_image_format(content_type.as_ref(), &bytes) {
-                    resize_raster_bytes(
-                        &bytes,
-                        format,
-                        self.config.max_raster_resize_dim,
-                        self.config.max_decoded_raster_pixels,
-                    )
-                    .map(Bytes::from)
-                    .unwrap_or(bytes)
+                    match self
+                        .resize_raster_bytes_blocking(bytes.clone(), format)
+                        .await
+                    {
+                        Ok(encoded) => Bytes::from(encoded),
+                        Err(_) => bytes,
+                    }
                 } else {
                     bytes
                 }
@@ -1437,16 +1440,27 @@ impl AssetResolver {
         ) {
             return Ok(None);
         }
-        let encoded = resize_raster_bytes(
-            &fetched.bytes,
-            format,
-            self.config.max_raster_resize_dim,
-            self.config.max_decoded_raster_pixels,
-        )?;
+        let encoded = self
+            .resize_raster_bytes_blocking(fetched.bytes.clone(), format)
+            .await?;
         Ok(Some(FetchedBytes {
             bytes: Bytes::from(encoded),
             content_type: mime_for_format(format),
         }))
+    }
+
+    async fn resize_raster_bytes_blocking(
+        &self,
+        bytes: Bytes,
+        format: ImageFormat,
+    ) -> Result<Vec<u8>> {
+        let max_dim = self.config.max_raster_resize_dim;
+        let max_pixels = self.config.max_decoded_raster_pixels;
+        let blocking = self.blocking_semaphore.clone();
+        spawn_blocking_with_semaphore(blocking, move || {
+            resize_raster_bytes(&bytes, format, max_dim, max_pixels)
+        })
+        .await
     }
 
     async fn validate_http_url(
@@ -2076,6 +2090,22 @@ fn mime_for_format(format: ImageFormat) -> Option<Mime> {
         ImageFormat::Jpeg => Some(mime::IMAGE_JPEG),
         ImageFormat::WebP => Some("image/webp".parse().ok()?),
         _ => None,
+    }
+}
+
+async fn spawn_blocking_with_semaphore<T, F>(blocking_semaphore: Arc<Semaphore>, f: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    let permit = blocking_semaphore.acquire_owned().await?;
+    let handle = task::spawn_blocking(move || {
+        let _permit = permit;
+        f()
+    });
+    match handle.await {
+        Ok(result) => result,
+        Err(err) => Err(anyhow!("blocking task failed: {err}")),
     }
 }
 

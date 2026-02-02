@@ -175,12 +175,14 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
+    let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
     let assets = AssetResolver::new(
         Arc::new(config.clone()),
         cache.clone(),
         db.clone(),
         Some(pinned_store.clone()),
         ipfs_semaphore.clone(),
+        blocking_semaphore.clone(),
         metrics.clone(),
     )?;
     let rpc_limit = if config.max_concurrent_rpc_calls == 0 {
@@ -231,6 +233,7 @@ async fn main() -> anyhow::Result<()> {
         assets,
         chain,
         metrics,
+        blocking_semaphore,
         rpc_semaphore,
         usage_tx,
         render_queue_tx,
@@ -523,12 +526,14 @@ mod tests {
         let metrics = Arc::new(metrics::Metrics::new(&config));
         let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
+        let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
         let assets = AssetResolver::new(
             Arc::new(config.clone()),
             cache.clone(),
             db.clone(),
             Some(pinned_store),
             ipfs_semaphore,
+            blocking_semaphore.clone(),
             metrics.clone(),
         )
         .unwrap();
@@ -551,6 +556,7 @@ mod tests {
             assets,
             chain,
             metrics,
+            blocking_semaphore,
             rpc_semaphore,
             None,
             None,
@@ -575,12 +581,14 @@ mod tests {
         let metrics = Arc::new(metrics::Metrics::new(&config));
         let pinned_store = Arc::new(PinnedAssetStore::new(&config).unwrap());
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
+        let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
         let assets = AssetResolver::new(
             Arc::new(config.clone()),
             cache.clone(),
             db.clone(),
             Some(pinned_store),
             ipfs_semaphore,
+            blocking_semaphore.clone(),
             metrics.clone(),
         )
         .unwrap();
@@ -603,6 +611,7 @@ mod tests {
             assets,
             chain,
             metrics,
+            blocking_semaphore,
             rpc_semaphore,
             None,
             None,

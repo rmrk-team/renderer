@@ -2755,12 +2755,14 @@ mod tests {
             None
         };
         let ipfs_semaphore = Arc::new(Semaphore::new(config.max_concurrent_ipfs_fetches));
+        let blocking_semaphore = Arc::new(Semaphore::new(config.max_blocking_tasks));
         let assets = AssetResolver::new(
             Arc::new(config.clone()),
             cache.clone(),
             db.clone(),
             pinned_store,
             ipfs_semaphore,
+            blocking_semaphore.clone(),
             metrics.clone(),
         )
         .unwrap();
@@ -2783,6 +2785,7 @@ mod tests {
             assets,
             chain,
             metrics,
+            blocking_semaphore,
             rpc_semaphore,
             None,
             None,
