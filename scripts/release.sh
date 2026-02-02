@@ -49,16 +49,6 @@ if ! git merge-base --is-ancestor origin/master HEAD; then
   exit 1
 fi
 
-if git rev-parse "refs/tags/$version" >/dev/null 2>&1; then
-  echo "Tag already exists locally: $version"
-  exit 1
-fi
-
-if [[ -n "$(git ls-remote --tags origin "refs/tags/$version")" ]]; then
-  echo "Tag already exists on origin: $version"
-  exit 1
-fi
-
 python3 - "$version" <<'PY'
 import re
 import sys
@@ -88,11 +78,19 @@ if lock.exists():
     lock.write_text(lock_text)
 PY
 
-git add Cargo.toml Cargo.lock
-git commit -m "chore(release): $version"
+if [[ -n "$(git status --porcelain)" ]]; then
+  git add Cargo.toml Cargo.lock
+  git commit -m "chore(release): $version"
+fi
 
-git tag "$version"
+if ! git rev-parse "refs/tags/$version" >/dev/null 2>&1; then
+  git tag "$version"
+fi
 git push origin master
 git push origin "$version"
 
-gh release create "$version" --title "$version" --notes "Release $version"
+if gh release view "$version" >/dev/null 2>&1; then
+  echo "Release already exists: $version"
+else
+  gh release create "$version" --title "$version" --notes "Release $version"
+fi
