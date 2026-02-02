@@ -375,6 +375,7 @@ async fn metrics(
         HeaderValue::from_str(encoder.format_type())
             .unwrap_or(HeaderValue::from_static("text/plain; version=0.0.4")),
     );
+    // Text fallbacks should never be cached by intermediaries.
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert(
         "X-Content-Type-Options",

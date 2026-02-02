@@ -266,6 +266,11 @@ configurable via admin settings. These CTA lines are intentionally unvalidated a
 trusted admin content to maximize conversion control; this is an accepted risk and relies on
 admin access protection.
 
+Caching policy:
+
+- File-based fallbacks use configured `Cache-Control` (typically `public, max-age=...`).
+- Generated fallback-text images always return `Cache-Control: no-store` to avoid accidental caching.
+
 ---
 
 ## 5. Catalog & Parts System
