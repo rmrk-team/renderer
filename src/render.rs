@@ -8,6 +8,7 @@ use crate::chain::{
 };
 use crate::config::{Config, RasterMismatchPolicy, RenderPolicy};
 use crate::db::CollectionConfig;
+use crate::metrics::Metrics;
 #[cfg(test)]
 use crate::pinning::PinnedAssetStore;
 use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
@@ -158,10 +159,35 @@ pub struct RenderResponse {
     pub missing_layers: usize,
     pub nonconforming_layers: usize,
     pub cache_hit: bool,
+    pub strategy: Option<RenderStrategyLabel>,
+    pub total_layers: Option<usize>,
     pub cache_control: String,
     pub etag: Option<String>,
     pub cached_path: Option<PathBuf>,
     pub content_length: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RenderStrategyLabel {
+    Rmrk,
+    Erc721,
+}
+
+impl RenderStrategyLabel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RenderStrategyLabel::Rmrk => "rmrk",
+            RenderStrategyLabel::Erc721 => "erc721",
+        }
+    }
+}
+
+fn strategy_label_for_asset_id(asset_id: &str) -> RenderStrategyLabel {
+    if asset_id == TOKEN_URI_FALLBACK_ASSET_ID {
+        RenderStrategyLabel::Erc721
+    } else {
+        RenderStrategyLabel::Rmrk
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -426,6 +452,8 @@ async fn render_token_with_limit_internal(
                             missing_layers: 0,
                             nonconforming_layers: 0,
                             cache_hit: true,
+                            strategy: Some(strategy_label_for_asset_id(&request.asset_id)),
+                            total_layers: None,
                             cache_control: cache_control_for_request(
                                 &request,
                                 state.cache.render_ttl,
@@ -928,6 +956,8 @@ pub(crate) async fn render_token_uncached(
     let mut composite_from_cache = false;
     let mut canvas: Option<RgbaImage> = None;
     let mut cache_selection: Option<RenderCacheSelection> = None;
+    let mut scaled_render = false;
+    let mut total_layers: Option<usize> = None;
     if let Some(image) = canvas.as_ref() {
         let canvas_pixels = (image.width() as u64).saturating_mul(image.height() as u64);
         if canvas_pixels > state.config.max_canvas_pixels {
@@ -1009,6 +1039,14 @@ pub(crate) async fn render_token_uncached(
             allow_thumb_fallback,
         )
         .await?;
+        let (canvas_width, canvas_height, scaled_render_local) = scaled_canvas_dimensions(
+            canvas_width,
+            canvas_height,
+            width,
+            request.og_mode,
+            &state.config,
+        );
+        scaled_render = scaled_render_local;
         let canvas_pixels = (canvas_width as u64).saturating_mul(canvas_height as u64);
         if canvas_pixels > state.config.max_canvas_pixels {
             return Err(RenderLimitError::CanvasTooLarge.into());
@@ -1034,6 +1072,7 @@ pub(crate) async fn render_token_uncached(
             log_debug_layers(context, &layers);
         }
         let required_layers = layers.iter().filter(|layer| layer.required).count();
+        total_layers = Some(layers.len());
         debug!(
             layers = layers.len(),
             required_layers, slot_part_layers, slot_child_layers, "render layers prepared"
@@ -1069,6 +1108,8 @@ pub(crate) async fn render_token_uncached(
                         missing_layers: 0,
                         nonconforming_layers: 0,
                         cache_hit: true,
+                        strategy: Some(strategy_label_for_asset_id(&request.asset_id)),
+                        total_layers: None,
                         cache_control: cache_control_for_request(
                             request,
                             state.cache.render_ttl,
@@ -1140,6 +1181,7 @@ pub(crate) async fn render_token_uncached(
             for (idx, layer) in layers.iter().enumerate() {
                 let permit = semaphore.clone().acquire_owned().await?;
                 let assets = state.assets.clone();
+                let metrics = state.metrics.clone();
                 let blocking_semaphore = state.blocking_semaphore.clone();
                 let heavy_svg_semaphore = state.heavy_svg_semaphore.clone();
                 let config = state.config.clone();
@@ -1155,6 +1197,7 @@ pub(crate) async fn render_token_uncached(
                     let _permit = permit;
                     let result = load_layer(
                         &assets,
+                        metrics.as_ref(),
                         blocking_semaphore,
                         heavy_svg_semaphore,
                         config.as_ref(),
@@ -1326,8 +1369,10 @@ pub(crate) async fn render_token_uncached(
                 final_image = apply_og_crop(final_image, focal_point);
             }
             if let Some(width) = width {
-                let height = scale_height(final_image.height(), final_image.width(), width);
-                final_image = final_image.resize_exact(width, height, FilterType::Lanczos3);
+                if !scaled_render {
+                    let height = scale_height(final_image.height(), final_image.width(), width);
+                    final_image = final_image.resize_exact(width, height, FilterType::Lanczos3);
+                }
             }
             let bytes = encode_image(final_image, &output_format)?;
             Ok((bytes, composite_bytes))
@@ -1408,6 +1453,8 @@ pub(crate) async fn render_token_uncached(
         missing_layers,
         nonconforming_layers,
         cache_hit: false,
+        strategy: Some(strategy_label_for_asset_id(&request.asset_id)),
+        total_layers,
         cache_control,
         etag,
         cached_path: None,
@@ -2024,6 +2071,13 @@ async fn compute_render_cache_key_for_request(
         allow_thumb_fallback,
     )
     .await?;
+    let (canvas_width, canvas_height, _) = scaled_canvas_dimensions(
+        canvas_width,
+        canvas_height,
+        width,
+        request.og_mode,
+        &state.config,
+    );
     let canvas_pixels = (canvas_width as u64).saturating_mul(canvas_height as u64);
     if canvas_pixels > state.config.max_canvas_pixels {
         return Err(RenderLimitError::CanvasTooLarge.into());
@@ -2438,6 +2492,7 @@ pub async fn refresh_canvas_size(
 #[allow(clippy::too_many_arguments)]
 async fn load_layer(
     assets: &AssetResolver,
+    metrics: &Metrics,
     blocking_semaphore: Arc<Semaphore>,
     heavy_svg_semaphore: Arc<Semaphore>,
     config: &Config,
@@ -2508,6 +2563,7 @@ async fn load_layer(
             target_width,
             og_mode,
             assets,
+            metrics,
             config,
             &blocking_semaphore,
             &heavy_svg_semaphore,
@@ -2848,6 +2904,7 @@ async fn load_layer(
         target_width,
         og_mode,
         assets,
+        metrics,
         config,
         &blocking_semaphore,
         &heavy_svg_semaphore,
@@ -3013,6 +3070,32 @@ fn scale_height(original_height: u32, original_width: u32, target_width: u32) ->
     }
     let ratio = target_width as f64 / original_width as f64;
     (original_height as f64 * ratio).round() as u32
+}
+
+fn scaled_canvas_dimensions(
+    canvas_width: u32,
+    canvas_height: u32,
+    target_width: Option<u32>,
+    og_mode: bool,
+    config: &Config,
+) -> (u32, u32, bool) {
+    if og_mode {
+        return (canvas_width, canvas_height, false);
+    }
+    let Some(target_width) = target_width else {
+        return (canvas_width, canvas_height, false);
+    };
+    if config.scaled_render_max_width == 0 || target_width > config.scaled_render_max_width {
+        return (canvas_width, canvas_height, false);
+    }
+    if target_width >= canvas_width {
+        return (canvas_width, canvas_height, false);
+    }
+    let scaled_height = scale_height(canvas_height, canvas_width, target_width);
+    if scaled_height == 0 {
+        return (canvas_width, canvas_height, false);
+    }
+    (target_width, scaled_height, true)
 }
 
 fn apply_og_crop(image: DynamicImage, focal_point: i64) -> DynamicImage {

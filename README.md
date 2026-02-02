@@ -112,6 +112,7 @@ Heavy render controls:
 - `HEAVY_SVG_NODE_THRESHOLD` / `HEAVY_SVG_FEATURE_THRESHOLD` define when SVGs are treated as heavy.
 - `HEAVY_SVG_CONCURRENCY` caps concurrent heavy SVG rasterization (separate from `MAX_BLOCKING_TASKS`).
 - `SVG_FAST_PATH_MAX_WIDTH` / `SVG_FAST_PATH_TARGET_WIDTH` enable lower internal SVG raster sizes for small widths.
+- `SCALED_RENDER_MAX_WIDTH` caps the width at which the full render pipeline scales down (0 disables).
 
 HTTP safety caps:
 
@@ -120,7 +121,8 @@ HTTP safety caps:
 - `APPROVAL_ON_DEMAND_RATE_LIMIT_PER_MINUTE` / `APPROVAL_ON_DEMAND_RATE_LIMIT_BURST` throttle on-demand approval checks for unknown collections (per identity).
 - `MAX_ADMIN_BODY_BYTES` caps admin API request bodies.
 - `MAX_BLOCKING_TASKS` caps CPU-heavy `spawn_blocking` work (SVG parse/render, raster decode/encode).
-- Asset/metadata fetches resolve DNS once per request and pin the connection to the resolved IPs to reduce DNS rebinding risk.
+- Asset/metadata fetches pin the connection to resolved IPs to reduce DNS rebinding risk.
+- `DNS_CACHE_TTL_SECONDS` / `DNS_CACHE_CAPACITY` cache DNS lookups for outbound fetches.
 - `CACHE_SIZE_REFRESH_SECONDS` controls how often cache size stats are refreshed for `/status` and admin dashboard.
 - `OUTBOUND_CLIENT_CACHE_TTL_SECONDS` / `OUTBOUND_CLIENT_CACHE_CAPACITY` cache pinned HTTP clients for outbound fetches.
 - `CACHE_EVICT_INTERVAL_SECONDS` sets how often the cache eviction loop runs (0 disables).
@@ -633,7 +635,10 @@ GET /og/{chain}/{collection}/{tokenId}/{assetId}.{format}?cache={timestamp}
 - `X-Renderer-Complete: true|false`
 - `X-Renderer-Result: rendered|placeholder|cache-miss|fallback`
 - `X-Renderer-Cache-Hit: true|false` (cached renders and HEAD probes)
+- `X-Renderer-Cache: hit|miss`
+- `X-Renderer-Strategy: rmrk|erc721|fallback`
 - `X-Cache: HIT|MISS`
+- `X-Renderer-Layers: <count>` (when available)
 - `X-Renderer-Missing-Layers: <count>` (when missing required layers)
 - `X-Renderer-Nonconforming-Layers: <count>` (when raster sizes mismatch)
 - `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache`

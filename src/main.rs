@@ -402,6 +402,7 @@ mod tests {
             heavy_svg_feature_threshold: 1,
             svg_fast_path_max_width: 1,
             svg_fast_path_target_width: 1,
+            scaled_render_max_width: 1,
             max_raster_bytes: 1,
             max_raster_resize_bytes: 1,
             max_raster_resize_dim: 1,
@@ -485,6 +486,8 @@ mod tests {
             primary_asset_cache_capacity: 0,
             outbound_client_cache_ttl: Duration::from_secs(0),
             outbound_client_cache_capacity: 0,
+            dns_cache_ttl_seconds: 0,
+            dns_cache_capacity: 0,
             openapi_public: true,
             render_policy: RenderPolicy {
                 raster_mismatch_fixed: RasterMismatchPolicy::TopLeftNoScale,

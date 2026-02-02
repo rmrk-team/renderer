@@ -341,6 +341,48 @@
         }
       ],
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 96 }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Heavy SVG hits",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(renderer_heavy_svg_hit_total[5m]))",
+          "legendFormat": "hits/s",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 96 }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Heavy SVG raster p95",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(renderer_heavy_svg_raster_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 104 }
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Heavy SVG queue wait p95",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(renderer_heavy_svg_queue_wait_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 104 }
     }
   ]
 }

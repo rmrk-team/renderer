@@ -480,6 +480,7 @@ async fn head_cached_response(
     headers.insert("X-Renderer-Complete", HeaderValue::from_static("true"));
     headers.insert("X-Renderer-Result", HeaderValue::from_static("rendered"));
     headers.insert("X-Renderer-Cache-Hit", HeaderValue::from_static("true"));
+    headers.insert("X-Renderer-Cache", HeaderValue::from_static("hit"));
     headers.insert("X-Cache", HeaderValue::from_static("HIT"));
     headers.insert(
         "Server-Timing",
@@ -499,6 +500,7 @@ fn head_cache_miss_response(request: &RenderRequest) -> Response {
     headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
     headers.insert("X-Renderer-Result", HeaderValue::from_static("cache-miss"));
     headers.insert("X-Renderer-Cache-Hit", HeaderValue::from_static("false"));
+    headers.insert("X-Renderer-Cache", HeaderValue::from_static("miss"));
     headers.insert("X-Cache", HeaderValue::from_static("MISS"));
     headers.insert(
         "Server-Timing",
@@ -551,6 +553,23 @@ async fn to_http_response(
         HeaderValue::from_str(if response.cache_hit { "true" } else { "false" })
             .unwrap_or(HeaderValue::from_static("false")),
     );
+    headers.insert(
+        "X-Renderer-Cache",
+        HeaderValue::from_static(if response.cache_hit { "hit" } else { "miss" }),
+    );
+    if let Some(strategy) = response.strategy {
+        headers.insert(
+            "X-Renderer-Strategy",
+            HeaderValue::from_static(strategy.as_str()),
+        );
+    }
+    if let Some(total_layers) = response.total_layers {
+        headers.insert(
+            "X-Renderer-Layers",
+            HeaderValue::from_str(&total_layers.to_string())
+                .unwrap_or(HeaderValue::from_static("0")),
+        );
+    }
     let cache_label = if response.cache_hit { "HIT" } else { "MISS" };
     headers.insert(
         "X-Cache",
@@ -840,6 +859,7 @@ async fn fallback_text_response(
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
     headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert("X-Renderer-Strategy", HeaderValue::from_static("fallback"));
     headers.insert(
         "X-Renderer-Fallback",
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
@@ -1233,6 +1253,7 @@ async fn fallback_file_response(
         HeaderValue::from_static(if complete { "true" } else { "false" }),
     );
     headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert("X-Renderer-Strategy", HeaderValue::from_static("fallback"));
     headers.insert(
         "X-Renderer-Fallback",
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
@@ -1850,6 +1871,7 @@ fn fallback_head_response(
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     headers.insert("X-Renderer-Complete", HeaderValue::from_static("false"));
     headers.insert("X-Renderer-Result", HeaderValue::from_static("fallback"));
+    headers.insert("X-Renderer-Strategy", HeaderValue::from_static("fallback"));
     headers.insert(
         "X-Renderer-Fallback",
         HeaderValue::from_str(fallback_kind).unwrap_or(HeaderValue::from_static("fallback")),
@@ -3925,6 +3947,11 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
             AssetFetchError::Blocked => ApiError::bad_request("asset uri not allowed")
                 .with_code("asset_uri_blocked")
                 .with_log_detail(detail),
+            AssetFetchError::DataUriTooLarge { .. } => {
+                ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "data uri too large")
+                    .with_code("data_uri_too_large")
+                    .with_log_detail(detail)
+            }
             AssetFetchError::TooLarge => {
                 ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, "asset too large")
                     .with_code("asset_too_large")

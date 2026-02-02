@@ -32,6 +32,7 @@ use url::{Host, Url};
 pub struct AssetResolver {
     client: reqwest::Client,
     client_cache: ClientCache,
+    dns_cache: DnsCache,
     cache: CacheManager,
     config: Arc<Config>,
     db: Database,
@@ -355,6 +356,39 @@ struct ClientCacheEntry {
     expires_at: Instant,
 }
 
+#[derive(Clone)]
+struct DnsCache {
+    capacity: usize,
+    ttl: Duration,
+    inner: Arc<Mutex<DnsCacheInner>>,
+}
+
+struct DnsCacheInner {
+    map: HashMap<String, DnsCacheEntry>,
+    order: VecDeque<String>,
+}
+
+#[derive(Clone)]
+struct DnsCacheEntry {
+    addrs: Vec<SocketAddr>,
+    expires_at: Instant,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DataUriKind {
+    Metadata,
+    Asset,
+}
+
+impl std::fmt::Display for DataUriKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataUriKind::Metadata => write!(f, "metadata"),
+            DataUriKind::Asset => write!(f, "asset"),
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum AssetFetchError {
     #[error("invalid asset uri")]
@@ -363,6 +397,15 @@ pub enum AssetFetchError {
     Blocked,
     #[error("asset too large")]
     TooLarge,
+    #[error(
+        "data uri too large for {kind} (encoded={encoded_len} max_encoded={max_encoded_bytes} max_decoded={max_decoded_bytes})"
+    )]
+    DataUriTooLarge {
+        kind: DataUriKind,
+        encoded_len: usize,
+        max_encoded_bytes: usize,
+        max_decoded_bytes: usize,
+    },
     #[error("asset fetch blocked by ipfs negative cache: {key}")]
     NegativeCache {
         key: String,
@@ -377,6 +420,14 @@ pub enum AssetFetchError {
 #[derive(Debug, Deserialize)]
 struct MetadataJson {
     image: Option<String>,
+    #[serde(rename = "image_url")]
+    image_url: Option<String>,
+    #[serde(rename = "imageUrl")]
+    image_url_alt: Option<String>,
+    #[serde(rename = "image_uri")]
+    image_uri: Option<String>,
+    #[serde(rename = "imageUri")]
+    image_uri_alt: Option<String>,
     #[serde(rename = "mediaUri")]
     media_uri: Option<String>,
     #[serde(rename = "media_uri")]
@@ -411,9 +462,14 @@ impl AssetResolver {
             config.outbound_client_cache_capacity,
             config.outbound_client_cache_ttl,
         );
+        let dns_cache = DnsCache::new(
+            config.dns_cache_capacity,
+            Duration::from_secs(config.dns_cache_ttl_seconds),
+        );
         Ok(Self {
             client,
             client_cache,
+            dns_cache,
             cache,
             config,
             db,
@@ -681,7 +737,8 @@ impl AssetResolver {
     pub async fn fetch_asset(&self, uri: &str) -> Result<ResolvedAsset> {
         let uri = uri.trim();
         if uri.starts_with("data:") {
-            let (bytes, content_type) = parse_data_uri(uri)?;
+            let (bytes, content_type) =
+                parse_data_uri(uri, DataUriKind::Asset, self.config.max_raster_resize_bytes)?;
             let bytes = if bytes.len() > self.config.max_raster_bytes {
                 if let Some(format) = infer_image_format(content_type.as_ref(), &bytes) {
                     resize_raster_bytes(
@@ -761,10 +818,11 @@ impl AssetResolver {
     pub async fn fetch_metadata_json(&self, metadata_uri: &str) -> Result<Bytes> {
         let uri = metadata_uri.trim();
         if uri.starts_with("data:") {
-            let (bytes, _) = parse_data_uri(uri)?;
-            if bytes.len() > self.config.max_metadata_json_bytes {
-                return Err(anyhow!("metadata json too large ({} bytes)", bytes.len()));
-            }
+            let (bytes, _) = parse_data_uri(
+                uri,
+                DataUriKind::Metadata,
+                self.config.max_metadata_json_bytes,
+            )?;
             return Ok(bytes);
         }
         let resolved = self.resolve_uri(uri)?;
@@ -1449,6 +1507,10 @@ impl AssetResolver {
                 Host::Domain(_) => {}
             }
         }
+        let cache_key = format!("{host}:{port}:{allow_private}");
+        if let Some(addrs) = self.dns_cache.get(&cache_key).await {
+            return Ok((addrs, false));
+        }
         let mut addrs: Vec<SocketAddr> = lookup_host((host, port))
             .await
             .map_err(|_| AssetFetchError::Upstream {
@@ -1461,6 +1523,7 @@ impl AssetResolver {
         if addrs.is_empty() {
             return Err(AssetFetchError::Blocked);
         }
+        self.dns_cache.insert(cache_key, addrs.clone()).await;
         Ok((addrs, false))
     }
 
@@ -1597,6 +1660,65 @@ fn touch_client_key(order: &mut VecDeque<ClientCacheKey>, key: &ClientCacheKey) 
         order.remove(pos);
     }
     order.push_back(key.clone());
+}
+
+impl DnsCache {
+    fn new(capacity: usize, ttl: Duration) -> Self {
+        Self {
+            capacity,
+            ttl,
+            inner: Arc::new(Mutex::new(DnsCacheInner {
+                map: HashMap::new(),
+                order: VecDeque::new(),
+            })),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.capacity > 0 && self.ttl > Duration::from_secs(0)
+    }
+
+    async fn get(&self, key: &str) -> Option<Vec<SocketAddr>> {
+        if !self.enabled() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut guard = self.inner.lock().await;
+        if let Some(entry) = guard.map.get(key).cloned() {
+            if entry.expires_at <= now {
+                guard.map.remove(key);
+                guard.order.retain(|item| item != key);
+                return None;
+            }
+            touch_dns_key(&mut guard.order, key);
+            return Some(entry.addrs);
+        }
+        None
+    }
+
+    async fn insert(&self, key: String, addrs: Vec<SocketAddr>) {
+        if !self.enabled() {
+            return;
+        }
+        let expires_at = Instant::now() + self.ttl;
+        let mut guard = self.inner.lock().await;
+        guard
+            .map
+            .insert(key.clone(), DnsCacheEntry { addrs, expires_at });
+        touch_dns_key(&mut guard.order, &key);
+        while guard.map.len() > self.capacity {
+            if let Some(oldest) = guard.order.pop_front() {
+                guard.map.remove(&oldest);
+            }
+        }
+    }
+}
+
+fn touch_dns_key(order: &mut VecDeque<String>, key: &str) {
+    if let Some(pos) = order.iter().position(|item| item == key) {
+        order.remove(pos);
+    }
+    order.push_back(key.to_string());
 }
 
 impl AssetResolver {
@@ -1789,13 +1911,17 @@ fn is_valid_cid(cid: &str) -> bool {
     cid.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
-fn parse_data_uri(uri: &str) -> Result<(Bytes, Option<Mime>)> {
+fn parse_data_uri(
+    uri: &str,
+    kind: DataUriKind,
+    max_decoded_bytes: usize,
+) -> Result<(Bytes, Option<Mime>), AssetFetchError> {
     let Some((meta, data)) = uri.split_once(',') else {
-        return Err(anyhow!("invalid data uri"));
+        return Err(AssetFetchError::InvalidUri);
     };
     let meta = meta
         .strip_prefix("data:")
-        .ok_or_else(|| anyhow!("invalid data uri"))?;
+        .ok_or(AssetFetchError::InvalidUri)?;
     let mut content_type = None;
     let mut is_base64 = false;
     for (idx, part) in meta.split(';').enumerate() {
@@ -1807,38 +1933,96 @@ fn parse_data_uri(uri: &str) -> Result<(Bytes, Option<Mime>)> {
             is_base64 = true;
         }
     }
-    let bytes = if is_base64 {
-        Bytes::from(
-            base64::engine::general_purpose::STANDARD
-                .decode(data.as_bytes())
-                .context("data uri base64 decode failed")?,
-        )
+    if max_decoded_bytes == 0 {
+        return Err(AssetFetchError::DataUriTooLarge {
+            kind,
+            encoded_len: data.len(),
+            max_encoded_bytes: 0,
+            max_decoded_bytes,
+        });
+    }
+    let max_encoded_bytes = if is_base64 {
+        max_decoded_bytes
+            .saturating_mul(4)
+            .saturating_div(3)
+            .saturating_add(4)
     } else {
-        Bytes::from(percent_decode_bytes(data)?)
+        max_decoded_bytes.saturating_mul(3)
+    };
+    if data.len() > max_encoded_bytes {
+        return Err(AssetFetchError::DataUriTooLarge {
+            kind,
+            encoded_len: data.len(),
+            max_encoded_bytes,
+            max_decoded_bytes,
+        });
+    }
+    let bytes = if is_base64 {
+        let max_est = data
+            .len()
+            .saturating_mul(3)
+            .saturating_div(4)
+            .saturating_add(3);
+        if max_est > max_decoded_bytes {
+            return Err(AssetFetchError::DataUriTooLarge {
+                kind,
+                encoded_len: data.len(),
+                max_encoded_bytes,
+                max_decoded_bytes,
+            });
+        }
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(data.as_bytes())
+            .map_err(|_| AssetFetchError::InvalidUri)?;
+        if decoded.len() > max_decoded_bytes {
+            return Err(AssetFetchError::DataUriTooLarge {
+                kind,
+                encoded_len: data.len(),
+                max_encoded_bytes,
+                max_decoded_bytes,
+            });
+        }
+        Bytes::from(decoded)
+    } else {
+        Bytes::from(percent_decode_bytes(
+            data,
+            kind,
+            max_decoded_bytes,
+            max_encoded_bytes,
+        )?)
     };
     Ok((bytes, content_type))
 }
 
-fn percent_decode_bytes(data: &str) -> Result<Vec<u8>> {
+fn percent_decode_bytes(
+    data: &str,
+    kind: DataUriKind,
+    max_decoded_bytes: usize,
+    max_encoded_bytes: usize,
+) -> Result<Vec<u8>, AssetFetchError> {
     let mut output = Vec::with_capacity(data.len());
     let mut bytes = data.as_bytes().iter().copied();
     while let Some(value) = bytes.next() {
         if value == b'%' {
-            let hi = bytes
-                .next()
-                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
-            let lo = bytes
-                .next()
-                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+            let hi = bytes.next().ok_or(AssetFetchError::InvalidUri)?;
+            let lo = bytes.next().ok_or(AssetFetchError::InvalidUri)?;
             let hi = (hi as char)
                 .to_digit(16)
-                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+                .ok_or(AssetFetchError::InvalidUri)?;
             let lo = (lo as char)
                 .to_digit(16)
-                .ok_or_else(|| anyhow!("invalid percent encoding"))?;
+                .ok_or(AssetFetchError::InvalidUri)?;
             output.push(((hi << 4) + lo) as u8);
         } else {
             output.push(value);
+        }
+        if output.len() > max_decoded_bytes {
+            return Err(AssetFetchError::DataUriTooLarge {
+                kind,
+                encoded_len: data.len(),
+                max_encoded_bytes,
+                max_decoded_bytes,
+            });
         }
     }
     Ok(output)
@@ -2086,6 +2270,26 @@ fn select_render_uri(
             return Some((value.clone(), "image"));
         }
     }
+    if let Some(value) = metadata.image_url.as_ref() {
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "image_url"));
+        }
+    }
+    if let Some(value) = metadata.image_url_alt.as_ref() {
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "imageUrl"));
+        }
+    }
+    if let Some(value) = metadata.image_uri.as_ref() {
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "image_uri"));
+        }
+    }
+    if let Some(value) = metadata.image_uri_alt.as_ref() {
+        if !value.trim().is_empty() {
+            return Some((value.clone(), "imageUri"));
+        }
+    }
     if let Some(value) = metadata.src.as_ref() {
         if !value.trim().is_empty() {
             return Some((value.clone(), "src"));
@@ -2217,7 +2421,12 @@ mod tests {
 
     #[test]
     fn parse_data_uri_base64() {
-        let (bytes, mime) = parse_data_uri("data:text/plain;base64,SGVsbG8=").unwrap();
+        let (bytes, mime) = parse_data_uri(
+            "data:text/plain;base64,SGVsbG8=",
+            DataUriKind::Metadata,
+            1024,
+        )
+        .unwrap();
         assert_eq!(mime.unwrap().essence_str(), "text/plain");
         assert_eq!(bytes.as_ref(), b"Hello");
     }
@@ -2226,6 +2435,10 @@ mod tests {
     fn metadata_prefers_media_uri_over_image() {
         let metadata = MetadataJson {
             image: Some("ipfs://image".to_string()),
+            image_url: None,
+            image_url_alt: None,
+            image_uri: None,
+            image_uri_alt: None,
             media_uri: Some("ipfs://media".to_string()),
             media_uri_alt: None,
             animation_url: None,
@@ -2243,6 +2456,10 @@ mod tests {
     fn metadata_prefers_thumbnail_when_requested() {
         let metadata = MetadataJson {
             image: Some("ipfs://image".to_string()),
+            image_url: None,
+            image_url_alt: None,
+            image_uri: None,
+            image_uri_alt: None,
             media_uri: Some("ipfs://media".to_string()),
             media_uri_alt: None,
             animation_url: None,
@@ -2260,6 +2477,10 @@ mod tests {
     fn metadata_none_when_no_media_fields() {
         let metadata = MetadataJson {
             image: None,
+            image_url: None,
+            image_url_alt: None,
+            image_uri: None,
+            image_uri_alt: None,
             media_uri: None,
             media_uri_alt: None,
             animation_url: None,
@@ -2275,6 +2496,10 @@ mod tests {
     fn metadata_skips_empty_strings() {
         let metadata = MetadataJson {
             image: Some("   ".to_string()),
+            image_url: None,
+            image_url_alt: None,
+            image_uri: None,
+            image_uri_alt: None,
             media_uri: None,
             media_uri_alt: None,
             animation_url: None,

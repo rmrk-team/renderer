@@ -113,6 +113,20 @@ Observations:
   fallback instead of redoing heavy CPU work immediately.
 - Timeout events enqueue a token warmup job (best-effort) to populate caches in
   the background.
+- Heavy SVG detection thresholds route complex layers through a dedicated
+  `HEAVY_SVG_CONCURRENCY` semaphore to isolate tail latency.
+- SVG fast-path rasterization (`SVG_FAST_PATH_MAX_WIDTH` /
+  `SVG_FAST_PATH_TARGET_WIDTH`) reduces heavy SVG cost for small widths.
+- Scaled render mode (`SCALED_RENDER_MAX_WIDTH`) composites small outputs at
+  scaled canvas sizes and skips the final downscale.
+
+## Observability
+
+- `renderer_heavy_svg_hit_total`
+- `renderer_heavy_svg_queue_wait_seconds`
+- `renderer_heavy_svg_raster_seconds`
+
+These are exported to Prometheus and included in the Grafana full dashboard.
 
 ## Notes
 

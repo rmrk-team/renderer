@@ -2,6 +2,8 @@ openapi: 3.0.3
 info:
   title: RMRK Renderer API
   version: "1.0"
+  description: "API v1.0. Renderer spec v1.2."
+  x-renderer-spec-version: "1.2"
 paths:
   /healthz:
     get:

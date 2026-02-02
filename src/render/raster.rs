@@ -1,5 +1,6 @@
 use super::*;
 use crate::layer_profile;
+use crate::metrics::Metrics;
 use image::imageops::FilterType;
 use std::borrow::Cow;
 
@@ -49,6 +50,7 @@ pub(super) async fn rasterize_bytes(
     target_width: Option<u32>,
     og_mode: bool,
     assets: &AssetResolver,
+    metrics: &Metrics,
     config: &Config,
     blocking_semaphore: &Arc<Semaphore>,
     heavy_svg_semaphore: &Arc<Semaphore>,
@@ -177,11 +179,16 @@ pub(super) async fn rasterize_bytes(
             config.heavy_svg_node_threshold,
             config.heavy_svg_feature_threshold,
         );
+        let heavy_wait_started = Instant::now();
         let heavy_permit = if is_heavy {
             Some(heavy_svg_semaphore.clone().acquire_owned().await?)
         } else {
             None
         };
+        if is_heavy {
+            metrics.observe_heavy_svg_hit();
+            metrics.observe_heavy_svg_queue_wait(heavy_wait_started.elapsed());
+        }
         let blocking = blocking_semaphore.clone();
         let (
             image,
@@ -245,6 +252,9 @@ pub(super) async fn rasterize_bytes(
                 return Err(err);
             }
         };
+        if is_heavy {
+            metrics.observe_heavy_svg_raster(Duration::from_millis(render_ms as u64));
+        }
         layer_profile!(
             debug_context,
             layer,

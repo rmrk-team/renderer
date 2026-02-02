@@ -298,12 +298,15 @@ Catalogs are expected to be effectively immutable; nevertheless, the admin UI pr
 - `https://...`
 - `http://...` (allowed, but discouraged; can be disabled via config)
 - `ar://...` (normalized to `https://arweave.net/`)
-- `data:...` (metadata and asset bytes)
+- `data:...` (metadata and asset bytes; decoded size is capped by `MAX_METADATA_JSON_BYTES` or
+  `MAX_RASTER_RESIZE_BYTES`)
 
 Additional resolution rules:
 
 - Relative asset URIs are resolved against the metadata URI base (HTTP or IPFS).
 - HTTP gateway URLs containing `/ipfs/<cid>` are normalized to `ipfs://` so gateway rotation applies.
+- Data URI decoding enforces encoded + decoded caps; oversized payloads return
+  `413` with `X-Renderer-Error-Code: data_uri_too_large`.
 
 ### 6.2 IPFS Gateway Strategy
 
@@ -318,12 +321,16 @@ Additional resolution rules:
 Part `metadataURI` typically points to JSON containing one or more of:
 
 - `image`
-- `mediaUri`
-- `animation_url`
+- `image_url` / `imageUrl`
+- `image_uri` / `imageUri`
+- `mediaUri` / `media_uri`
+- `animation_url` / `animationUrl`
 - `src`
-- `thumbnailUri`
+- `thumbnailUri` / `thumbnail_uri`
 
-The renderer treats these as equivalent and prefers `image`, then `mediaUri`, then `animation_url`, then `src`, then `thumbnailUri`.
+The renderer treats these as equivalent and prefers (unless `prefer_thumb` is set):
+`mediaUri` → `animation_url` → `image` → `image_url`/`imageUrl` → `image_uri`/`imageUri` → `src` → `thumbnailUri`.
+When `prefer_thumb=true`, `thumbnailUri` is preferred first.
 
 ### 6.4 SVG Security Rules
 
@@ -516,10 +523,16 @@ GET /render/{chain}/{collection}/{tokenId}/{assetId}.{format}
 - `X-Renderer-Complete: true|false`
 - `X-Renderer-Result: rendered|placeholder|cache-miss|fallback`
 - `X-Renderer-Cache-Hit: true|false`
+- `X-Renderer-Cache: hit|miss`
+- `X-Renderer-Strategy: rmrk|erc721|fallback`
+- `X-Renderer-Layers: <n>` (when available)
+- `X-Renderer-Missing-Layers: <count>` (only when missing)
+- `X-Renderer-Nonconforming-Layers: <count>` (only when present)
 - `X-Cache: HIT|MISS`
 - `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Action: retry|backoff|stop`
+- `X-Renderer-Fallback-Reason: <reason>`
 - `X-Renderer-Fallback-Until: <unix_ts>` (present when backoff is advised)
 - `X-Renderer-Error-Code: <code>`
 - `X-Renderer-Error: ipfs_negative_cache` (set on negative-cache hits)
@@ -696,6 +709,8 @@ See the Admin API section in this spec for the full surface area.
 
 ### 11.1 Environment Variables
 
+This list is a representative subset. See `env.example` for the full set and defaults.
+
 ```env
 # Server
 HOST=0.0.0.0
@@ -752,6 +767,9 @@ TOKEN_OVERRIDE_CACHE_CAPACITY=100000
 MAX_CONCURRENT_RENDERS=4
 MAX_CONCURRENT_IPFS_FETCHES=16
 MAX_CONCURRENT_RPC_CALLS=16
+MAX_BLOCKING_TASKS=4
+MAX_IN_FLIGHT_REQUESTS=512
+HEAVY_SVG_CONCURRENCY=1
 
 # Default canvas fallback (only used if derivation fails)
 DEFAULT_CANVAS_WIDTH=1080
@@ -763,11 +781,20 @@ RPC_ENDPOINTS={"base":["https://mainnet.base.org"],"moonbeam":["https://rpc.api.
 # IPFS/HTTP fetch
 IPFS_GATEWAYS=["https://rmrk.myfilebase.com/ipfs/","https://cloudflare-ipfs.com/ipfs/","https://ipfs.io/ipfs/"]
 IPFS_TIMEOUT_SECONDS=30
+DNS_CACHE_TTL_SECONDS=300
+DNS_CACHE_CAPACITY=1024
+OUTBOUND_CLIENT_CACHE_TTL_SECONDS=900
+OUTBOUND_CLIENT_CACHE_CAPACITY=256
 ALLOW_HTTP=true
 ALLOW_PRIVATE_NETWORKS=false
 MAX_METADATA_JSON_BYTES=524288
 MAX_SVG_BYTES=2097152
 MAX_SVG_NODE_COUNT=200000
+HEAVY_SVG_NODE_THRESHOLD=20000
+HEAVY_SVG_FEATURE_THRESHOLD=200
+SVG_FAST_PATH_MAX_WIDTH=256
+SVG_FAST_PATH_TARGET_WIDTH=512
+SCALED_RENDER_MAX_WIDTH=256
 MAX_RASTER_BYTES=10485760
 MAX_RASTER_RESIZE_BYTES=52428800
 MAX_RASTER_RESIZE_DIM=2048

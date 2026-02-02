@@ -161,6 +161,7 @@ async fn run_heavy_warmup(
             None,
             false,
             &state.assets,
+            state.metrics.as_ref(),
             state.config.as_ref(),
             &state.blocking_semaphore,
             &state.heavy_svg_semaphore,

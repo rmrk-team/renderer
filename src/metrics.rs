@@ -2,8 +2,8 @@ use crate::config::{Config, MetricsIpLabelMode};
 use crate::state::AppState;
 use anyhow::Result;
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
-    TextEncoder,
+    Encoder, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry, TextEncoder,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -20,6 +20,9 @@ pub struct Metrics {
     upstream_failures: IntCounterVec,
     render_duration: HistogramVec,
     fetch_duration: HistogramVec,
+    heavy_svg_hit_total: IntCounter,
+    heavy_svg_queue_wait_seconds: Histogram,
+    heavy_svg_raster_seconds: Histogram,
     inflight_requests: IntGauge,
     semaphore_in_use: IntGaugeVec,
     render_queue_depth: IntGauge,
@@ -123,6 +126,27 @@ impl Metrics {
             &["kind"],
         )
         .expect("fetch_duration_seconds");
+        let heavy_svg_hit_total = IntCounter::new(
+            "renderer_heavy_svg_hit_total",
+            "Heavy SVG rasterization hits",
+        )
+        .expect("heavy_svg_hit_total");
+        let heavy_svg_queue_wait_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "renderer_heavy_svg_queue_wait_seconds",
+                "Heavy SVG queue wait time",
+            )
+            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
+        )
+        .expect("heavy_svg_queue_wait_seconds");
+        let heavy_svg_raster_seconds = Histogram::with_opts(
+            HistogramOpts::new(
+                "renderer_heavy_svg_raster_seconds",
+                "Heavy SVG rasterization time",
+            )
+            .buckets(vec![0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]),
+        )
+        .expect("heavy_svg_raster_seconds");
         let inflight_requests = IntGauge::new("renderer_inflight_requests", "Requests in flight")
             .expect("inflight_requests");
         let semaphore_in_use = IntGaugeVec::new(
@@ -256,6 +280,15 @@ impl Metrics {
             .register(Box::new(fetch_duration.clone()))
             .expect("register fetch_duration");
         registry
+            .register(Box::new(heavy_svg_hit_total.clone()))
+            .expect("register heavy_svg_hit_total");
+        registry
+            .register(Box::new(heavy_svg_queue_wait_seconds.clone()))
+            .expect("register heavy_svg_queue_wait_seconds");
+        registry
+            .register(Box::new(heavy_svg_raster_seconds.clone()))
+            .expect("register heavy_svg_raster_seconds");
+        registry
             .register(Box::new(inflight_requests.clone()))
             .expect("register inflight_requests");
         registry
@@ -318,6 +351,9 @@ impl Metrics {
             upstream_failures,
             render_duration,
             fetch_duration,
+            heavy_svg_hit_total,
+            heavy_svg_queue_wait_seconds,
+            heavy_svg_raster_seconds,
             inflight_requests,
             semaphore_in_use,
             render_queue_depth,
@@ -424,6 +460,20 @@ impl Metrics {
     pub fn observe_fetch_duration(&self, kind: &str, duration: Duration) {
         self.fetch_duration
             .with_label_values(&[kind])
+            .observe(duration.as_secs_f64());
+    }
+
+    pub fn observe_heavy_svg_hit(&self) {
+        self.heavy_svg_hit_total.inc();
+    }
+
+    pub fn observe_heavy_svg_queue_wait(&self, duration: Duration) {
+        self.heavy_svg_queue_wait_seconds
+            .observe(duration.as_secs_f64());
+    }
+
+    pub fn observe_heavy_svg_raster(&self, duration: Duration) {
+        self.heavy_svg_raster_seconds
             .observe(duration.as_secs_f64());
     }
 

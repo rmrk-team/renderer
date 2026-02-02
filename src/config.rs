@@ -66,6 +66,7 @@ pub struct Config {
     pub heavy_svg_feature_threshold: usize,
     pub svg_fast_path_max_width: u32,
     pub svg_fast_path_target_width: u32,
+    pub scaled_render_max_width: u32,
     pub max_raster_bytes: usize,
     pub max_raster_resize_bytes: usize,
     pub max_raster_resize_dim: u32,
@@ -149,6 +150,8 @@ pub struct Config {
     pub primary_asset_cache_capacity: usize,
     pub outbound_client_cache_ttl: Duration,
     pub outbound_client_cache_capacity: usize,
+    pub dns_cache_ttl_seconds: u64,
+    pub dns_cache_capacity: usize,
     pub openapi_public: bool,
     pub render_policy: RenderPolicy,
     pub collection_render_overrides: HashMap<String, RenderPolicyOverride>,
@@ -356,6 +359,7 @@ impl Config {
         let heavy_svg_feature_threshold = parse_usize("HEAVY_SVG_FEATURE_THRESHOLD", 200);
         let svg_fast_path_max_width = parse_u32("SVG_FAST_PATH_MAX_WIDTH", 256);
         let svg_fast_path_target_width = parse_u32("SVG_FAST_PATH_TARGET_WIDTH", 512);
+        let scaled_render_max_width = parse_u32("SCALED_RENDER_MAX_WIDTH", svg_fast_path_max_width);
         let max_raster_bytes = parse_usize("MAX_RASTER_BYTES", 10 * 1024 * 1024);
         let max_raster_resize_bytes = parse_usize(
             "MAX_RASTER_RESIZE_BYTES",
@@ -515,6 +519,8 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
         let outbound_client_cache_ttl =
             Duration::from_secs(parse_u64("OUTBOUND_CLIENT_CACHE_TTL_SECONDS", 900));
         let outbound_client_cache_capacity = parse_usize("OUTBOUND_CLIENT_CACHE_CAPACITY", 256);
+        let dns_cache_ttl_seconds = parse_u64("DNS_CACHE_TTL_SECONDS", 300);
+        let dns_cache_capacity = parse_usize("DNS_CACHE_CAPACITY", 1024);
         let landing = parse_landing_config()?;
         let openapi_public = parse_bool("OPENAPI_PUBLIC", true);
         let landing_public = parse_bool("LANDING_PUBLIC", false) && landing.is_some();
@@ -590,6 +596,7 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             heavy_svg_feature_threshold,
             svg_fast_path_max_width,
             svg_fast_path_target_width,
+            scaled_render_max_width,
             max_raster_bytes,
             max_raster_resize_bytes,
             max_raster_resize_dim,
@@ -673,6 +680,8 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             primary_asset_cache_capacity,
             outbound_client_cache_ttl,
             outbound_client_cache_capacity,
+            dns_cache_ttl_seconds,
+            dns_cache_capacity,
             openapi_public,
             render_policy,
             collection_render_overrides,
