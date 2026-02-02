@@ -14252,5 +14252,1400 @@
         "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-02-01T20-00-58-222Z-29b003c/pinned.log"
       }
     }
+  },
+  {
+    "runId": "2026-02-02T07-41-22-651Z-f897d79",
+    "timestamp": "2026-02-02T07:41:22.651Z",
+    "commit": "f897d7947e98ce4ab4f515b488c76cba0da2a0ef",
+    "dirty": false,
+    "configPath": "benchmarks/renderer-benchmark-config.json",
+    "baseUrl": "http://127.0.0.1:55422",
+    "port": 55422,
+    "format": "webp",
+    "width": "medium",
+    "iterations": 3,
+    "concurrency": 3,
+    "trimRatio": 0.1,
+    "timeoutMs": 60000,
+    "rustLog": "proj_renderer=debug,sqlx=warn",
+    "modes": {
+      "fresh": {
+        "mode": "fresh",
+        "warmupIterations": 0,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 1484.5,
+            "p95Ms": 4315,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 2127,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 393,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 307,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 344,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 4315,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 4395,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&fresh=1",
+                "durationMs": 1705,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&fresh=1",
+                "durationMs": 1181,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&fresh=1",
+                "durationMs": 1264,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&fresh=1",
+                "durationMs": 4142,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 110.5,
+            "p95Ms": 144,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 124,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 140,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 197,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 83,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 92,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&fresh=1",
+                "durationMs": 84,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&fresh=1",
+                "durationMs": 97,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 133,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&fresh=1",
+                "durationMs": 91,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&fresh=1",
+                "durationMs": 144,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 114.5,
+            "p95Ms": 124,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&fresh=1",
+                "durationMs": 119,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&fresh=1",
+                "durationMs": 120,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&fresh=1",
+                "durationMs": 163,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&fresh=1",
+                "durationMs": 113,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&fresh=1",
+                "durationMs": 114,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&fresh=1",
+                "durationMs": 115,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&fresh=1",
+                "durationMs": 88,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&fresh=1",
+                "durationMs": 109,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&fresh=1",
+                "durationMs": 87,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&fresh=1",
+                "durationMs": 124,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 128.5,
+        "iterationMedianMs": 114.5,
+        "tokenMedians": {
+          "chunkies-1": 197,
+          "chunkies-2": 114,
+          "chunkies-3": 113,
+          "chunkies-4": 133,
+          "kanaria-1": 140,
+          "kanaria-3005": 124,
+          "kanaria-2": 88,
+          "kanaria-4": 91,
+          "kanaria-3": 109,
+          "kanaria-5": 144
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-02-02T07-41-22-651Z-f897d79/fresh.log"
+      },
+      "cached": {
+        "mode": "cached",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3.5,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 3.5,
+            "p95Ms": 4,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 1,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4,
+            "p95Ms": 6,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium&cache=0",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium&cache=0",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium&cache=0",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium&cache=0",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium&cache=0",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 4,
+        "iterationMedianMs": 3.5,
+        "tokenMedians": {
+          "chunkies-1": 2,
+          "kanaria-3005": 4,
+          "kanaria-1": 4,
+          "chunkies-2": 2,
+          "chunkies-3": 2,
+          "chunkies-4": 2,
+          "kanaria-2": 5,
+          "kanaria-3": 4,
+          "kanaria-4": 4,
+          "kanaria-5": 4
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-02-02T07-41-22-651Z-f897d79/cached.log"
+      },
+      "pinned": {
+        "mode": "pinned",
+        "warmupIterations": 1,
+        "iterations": [
+          {
+            "index": 1,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4,
+            "p95Ms": 5,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 2,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4,
+            "p95Ms": 5,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 3,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          },
+          {
+            "index": 3,
+            "sampleCount": 10,
+            "trimmedCount": 8,
+            "medianMs": 4,
+            "p95Ms": 6,
+            "statusCounts": {
+              "200": 10
+            },
+            "resultCounts": {
+              "rendered": 10
+            },
+            "fallbackCounts": {
+              "none": 10
+            },
+            "errorCodeCounts": {
+              "none": 10
+            },
+            "rendererErrorCounts": {
+              "none": 10
+            },
+            "samples": [
+              {
+                "label": "chunkies-1",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "1",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/1/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-2",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/2/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3005",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3005",
+                "assetId": "15528",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3005/15528/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 142282,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-1",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "1",
+                "assetId": "9987",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/1/9987/webp?width=medium",
+                "durationMs": 6,
+                "status": 200,
+                "bytes": 142534,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-3",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/3/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "chunkies-4",
+                "chain": "base",
+                "collection": "0x7d5f40b1f94e27f3e6d676d28254252f65efd60c",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x7d5f40b1f94e27f3e6d676d28254252f65efd60c/4/webp?width=medium",
+                "durationMs": 2,
+                "status": 200,
+                "bytes": 1984,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-3",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "3",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/3/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 147830,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-4",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "4",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/4/webp?width=medium",
+                "durationMs": 5,
+                "status": 200,
+                "bytes": 138172,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-2",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "2",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/2/webp?width=medium",
+                "durationMs": 8,
+                "status": 200,
+                "bytes": 144944,
+                "result": "rendered",
+                "complete": "true"
+              },
+              {
+                "label": "kanaria-5",
+                "chain": "base",
+                "collection": "0x011ff409bc4803ec5cfab41c3fd1db99fd05c004",
+                "tokenId": "5",
+                "url": "http://127.0.0.1:55422/render/base/0x011ff409bc4803ec5cfab41c3fd1db99fd05c004/5/webp?width=medium",
+                "durationMs": 4,
+                "status": 200,
+                "bytes": 150206,
+                "result": "rendered",
+                "complete": "true"
+              }
+            ]
+          }
+        ],
+        "overallMedianMs": 4,
+        "iterationMedianMs": 4,
+        "tokenMedians": {
+          "chunkies-1": 2,
+          "kanaria-3005": 4,
+          "chunkies-2": 2,
+          "kanaria-1": 5,
+          "chunkies-3": 2,
+          "chunkies-4": 2,
+          "kanaria-2": 5,
+          "kanaria-3": 5,
+          "kanaria-4": 5,
+          "kanaria-5": 4
+        },
+        "logPath": "/Users/swader/repos/kanaria-context/proj-renderer/benchmarks/runs/2026-02-02T07-41-22-651Z-f897d79/pinned.log"
+      }
+    }
   }
 ]
