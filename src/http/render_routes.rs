@@ -723,14 +723,9 @@ pub(super) async fn render_primary(
                 retry_after_seconds,
             });
             if !prefer_json {
-                if let Some(response) = fallback_for_render_error(
-                    &state,
-                    &request,
-                    &placeholder_width,
-                    &headers,
-                    &err,
-                )
-                .await
+                if let Some(response) =
+                    fallback_for_render_error(&state, &request, &placeholder_width, &headers, &err)
+                        .await
                 {
                     record_render_metrics(
                         &state,

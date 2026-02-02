@@ -326,6 +326,7 @@ Additional resolution rules:
 Part `metadataURI` typically points to JSON containing one or more of:
 
 - `image`
+- `image_data` / `imageData`
 - `image_url` / `imageUrl`
 - `image_uri` / `imageUri`
 - `mediaUri` / `media_uri`
@@ -334,7 +335,8 @@ Part `metadataURI` typically points to JSON containing one or more of:
 - `thumbnailUri` / `thumbnail_uri`
 
 The renderer treats these as equivalent and prefers (unless `prefer_thumb` is set):
-`mediaUri` → `animation_url` → `image` → `image_url`/`imageUrl` → `image_uri`/`imageUri` → `src` → `thumbnailUri`.
+`mediaUri` → `animation_url` → `image` → `image_data`/`imageData` → `image_url`/`imageUrl` → `image_uri`/`imageUri` → `src` → `thumbnailUri`.
+When `image_data` is inline SVG (no `data:` prefix), it is wrapped as `data:image/svg+xml;base64,...`.
 When `prefer_thumb=true`, `thumbnailUri` is preferred first.
 
 ### 6.4 SVG Security Rules

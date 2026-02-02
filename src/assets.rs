@@ -422,6 +422,10 @@ pub enum AssetFetchError {
 #[derive(Debug, Deserialize)]
 struct MetadataJson {
     image: Option<String>,
+    #[serde(rename = "image_data")]
+    image_data: Option<String>,
+    #[serde(rename = "imageData")]
+    image_data_alt: Option<String>,
     #[serde(rename = "image_url")]
     image_url: Option<String>,
     #[serde(rename = "imageUrl")]
@@ -2300,6 +2304,16 @@ fn select_render_uri(
             return Some((value.clone(), "image"));
         }
     }
+    if let Some(value) = metadata.image_data.as_ref() {
+        if let Some(normalized) = normalize_image_data(value) {
+            return Some((normalized, "image_data"));
+        }
+    }
+    if let Some(value) = metadata.image_data_alt.as_ref() {
+        if let Some(normalized) = normalize_image_data(value) {
+            return Some((normalized, "imageData"));
+        }
+    }
     if let Some(value) = metadata.image_url.as_ref() {
         if !value.trim().is_empty() {
             return Some((value.clone(), "image_url"));
@@ -2331,6 +2345,27 @@ fn select_render_uri(
         }
     }
     None
+}
+
+fn normalize_image_data(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("data:")
+        || lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || normalize_ipfs_uri(trimmed).is_some()
+        || normalize_arweave_uri(trimmed).is_some()
+    {
+        return Some(trimmed.to_string());
+    }
+    if lower.contains("<svg") || trimmed.starts_with('<') {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(trimmed.as_bytes());
+        return Some(format!("data:image/svg+xml;base64,{encoded}"));
+    }
+    Some(trimmed.to_string())
 }
 
 fn resolve_relative_art_uri(art_uri: &str, metadata_uri: &str) -> Option<String> {
@@ -2465,6 +2500,8 @@ mod tests {
     fn metadata_prefers_media_uri_over_image() {
         let metadata = MetadataJson {
             image: Some("ipfs://image".to_string()),
+            image_data: None,
+            image_data_alt: None,
             image_url: None,
             image_url_alt: None,
             image_uri: None,
@@ -2486,6 +2523,8 @@ mod tests {
     fn metadata_prefers_thumbnail_when_requested() {
         let metadata = MetadataJson {
             image: Some("ipfs://image".to_string()),
+            image_data: None,
+            image_data_alt: None,
             image_url: None,
             image_url_alt: None,
             image_uri: None,
@@ -2504,9 +2543,37 @@ mod tests {
     }
 
     #[test]
+    fn metadata_uses_image_data_svg() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        let metadata = MetadataJson {
+            image: None,
+            image_data: Some(svg.to_string()),
+            image_data_alt: None,
+            image_url: None,
+            image_url_alt: None,
+            image_uri: None,
+            image_uri_alt: None,
+            media_uri: None,
+            media_uri_alt: None,
+            animation_url: None,
+            animation_url_alt: None,
+            src: None,
+            thumbnail_uri: None,
+            thumbnail_uri_alt: None,
+        };
+        let selected = select_render_uri(&metadata, false).unwrap();
+        assert_eq!(selected.1, "image_data");
+        let (bytes, mime) = parse_data_uri(&selected.0, DataUriKind::Asset, 1024).unwrap();
+        assert_eq!(mime.unwrap().essence_str(), "image/svg+xml");
+        assert_eq!(bytes.as_ref(), svg.as_bytes());
+    }
+
+    #[test]
     fn metadata_none_when_no_media_fields() {
         let metadata = MetadataJson {
             image: None,
+            image_data: None,
+            image_data_alt: None,
             image_url: None,
             image_url_alt: None,
             image_uri: None,
@@ -2526,6 +2593,8 @@ mod tests {
     fn metadata_skips_empty_strings() {
         let metadata = MetadataJson {
             image: Some("   ".to_string()),
+            image_data: None,
+            image_data_alt: None,
             image_url: None,
             image_url_alt: None,
             image_uri: None,
