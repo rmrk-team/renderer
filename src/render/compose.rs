@@ -202,6 +202,24 @@ pub(super) async fn load_compose_for_request(
     }
 
     let (compose, fallback_used) = if asset_id == TOKEN_URI_FALLBACK_ASSET_ID {
+        let cache_key = crate::state::token_uri_negative_cache_key(chain, collection);
+        if let Some(retry_after_seconds) = state
+            .token_uri_negative_cache
+            .get_retry_after(&cache_key)
+            .await
+        {
+            warn!(
+                chain = %chain,
+                collection = %collection,
+                token_id = %token_id,
+                retry_after_seconds,
+                "token URI negative cache hit"
+            );
+            return Err(TokenUriNegativeCacheError {
+                retry_after_seconds,
+            }
+            .into());
+        }
         let token_uri_started = Instant::now();
         let token_uri = match state.chain.get_token_uri(chain, collection, token_id).await {
             Ok(value) => value,
@@ -213,6 +231,12 @@ pub(super) async fn load_compose_for_request(
                     error = ?err,
                     "token URI lookup failed"
                 );
+                if crate::chain::is_contract_revert_error(&err) {
+                    state
+                        .token_uri_negative_cache
+                        .insert(cache_key.clone())
+                        .await;
+                }
                 let error_string = err.to_string();
                 let error_expires_at =
                     token_state_error_expires_at(state, &err, cached_entry.as_ref(), &error_string);
@@ -231,6 +255,7 @@ pub(super) async fn load_compose_for_request(
             }
         };
         let token_uri = token_uri.trim();
+        state.token_uri_negative_cache.remove(&cache_key).await;
         if token_uri.is_empty() {
             warn!(
                 chain = %chain,

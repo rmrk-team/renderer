@@ -713,6 +713,47 @@ pub(super) async fn render_primary(
         .await
         .map_err(map_render_error_anyhow)?;
     if matches!(strategy, render::PrimaryRenderStrategy::Erc721Metadata) {
+        let cache_key = crate::state::token_uri_negative_cache_key(&chain, &collection);
+        if let Some(retry_after_seconds) = state
+            .token_uri_negative_cache
+            .get_retry_after(&cache_key)
+            .await
+        {
+            let err = anyhow::Error::new(render::TokenUriNegativeCacheError {
+                retry_after_seconds,
+            });
+            if !prefer_json {
+                if let Some(response) = fallback_for_render_error(
+                    &state,
+                    &request,
+                    &placeholder_width,
+                    &headers,
+                    &err,
+                )
+                .await
+                {
+                    record_render_metrics(
+                        &state,
+                        &response,
+                        started.elapsed(),
+                        &request.chain,
+                        &request.collection,
+                        source_label.as_deref(),
+                    );
+                    return Ok(response);
+                }
+            }
+            let api_error = map_render_error(err);
+            record_render_error_metrics(
+                &state,
+                started.elapsed(),
+                &request.chain,
+                &request.collection,
+                source_label.as_deref(),
+                api_error.code.as_deref(),
+            );
+            return Err(api_error);
+        }
         request.asset_id = TOKEN_URI_FALLBACK_ASSET_ID.to_string();
         match state.chain.owner_of(&chain, &collection, &token_id).await {
             Ok(owner) => {

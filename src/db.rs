@@ -3665,6 +3665,8 @@ mod tests {
             token_state_check_ttl_seconds: 0,
             token_state_error_ttl_seconds: 0,
             token_state_error_permanent_ttl_seconds: 0,
+            token_uri_negative_cache_ttl_seconds: 0,
+            token_uri_negative_cache_capacity: 0,
             fresh_rate_limit_seconds: 0,
             fresh_request_retention_days: 0,
             primary_asset_cache_ttl: std::time::Duration::from_secs(0),

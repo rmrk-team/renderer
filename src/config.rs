@@ -143,6 +143,8 @@ pub struct Config {
     pub token_state_check_ttl_seconds: u64,
     pub token_state_error_ttl_seconds: u64,
     pub token_state_error_permanent_ttl_seconds: u64,
+    pub token_uri_negative_cache_ttl_seconds: u64,
+    pub token_uri_negative_cache_capacity: usize,
     pub fresh_rate_limit_seconds: u64,
     pub fresh_request_retention_days: u64,
     pub primary_asset_cache_ttl: Duration,
@@ -509,6 +511,12 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
         let token_state_error_ttl_seconds = parse_u64("TOKEN_STATE_ERROR_TTL_SECONDS", 300);
         let token_state_error_permanent_ttl_seconds =
             parse_u64("TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS", 3600);
+        let token_uri_negative_cache_ttl_seconds = parse_u64(
+            "TOKEN_URI_NEGATIVE_CACHE_TTL_SECONDS",
+            token_state_error_ttl_seconds,
+        );
+        let token_uri_negative_cache_capacity =
+            parse_usize("TOKEN_URI_NEGATIVE_CACHE_CAPACITY", 10_000);
         let fresh_rate_limit_seconds = parse_u64("FRESH_RATE_LIMIT_SECONDS", 300);
         let fresh_request_retention_days = parse_u64("FRESH_REQUEST_RETENTION_DAYS", 7);
         let primary_asset_cache_ttl =
@@ -673,6 +681,8 @@ I_KNOW_WHAT_I_AM_DOING=true to bypass"
             token_state_check_ttl_seconds,
             token_state_error_ttl_seconds,
             token_state_error_permanent_ttl_seconds,
+            token_uri_negative_cache_ttl_seconds,
+            token_uri_negative_cache_capacity,
             fresh_rate_limit_seconds,
             fresh_request_retention_days,
             primary_asset_cache_ttl,

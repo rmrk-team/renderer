@@ -249,6 +249,12 @@ pub struct TokenStateCachedError {
 }
 
 #[derive(Debug, Error)]
+#[error("token URI negative cache")]
+pub struct TokenUriNegativeCacheError {
+    pub retry_after_seconds: u64,
+}
+
+#[derive(Debug, Error)]
 #[error("token URI empty")]
 pub struct TokenUriEmptyError;
 
@@ -3309,45 +3315,47 @@ pub(crate) async fn resolve_primary_strategy(
         .capabilities_expires_at
         .map(|expires_at| expires_at > now)
         .unwrap_or(false);
-    if cached_caps {
-        return Ok(strategy_from_capabilities(&config));
-    }
-    let stale_caps = config.supports_erc165.is_some();
-    match refresh_collection_capabilities(state, chain, collection).await {
-        Ok(caps) => {
-            let ttl =
-                i64::try_from(state.config.collection_capabilities_ttl_seconds).unwrap_or(i64::MAX);
-            let expires_at = now.saturating_add(ttl.max(0));
-            let _ = state
-                .db
-                .set_collection_capabilities(
-                    chain,
-                    collection,
-                    caps.supports_erc165,
-                    caps.supports_erc5773,
-                    caps.supports_erc6220,
-                    caps.supports_erc721metadata,
-                    now,
-                    expires_at,
-                )
-                .await;
-            state.invalidate_collection_cache(chain, collection).await;
-            Ok(strategy_from_capabilities_values(&caps))
-        }
-        Err(err) => {
-            if stale_caps {
-                warn!(
-                    chain = %chain,
-                    collection = %collection,
-                    error = ?err,
-                    "capability refresh failed; using stale values"
-                );
-                Ok(strategy_from_capabilities(&config))
-            } else {
-                Err(err)
+    let strategy = if cached_caps {
+        strategy_from_capabilities(&config)
+    } else {
+        let stale_caps = config.supports_erc165.is_some();
+        match refresh_collection_capabilities(state, chain, collection).await {
+            Ok(caps) => {
+                let ttl = i64::try_from(state.config.collection_capabilities_ttl_seconds)
+                    .unwrap_or(i64::MAX);
+                let expires_at = now.saturating_add(ttl.max(0));
+                let _ = state
+                    .db
+                    .set_collection_capabilities(
+                        chain,
+                        collection,
+                        caps.supports_erc165,
+                        caps.supports_erc5773,
+                        caps.supports_erc6220,
+                        caps.supports_erc721metadata,
+                        now,
+                        expires_at,
+                    )
+                    .await;
+                state.invalidate_collection_cache(chain, collection).await;
+                strategy_from_capabilities_values(&caps)
+            }
+            Err(err) => {
+                if stale_caps {
+                    warn!(
+                        chain = %chain,
+                        collection = %collection,
+                        error = ?err,
+                        "capability refresh failed; using stale values"
+                    );
+                    strategy_from_capabilities(&config)
+                } else {
+                    return Err(err);
+                }
             }
         }
-    }
+    };
+    Ok(strategy)
 }
 
 #[derive(Debug, Clone, Copy)]

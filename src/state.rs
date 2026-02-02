@@ -48,6 +48,7 @@ pub struct AppState {
     pub primary_asset_cache: PrimaryAssetCache,
     pub approval_negative_cache: ApprovalNegativeCache,
     pub token_override_cache: TokenOverrideCache,
+    pub token_uri_negative_cache: TokenUriNegativeCache,
     pub ip_rules: IpRuleCache,
     pub require_approval_cache: RequireApprovalCache,
     pub unapproved_fallback_cache: UnapprovedFallbackCache,
@@ -104,6 +105,10 @@ impl AppState {
             config.token_override_cache_ttl,
             config.token_override_cache_capacity,
         );
+        let token_uri_negative_cache = TokenUriNegativeCache::new(
+            Duration::from_secs(config.token_uri_negative_cache_ttl_seconds),
+            config.token_uri_negative_cache_capacity,
+        );
         let ip_rules = IpRuleCache::new();
         let require_approval_cache = RequireApprovalCache::new(REQUIRE_APPROVAL_CACHE_TTL);
         let unapproved_fallback_cache = UnapprovedFallbackCache::new(UNAPPROVED_FALLBACK_CACHE_TTL);
@@ -148,6 +153,7 @@ impl AppState {
             primary_asset_cache,
             approval_negative_cache,
             token_override_cache,
+            token_uri_negative_cache,
             ip_rules,
             require_approval_cache,
             unapproved_fallback_cache,
@@ -262,6 +268,13 @@ pub struct TokenOverrideCache {
 }
 
 #[derive(Clone)]
+pub struct TokenUriNegativeCache {
+    ttl: Duration,
+    capacity: usize,
+    inner: Arc<Mutex<TokenUriNegativeCacheInner>>,
+}
+
+#[derive(Clone)]
 pub struct RequireApprovalCache {
     ttl: Duration,
     inner: Arc<Mutex<Option<CachedBool>>>,
@@ -296,6 +309,15 @@ struct TokenOverrideCacheInner {
 
 struct CachedTokenOverride {
     value: Option<TokenOverrideEntry>,
+    expires_at: Instant,
+}
+
+struct TokenUriNegativeCacheInner {
+    map: HashMap<String, CachedTokenUriNegative>,
+    order: VecDeque<String>,
+}
+
+struct CachedTokenUriNegative {
     expires_at: Instant,
 }
 
@@ -680,6 +702,72 @@ impl TokenOverrideCache {
     }
 }
 
+impl TokenUriNegativeCache {
+    pub fn new(ttl: Duration, capacity: usize) -> Self {
+        Self {
+            ttl,
+            capacity,
+            inner: Arc::new(Mutex::new(TokenUriNegativeCacheInner {
+                map: HashMap::new(),
+                order: VecDeque::new(),
+            })),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.capacity > 0 && !self.ttl.is_zero()
+    }
+
+    pub async fn get_retry_after(&self, key: &str) -> Option<u64> {
+        if !self.enabled() {
+            return None;
+        }
+        let now = Instant::now();
+        let mut inner = self.inner.lock().await;
+        let expires_at = match inner.map.get(key).map(|entry| entry.expires_at) {
+            Some(expires_at) => expires_at,
+            None => return None,
+        };
+        if expires_at <= now {
+            inner.map.remove(key);
+            inner.order.retain(|item| item != key);
+            return None;
+        }
+        inner.order.retain(|item| item != key);
+        inner.order.push_back(key.to_string());
+        Some(expires_at.saturating_duration_since(now).as_secs().max(1))
+    }
+
+    pub async fn insert(&self, key: String) {
+        if !self.enabled() {
+            return;
+        }
+        let mut inner = self.inner.lock().await;
+        if inner.map.contains_key(&key) {
+            inner.order.retain(|item| item != &key);
+        }
+        inner.order.push_back(key.clone());
+        inner.map.insert(
+            key.clone(),
+            CachedTokenUriNegative {
+                expires_at: Instant::now() + self.ttl,
+            },
+        );
+        while inner.order.len() > self.capacity {
+            if let Some(oldest) = inner.order.pop_front() {
+                inner.map.remove(&oldest);
+            }
+        }
+    }
+
+    pub async fn remove(&self, key: &str) {
+        let mut inner = self.inner.lock().await;
+        if inner.map.remove(key).is_some() {
+            inner.order.retain(|item| item != key);
+        }
+    }
+}
+
 impl RequireApprovalCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
@@ -1048,6 +1136,10 @@ pub(crate) fn collection_cache_key(chain: &str, collection: &str) -> String {
 
 pub(crate) fn token_override_cache_key(chain: &str, collection: &str, token_id: &str) -> String {
     format!("{chain}:{collection}:{token_id}")
+}
+
+pub(crate) fn token_uri_negative_cache_key(chain: &str, collection: &str) -> String {
+    format!("{chain}:{collection}").to_ascii_lowercase()
 }
 
 #[derive(Clone)]

@@ -534,7 +534,7 @@ GET /render/{chain}/{collection}/{tokenId}/{assetId}.{format}
 - `X-Renderer-Missing-Layers: <count>` (only when missing)
 - `X-Renderer-Nonconforming-Layers: <count>` (only when present)
 - `X-Cache: HIT|MISS`
-- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache`
+- `X-Renderer-Fallback: unapproved|render_fallback|token_override|queued|approval_rate_limited|approval_stale|timeout_queue|timeout_render|ipfs_negative_cache|token_uri_negative_cache`
 - `X-Renderer-Fallback-Source: global|collection|token` (disk-backed fallbacks)
 - `X-Renderer-Fallback-Action: retry|backoff|stop`
 - `X-Renderer-Fallback-Reason: <reason>`
@@ -767,6 +767,8 @@ IDENTITY_IP_LABEL_MODE=sha256_prefix
 # Token override cache
 TOKEN_OVERRIDE_CACHE_TTL_SECONDS=30
 TOKEN_OVERRIDE_CACHE_CAPACITY=100000
+TOKEN_URI_NEGATIVE_CACHE_TTL_SECONDS=300
+TOKEN_URI_NEGATIVE_CACHE_CAPACITY=10000
 
 # Rendering concurrency
 MAX_CONCURRENT_RENDERS=4

@@ -1709,6 +1709,35 @@ async fn fallback_for_render_error(
             .await,
         );
     }
+    if let Some(cached_error) = error.downcast_ref::<render::TokenUriNegativeCacheError>() {
+        let retry_after = cached_error.retry_after_seconds.max(1);
+        if let Some(response) = resolve_render_failure_fallback_with(
+            state,
+            request,
+            headers,
+            "token_uri_negative_cache",
+            Some(retry_after),
+        )
+        .await
+        {
+            return Some(response);
+        }
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(
+            fallback_text_response(
+                &request.format,
+                width,
+                height,
+                &["TOKEN URI CACHED".to_string(), "RETRY LATER".to_string()],
+                "token_uri_negative_cache",
+                "token_uri_negative_cache",
+                "token_uri_negative_cache",
+                StatusCode::OK,
+                Some(retry_after),
+            )
+            .await,
+        );
+    }
     if error.downcast_ref::<render::TokenNotFoundError>().is_some() {
         if let Some(response) =
             resolve_render_failure_fallback_with(state, request, headers, "token_not_found", None)
@@ -3894,6 +3923,18 @@ fn map_render_error(error: anyhow::Error) -> ApiError {
         let retry_after = cached_error.retry_after_seconds.max(1);
         return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "token state cached")
             .with_code("token_state_cached")
+            .with_field("retry_after_seconds", Value::Number(retry_after.into()))
+            .with_header(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(&retry_after.to_string())
+                    .unwrap_or(HeaderValue::from_static("30")),
+            )
+            .with_log_detail(detail);
+    }
+    if let Some(cached_error) = error.downcast_ref::<render::TokenUriNegativeCacheError>() {
+        let retry_after = cached_error.retry_after_seconds.max(1);
+        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "token uri cached")
+            .with_code("token_uri_negative_cache")
             .with_field("retry_after_seconds", Value::Number(retry_after.into()))
             .with_header(
                 header::RETRY_AFTER,

@@ -29,6 +29,10 @@ This document summarizes the renderer caching layers and when cache epochs are r
 - Permanent errors (contract reverts, empty tokenURI) apply backoff:
   `1x` → `6x` → `24x` of `TOKEN_STATE_ERROR_PERMANENT_TTL_SECONDS` for repeated failures.
 
+### TokenURI negative cache (per-collection)
+- Caches collections whose `tokenURI()` calls revert to avoid repeated RPC work.
+- Controlled by `TOKEN_URI_NEGATIVE_CACHE_TTL_SECONDS` and `TOKEN_URI_NEGATIVE_CACHE_CAPACITY`.
+
 ### Fallback responses
 - File-based fallbacks use configured `Cache-Control` (typically `public, max-age=...`).
 - Generated fallback-text images and placeholders always return `Cache-Control: no-store`.

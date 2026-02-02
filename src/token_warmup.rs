@@ -236,6 +236,22 @@ async fn compose_from_token_uri(
     state: &AppState,
     item: &TokenWarmupItem,
 ) -> Result<Option<ComposeResult>> {
+    let cache_key =
+        crate::state::token_uri_negative_cache_key(&item.chain, &item.collection_address);
+    if let Some(retry_after_seconds) = state
+        .token_uri_negative_cache
+        .get_retry_after(&cache_key)
+        .await
+    {
+        warn!(
+            chain = %item.chain,
+            collection = %item.collection_address,
+            token_id = %item.token_id,
+            retry_after_seconds,
+            "token URI negative cache hit; skipping"
+        );
+        return Ok(None);
+    }
     match state
         .chain
         .get_token_uri(&item.chain, &item.collection_address, &item.token_id)
@@ -243,6 +259,7 @@ async fn compose_from_token_uri(
     {
         Ok(token_uri) => {
             let token_uri = token_uri.trim();
+            state.token_uri_negative_cache.remove(&cache_key).await;
             if token_uri.is_empty() {
                 warn!(
                     chain = %item.chain,
@@ -271,6 +288,10 @@ async fn compose_from_token_uri(
                     token_id = %item.token_id,
                     "token URI reverted; skipping"
                 );
+                state
+                    .token_uri_negative_cache
+                    .insert(cache_key.clone())
+                    .await;
                 return Ok(None);
             }
             warn!(
