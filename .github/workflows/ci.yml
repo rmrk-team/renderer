@@ -25,28 +25,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "."
-      - name: Format check
-        run: cargo fmt --check
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features
-      - name: Tests
-        run: cargo test
-      - name: Install cargo-audit
-        run: cargo install cargo-audit
-      - name: Cargo audit
-        run: cargo audit
-      - name: Smoke test
-        run: |
-          mkdir -p ./tmp/cache ./tmp/pinned
-          ADMIN_PASSWORD=ci \
-          DB_PATH=./tmp/renderer.db \
-          CACHE_DIR=./tmp/cache \
-          PINNED_DIR=./tmp/pinned \
-          PINNING_ENABLED=false \
-          LOCAL_IPFS_ENABLED=false \
-          ACCESS_MODE=open \
-          REQUIRE_APPROVAL=false \
-          PORT=18080 \
-          cargo run --quiet &
-          sleep 2
-          curl --fail http://127.0.0.1:18080/healthz
+      - name: Install Node (OpenAPI lint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: CI Parity Command
+        run: cargo ci

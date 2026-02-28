@@ -2232,9 +2232,9 @@ async fn ensure_canvas_size(
         }
     }
     fixed_parts.sort_by(|a, b| a.z.cmp(&b.z));
-    let first = fixed_parts
-        .first()
-        .ok_or_else(|| anyhow!("no fixed parts and missing compose metadata for canvas size derivation"))?;
+    let first = fixed_parts.first().ok_or_else(|| {
+        anyhow!("no fixed parts and missing compose metadata for canvas size derivation")
+    })?;
     let resolve_started = Instant::now();
     let resolved = state
         .assets

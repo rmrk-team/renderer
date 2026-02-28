@@ -4,6 +4,10 @@ info:
   version: "1.0"
   description: "API v1.0. Renderer spec v1.2."
   x-renderer-spec-version: "1.2"
+servers:
+  - url: /
+security:
+  - {}
 paths:
   /healthz:
     get:
