@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renderer Debug"
+  short_description: "Debug NFT renderer failures quickly"
+  default_prompt: "Diagnose why an NFT render fails by reproducing with local and production routes, then trace headers, logs, compose state, and fallback behavior."

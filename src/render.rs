@@ -2217,10 +2217,24 @@ async fn ensure_canvas_size(
     allow_thumb_fallback: bool,
 ) -> Result<(u32, u32)> {
     let mut fixed_parts = compose.fixed_parts.clone();
+    if fixed_parts.is_empty() {
+        let fallback_metadata = compose.metadata_uri.trim();
+        if !fallback_metadata.is_empty() {
+            fixed_parts.push(FixedPart {
+                part_id: 0,
+                z: 0,
+                metadata_uri: fallback_metadata.to_string(),
+            });
+            debug!(
+                metadata_uri = %compose.metadata_uri,
+                "compose has no fixed parts, using compose metadata for canvas base"
+            );
+        }
+    }
     fixed_parts.sort_by(|a, b| a.z.cmp(&b.z));
     let first = fixed_parts
         .first()
-        .ok_or_else(|| anyhow!("no fixed parts for canvas size derivation"))?;
+        .ok_or_else(|| anyhow!("no fixed parts and missing compose metadata for canvas size derivation"))?;
     let resolve_started = Instant::now();
     let resolved = state
         .assets
@@ -3652,6 +3666,13 @@ mod tests {
         assert_eq!(
             layers
                 .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::Fixed))
+                .count(),
+            1
+        );
+        assert_eq!(
+            layers
+                .iter()
                 .filter(|layer| matches!(layer.kind, LayerKind::SlotChild))
                 .count(),
             1
@@ -3682,10 +3703,46 @@ mod tests {
         assert_eq!(
             layers
                 .iter()
+                .filter(|layer| matches!(layer.kind, LayerKind::Fixed))
+                .count(),
+            1
+        );
+        assert_eq!(
+            layers
+                .iter()
                 .filter(|layer| matches!(layer.kind, LayerKind::SlotChild))
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn no_fixed_parts_fall_back_to_compose_metadata_layer() {
+        let compose = ComposeResult {
+            metadata_uri: "ipfs://parent".to_string(),
+            catalog_address: "0x0".to_string(),
+            fixed_parts: Vec::new(),
+            slot_parts: Vec::new(),
+        };
+        let layers = build_layers(&compose);
+        assert_eq!(layers.len(), 1);
+        let layer = &layers[0];
+        assert!(matches!(layer.kind, LayerKind::Fixed));
+        assert!(layer.required);
+        assert_eq!(layer.z, 0);
+        assert_eq!(layer.metadata_uri, "ipfs://parent");
+    }
+
+    #[test]
+    fn no_fixed_parts_and_blank_compose_metadata_stays_empty() {
+        let compose = ComposeResult {
+            metadata_uri: "   ".to_string(),
+            catalog_address: "0x0".to_string(),
+            fixed_parts: Vec::new(),
+            slot_parts: Vec::new(),
+        };
+        let layers = build_layers(&compose);
+        assert!(layers.is_empty());
     }
 
     #[test]

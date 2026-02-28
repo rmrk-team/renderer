@@ -3,13 +3,25 @@ use crate::db::TokenStateCacheEntry;
 
 pub(super) fn build_layers(compose: &ComposeResult) -> Vec<Layer> {
     let mut layers = Vec::new();
-    for part in &compose.fixed_parts {
-        layers.push(Layer {
-            z: part.z,
-            required: true,
-            kind: LayerKind::Fixed,
-            metadata_uri: part.metadata_uri.clone(),
-        });
+    if compose.fixed_parts.is_empty() {
+        let fallback_metadata = compose.metadata_uri.trim();
+        if !fallback_metadata.is_empty() {
+            layers.push(Layer {
+                z: 0,
+                required: true,
+                kind: LayerKind::Fixed,
+                metadata_uri: fallback_metadata.to_string(),
+            });
+        }
+    } else {
+        for part in &compose.fixed_parts {
+            layers.push(Layer {
+                z: part.z,
+                required: true,
+                kind: LayerKind::Fixed,
+                metadata_uri: part.metadata_uri.clone(),
+            });
+        }
     }
     for part in &compose.slot_parts {
         let has_child = !part.child_asset_metadata.trim().is_empty();

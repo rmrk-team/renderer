@@ -3,6 +3,8 @@
 Standalone Rust service that renders RMRK equippable NFTs into flat images.
 SVG-first rendering, deterministic caching, and a minimal admin panel and API.
 
+Status: live service backing `composable.rmrk.link` (replaces the legacy AWS renderer).
+
 ## Features
 
 - Canonical render endpoints with cache-busting via `cache=` query param
