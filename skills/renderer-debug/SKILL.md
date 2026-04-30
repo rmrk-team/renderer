@@ -43,6 +43,15 @@ Prefer concrete evidence from headers, redirect targets, logs, DB cache rows, an
 - Separate root cause from symptoms.
 - Recommend concrete fixes: content fix (pin/repair metadata), policy fix (fallback/override), or code fix.
 
+## CI and Audit Failures
+
+When the renderer CI fails outside a render-route reproduction:
+
+- Inspect the latest GitHub Actions run first (`gh run list`, then `gh run view <run-id> --log`) and identify the exact failing `cargo ci` step before changing dependencies.
+- Reproduce with the CI toolchain, not the local default. This repo uses Rust 2024, so older default Cargo versions can fail before reaching the real issue; use the stable toolchain explicitly and put its `bin` directory first for helper scripts that call plain `cargo`.
+- For `cargo audit` failures, prefer reducing unused dependency surface and updating the lockfile over blanket advisory ignores. In particular, avoid broad Ethereum convenience crates or default features when only contract/provider/core functionality is needed.
+- Verify release readiness with both the CI wrapper and the release build path: `cargo ci` plus `cargo build --release --locked`.
+
 ## Quick Commands
 
 Use project root as working directory, or call the globally installed symlink path directly.
@@ -55,6 +64,11 @@ Use project root as working directory, or call the globally installed symlink pa
 # Canonical triage (asset-specific)
 "$CODEX_HOME"/skills/renderer-debug/scripts/probe-render.sh \
   https://renderer.rmrk.app base 0xCOLLECTION 1234 png 5678 "fresh=1"
+
+# CI parity on machines whose default cargo is older than the repo toolchain
+STABLE_CARGO="$(rustup which --toolchain stable cargo)"
+STABLE_BIN="$(dirname "$STABLE_CARGO")"
+PATH="$STABLE_BIN:$PATH" CARGO="$STABLE_CARGO" "$STABLE_CARGO" ci
 ```
 
 Read detailed procedures and diagnosis patterns in:

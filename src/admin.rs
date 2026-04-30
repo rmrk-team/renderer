@@ -27,7 +27,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use base64::Engine;
-use ethers::providers::Middleware;
+use ethers_providers::Middleware;
 use hmac::{Hmac, Mac};
 use image::imageops;
 use image::imageops::FilterType;

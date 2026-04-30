@@ -718,6 +718,7 @@ async fn queued_fallback_response(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn render_timeout_fallback_response(
     format: &OutputFormat,
     width: u32,
@@ -839,6 +840,7 @@ async fn fallback_bytes(
     bytes
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fallback_text_response(
     format: &OutputFormat,
     width: u32,
@@ -1217,6 +1219,7 @@ async fn load_fallback_variant(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fallback_file_response(
     dir: &StdPath,
     format: &OutputFormat,
@@ -1310,6 +1313,7 @@ fn if_none_match_matches(headers: &HeaderMap, etag: &str) -> bool {
         .any(|item| item == etag)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fallback_head_from_dir(
     dir: &StdPath,
     format: &OutputFormat,
@@ -1859,28 +1863,26 @@ async fn fallback_for_render_error(
         };
         return Some(response);
     }
-    if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
-        if let AssetFetchError::NegativeCache {
-            retry_after_seconds,
-            ..
-        } = fetch_error
-        {
-            let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
-            return Some(
-                fallback_text_response(
-                    &request.format,
-                    width,
-                    height,
-                    &["IPFS NEGATIVE CACHE".to_string(), "RETRY LATER".to_string()],
-                    "ipfs_negative_cache",
-                    "ipfs_negative_cache",
-                    "ipfs_negative_cache",
-                    StatusCode::OK,
-                    Some(*retry_after_seconds),
-                )
-                .await,
-            );
-        }
+    if let Some(AssetFetchError::NegativeCache {
+        retry_after_seconds,
+        ..
+    }) = error.downcast_ref::<AssetFetchError>()
+    {
+        let (width, height) = placeholder_dimensions(state, placeholder_width, request.og_mode);
+        return Some(
+            fallback_text_response(
+                &request.format,
+                width,
+                height,
+                &["IPFS NEGATIVE CACHE".to_string(), "RETRY LATER".to_string()],
+                "ipfs_negative_cache",
+                "ipfs_negative_cache",
+                "ipfs_negative_cache",
+                StatusCode::OK,
+                Some(*retry_after_seconds),
+            )
+            .await,
+        );
     }
     resolve_render_failure_fallback(state, request, headers).await
 }
@@ -2037,20 +2039,18 @@ async fn fallback_head_for_render_error(
             ),
         });
     }
-    if let Some(fetch_error) = error.downcast_ref::<AssetFetchError>() {
-        if let AssetFetchError::NegativeCache {
-            retry_after_seconds,
-            ..
-        } = fetch_error
-        {
-            return Some(fallback_head_response(
-                &request.format,
-                "ipfs_negative_cache",
-                "ipfs_negative_cache",
-                "ipfs_negative_cache",
-                Some(*retry_after_seconds),
-            ));
-        }
+    if let Some(AssetFetchError::NegativeCache {
+        retry_after_seconds,
+        ..
+    }) = error.downcast_ref::<AssetFetchError>()
+    {
+        return Some(fallback_head_response(
+            &request.format,
+            "ipfs_negative_cache",
+            "ipfs_negative_cache",
+            "ipfs_negative_cache",
+            Some(*retry_after_seconds),
+        ));
     }
     None
 }
@@ -3701,6 +3701,7 @@ fn should_log_failure(status: StatusCode) -> bool {
         )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_failure_if_needed(
     state: &AppState,
     response: &Response,

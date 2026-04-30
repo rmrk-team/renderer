@@ -1,6 +1,6 @@
 [package]
 name = "proj-renderer"
-version = "0.3.5"
+version = "0.3.7"
 edition = "2024"
 
 [dependencies]
@@ -9,16 +9,18 @@ axum = { version = "0.8.8", features = ["multipart"] }
 base64 = "0.22.1"
 bytes = "1.11.1"
 dashmap = "6.1.0"
-ethers = { version = "2.0.14", features = ["abigen"] }
+ethers-contract = { version = "2.0.14", default-features = false, features = ["abigen", "providers", "openssl"] }
+ethers-core = "2.0.14"
+ethers-providers = { version = "2.0.14", default-features = false, features = ["openssl"] }
 filetime = "0.2.26"
 hmac = "0.12.1"
 hex = "0.4.3"
 image = { version = "0.25.9", features = ["png", "jpeg", "webp"] }
 ipnet = "2.10.0"
 mime = "0.3.17"
-rand = "0.8.5"
+rand = "0.8.6"
 reqwest = { version = "0.13.1", features = ["json", "stream", "webpki-roots"] }
-reqwest11 = { package = "reqwest", version = "0.11.27", features = ["json", "rustls-tls"] }
+reqwest11 = { package = "reqwest", version = "0.11.27", default-features = false, features = ["native-tls"] }
 resvg = "0.46.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

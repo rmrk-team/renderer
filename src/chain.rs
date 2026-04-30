@@ -2,8 +2,9 @@ use crate::config::Config;
 use crate::db::{Database, RpcEndpoint};
 use crate::metrics::Metrics;
 use anyhow::{Context, Result, anyhow};
-use ethers::contract::ContractError;
-use ethers::prelude::*;
+use ethers_contract::{ContractError, abigen};
+use ethers_core::types::{Address, Filter, H256, U256};
+use ethers_providers::{Http, Middleware, Provider};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -254,10 +255,10 @@ pub(crate) fn revert_selector(err: &anyhow::Error) -> Option<[u8; 4]> {
         if let Some(revert) = cause.downcast_ref::<ChainRevertError>() {
             return revert.selector;
         }
-        if let Some(contract_err) = cause.downcast_ref::<ContractError<Provider<Http>>>() {
-            if let ContractError::Revert(data) = contract_err {
-                return selector_from_bytes(data.as_ref());
-            }
+        if let Some(ContractError::Revert(data)) =
+            cause.downcast_ref::<ContractError<Provider<Http>>>()
+        {
+            return selector_from_bytes(data.as_ref());
         }
     }
     None
@@ -268,10 +269,11 @@ pub(crate) fn is_contract_revert_error(err: &anyhow::Error) -> bool {
         if cause.downcast_ref::<ChainRevertError>().is_some() {
             return true;
         }
-        if let Some(contract_err) = cause.downcast_ref::<ContractError<Provider<Http>>>() {
-            if matches!(contract_err, ContractError::Revert(_)) {
-                return true;
-            }
+        if matches!(
+            cause.downcast_ref::<ContractError<Provider<Http>>>(),
+            Some(ContractError::Revert(_))
+        ) {
+            return true;
         }
     }
     false

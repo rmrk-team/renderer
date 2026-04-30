@@ -33,6 +33,7 @@ pub struct FailureLogEntry {
 }
 
 impl FailureLogEntry {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         method: String,
         path: String,

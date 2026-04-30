@@ -1559,6 +1559,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn set_collection_capabilities(
         &self,
         chain: &str,

@@ -752,7 +752,7 @@ pub(super) async fn render_primary(
         request.asset_id = TOKEN_URI_FALLBACK_ASSET_ID.to_string();
         match state.chain.owner_of(&chain, &collection, &token_id).await {
             Ok(owner) => {
-                if owner == ethers::types::Address::zero() {
+                if owner == ethers_core::types::Address::zero() {
                     let err = anyhow::Error::new(render::TokenNotFoundError);
                     if !prefer_json {
                         if let Some(response) = fallback_for_render_error(

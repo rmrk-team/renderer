@@ -14,6 +14,7 @@ use crate::pinning::PinnedAssetStore;
 use crate::state::{AppState, ThemeSourceCache, collection_cache_key};
 use crate::token_warmup::{TokenWarmupRequest, enqueue_token_warmup};
 use anyhow::{Context, Result, anyhow};
+use ethers_core::types::Address;
 use image::codecs::png::{CompressionType, FilterType as PngFilterType, PngEncoder};
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageEncoder, ImageFormat, ImageReader, Rgba, RgbaImage};
@@ -756,7 +757,7 @@ async fn on_demand_approval_check(
         .as_deref()
         .unwrap_or(chain);
     let collection = canonical::canonicalize_collection_address(collection)?;
-    let address = ethers::types::Address::from_str(&collection)?;
+    let address = Address::from_str(&collection)?;
     let result = state
         .chain
         .call_with_approvals(contract_chain, move |contract| async move {

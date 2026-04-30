@@ -1,5 +1,5 @@
 use crate::config::Config;
-use ethers::types::Address;
+use ethers_core::types::Address;
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error)]

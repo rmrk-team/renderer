@@ -127,9 +127,7 @@ impl NonRenderableMetaCache {
 
 impl IpfsNegativeCache {
     fn contains(&mut self, key: &str) -> Option<Duration> {
-        let Some(expires_at) = self.map.get(key).copied() else {
-            return None;
-        };
+        let expires_at = self.map.get(key).copied()?;
         let now = Instant::now();
         if now <= expires_at {
             return Some(expires_at.saturating_duration_since(now));
@@ -621,7 +619,7 @@ impl AssetResolver {
     async fn ipfs_probe_url_status(&self, url: &str) -> Option<StatusCode> {
         let resolved = self.validate_http_url(url).await.ok()?;
         let _permit = self.ipfs_semaphore.acquire().await.ok()?;
-        let timeout = Duration::from_secs(self.config.ipfs_timeout_seconds.min(5).max(1));
+        let timeout = Duration::from_secs(self.config.ipfs_timeout_seconds.clamp(1, 5));
         let mut headers = header::HeaderMap::new();
         headers.insert(header::RANGE, header::HeaderValue::from_static("bytes=0-0"));
         if resolved.is_ip_literal {
