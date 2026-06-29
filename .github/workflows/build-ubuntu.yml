@@ -12,7 +12,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
@@ -27,12 +27,12 @@ jobs:
           cp "target/release/proj-renderer" "dist/rmrk-renderer-ubuntu-x86_64"
       - name: Upload release asset
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/rmrk-renderer-ubuntu-x86_64
       - name: Upload workflow artifact
         if: github.event_name != 'release'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rmrk-renderer-ubuntu
           path: dist/rmrk-renderer-ubuntu-x86_64
